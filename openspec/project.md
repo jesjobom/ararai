@@ -2,8 +2,8 @@
 
 ## Purpose
 
-ArarAI is an Android hub for local open LLMs. It should let users obtain or
-select supported models, send prompts, and receive streamed responses while all
+ArarAI is an Android hub for local open LLMs. It should obtain a configured
+supported model, send prompts, and receive streamed responses while all
 inference runs on the device.
 
 The project is intentionally exploratory: it should grow through small validated
@@ -17,9 +17,10 @@ runtime implementations later.
 - The MVP targets Android SDK 36 and does not need to support old Android
   versions.
 - The MVP uses no external application backend, remote database, or hosted API.
-- The first model source is a user-selected local GGUF file through Android's
-  file picker. During early testing, model files can be copied to the physical
-  device manually and selected from local storage.
+- The first model source is one fixed GGUF model declared in checked-in app
+  configuration. On startup, the app checks the configured app-owned model path
+  and automatically downloads the configured model if it is absent or invalid.
+  There is no model picker in the MVP.
 - Android release signing is out of scope initially; debug builds are enough.
 - Fase 0 model feasibility testing is skipped because representative local
   models have already been tested in other Android applications.
@@ -45,7 +46,7 @@ runtime implementations later.
 - GGUF model files
 - Room or plain SQLite only when local persistence becomes necessary
 - DataStore for small preferences
-- WorkManager for model downloads when download flow is introduced
+- WorkManager for the configured model download flow
 - Android TextToSpeech and SpeechRecognizer for early voice experiments
 
 ## Architecture Direction
@@ -72,16 +73,18 @@ the whole app.
 The first vertical slice is a single-screen debug chat flow:
 
 1. Launch the app.
-2. Select a local GGUF model file through the Android file picker.
-3. Load the selected model through the `LocalLlmEngine` boundary.
-4. Submit one text prompt.
-5. Stream generated text back into the chat view.
-6. Unload the model when leaving the screen or replacing the model.
+2. Resolve the configured GGUF model from the standard app-owned location.
+3. Automatically download the configured model if it is missing or invalid.
+4. Load the configured model through the `LocalLlmEngine` boundary.
+5. Submit one text prompt.
+6. Stream generated text back into the chat view.
+7. Unload the model when leaving the screen.
 
-This slice excludes conversation history, remote downloads, model catalog sync,
+This slice excludes conversation history, model choice, model catalog sync,
 voice, image input/output, release signing, and polished settings. It should
-still include automated tests around prompt/session state, engine-boundary
-events, and failure handling before native runtime work is wired in.
+still include automated tests around configured-model resolution, download
+orchestration, prompt/session state, engine-boundary events, and failure
+handling before native runtime work is wired in.
 
 ## Development Process
 

@@ -41,20 +41,30 @@ The application SHALL run LLM inference on the Android device for the MVP.
 #### Scenario: Prompt execution
 
 - **WHEN** the user submits a prompt
-- **THEN** the selected local model handles inference on-device
+- **THEN** the configured local model handles inference on-device
 - **AND** no remote inference API is called.
 
-### Requirement: Local Model File Selection
+### Requirement: Configured Model Startup Resolution
 
-The first model source SHALL be a user-selected local GGUF file.
+The first model source SHALL be one fixed GGUF model declared in checked-in
+application configuration.
 
-#### Scenario: Select local model
+#### Scenario: Load existing configured model
 
-- **GIVEN** a GGUF model file exists on the Android device
-- **WHEN** the user selects the file through Android's file picker
-- **THEN** the app can pass the selected file to the local inference engine
-- **AND** the MVP does not require bundled models, remote downloads, or a
-  Hugging Face token.
+- **GIVEN** the configured GGUF model exists at the configured app-owned path
+- **AND** the file passes the configured integrity check
+- **WHEN** the app starts
+- **THEN** the app can pass that file to the local inference engine
+- **AND** the MVP does not expose model selection.
+
+#### Scenario: Download missing configured model
+
+- **GIVEN** the configured GGUF model is missing or fails integrity validation
+- **WHEN** the app starts with network access
+- **THEN** the app automatically downloads the configured model to the standard
+  app-owned location
+- **AND** validates the downloaded file before loading it
+- **AND** does not require the user to choose a model.
 
 ### Requirement: No External Backend For MVP
 
@@ -63,7 +73,7 @@ hosted API to perform its core chat flow.
 
 #### Scenario: Offline-capable core flow
 
-- **GIVEN** a supported model is already available on the device
+- **GIVEN** the configured model is already available on the device
 - **WHEN** the user opens the app and submits a text prompt
 - **THEN** the app can produce a response without contacting an external backend.
 
@@ -76,7 +86,7 @@ boundary.
 
 - **WHEN** a future runtime is evaluated
 - **THEN** the app can add another engine implementation without rewriting the
-  chat UI or model-selection flow.
+  chat UI or configured-model resolution flow.
 
 ### Requirement: First Vertical Slice
 
@@ -85,7 +95,7 @@ by the local inference engine boundary.
 
 #### Scenario: First prompt loop
 
-- **GIVEN** the user has selected a local GGUF model
+- **GIVEN** the configured GGUF model is available at the standard location
 - **WHEN** the user submits one text prompt
 - **THEN** the app loads the model through the local inference engine boundary
 - **AND** streams generated text back into the chat UI

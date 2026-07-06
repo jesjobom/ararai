@@ -14,6 +14,7 @@
 - [x] Decide initial Gradle, Android Gradle Plugin, and JDK versions.
 - [x] Decide initial Kotlin and Compose versions.
 - [x] Decide whether the first model is loaded from local file picker, bundled
-      test asset, or manually pushed to device storage.
+      test asset, manually pushed to device storage, or automatically downloaded
+      from fixed configuration.
 - [x] Define the smallest first vertical slice for chat plus local inference.
 - [x] Define APK artifact handoff from OpenClaw container to the ADB host.

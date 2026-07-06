@@ -15,7 +15,8 @@ reopen settled choices or hide assumptions.
 - Pin the initial Kotlin and Compose setup.
 - Record the first runtime direction as llama.cpp plus GGUF through JNI/NDK.
 - Declare that the MVP has no external backend, database, or model API.
-- Choose local GGUF file selection as the first model source.
+- Choose one configured GGUF model with automatic startup download as the first
+  model source.
 - Record that early testing targets a physical Galaxy 26 device instead of an
   emulator.
 - Define the expected split between building APKs in the OpenClaw container and
@@ -25,6 +26,7 @@ reopen settled choices or hide assumptions.
 ## Out Of Scope
 
 - Creating the Android project scaffold.
-- Implementing model download, chat UI, inference, voice, or image support.
+- Implementing the actual download worker, chat UI, inference, voice, or image
+  support.
 - Configuring release signing.
 - Adding external services or hosted APIs.

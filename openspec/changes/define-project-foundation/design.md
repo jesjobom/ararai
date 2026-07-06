@@ -62,32 +62,39 @@ Local persistence should be introduced only when needed:
 - preferences through DataStore
 - conversation history, local catalog, or model metadata through Room/SQLite
 
-The model catalog can start as static in-app data or a checked-in JSON file. A
-remote catalog should be introduced only when the basic local flow is working.
+The model catalog should start as a single checked-in configuration entry that
+declares the fixed GGUF model URL, expected file name, storage location,
+integrity metadata, and runtime defaults. A remote catalog should be introduced
+only after the basic local flow is working.
 
-The first model source should be a user-selected local GGUF file through
-Android's file picker. For early development, the model file can be copied to
-the physical device manually and selected locally. Bundling a model in the APK
-is too heavy for the first loop, and remote download adds network, background
-work, storage, and retry complexity before local inference is proven.
+The first model source should be a fixed configured GGUF model. On startup, the
+app should check the configured app-owned model path first. If the file is
+present and passes the configured integrity check, it can be loaded directly. If
+it is absent or invalid, the app should automatically download the configured
+model to that standard location. The MVP should not expose a model picker or
+model choice yet. Bundling a model in the APK is too heavy for the first loop,
+but a single automatic download keeps setup simple while avoiding early catalog
+and selection complexity.
 
 ## First Slice
 
 The smallest first vertical slice is:
 
 1. Launch the app.
-2. Select one local GGUF model file.
-3. Load the model through the local inference engine boundary.
-4. Send one text prompt.
-5. Stream text output into a single chat screen.
-6. Surface load/generation errors in the UI.
-7. Unload or replace the model cleanly.
+2. Resolve the configured GGUF model from the standard app-owned location.
+3. Automatically download the configured model if it is missing or invalid.
+4. Load the model through the local inference engine boundary.
+5. Send one text prompt.
+6. Stream text output into a single chat screen.
+7. Surface model resolution, download, load, and generation errors in the UI.
+8. Unload the model cleanly.
 
-This intentionally excludes model downloads, model catalog sync, conversation
+This intentionally excludes model choice, model catalog sync, conversation
 history, Room, voice, image features, release signing, and polished settings.
 Before native llama.cpp integration is connected, automated tests should cover
-the chat state reducer/ViewModel and a fake `LocalLlmEngine` that emits loading,
-token, completion, and error events.
+model-resolution and download orchestration, the chat state reducer/ViewModel,
+and a fake `LocalLlmEngine` that emits loading, token, completion, and error
+events.
 
 ## Testing Strategy
 
@@ -133,5 +140,5 @@ The first implementation slice should be intentionally small:
   environment that builds the APK.
 - Device performance, thermal behavior, and memory pressure will dominate UX
   quality more than normal Android UI concerns.
-- Model packaging and file size may complicate install, storage, and download
-  behavior.
+- Model file size may complicate storage, network use, retry behavior, and
+  first-run latency.
