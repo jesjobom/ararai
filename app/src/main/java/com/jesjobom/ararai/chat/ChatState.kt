@@ -5,6 +5,7 @@ data class ChatUiState(
     val prompt: String = "",
     val messages: List<ChatMessage> = emptyList(),
     val isGenerating: Boolean = false,
+    val canRetryModelDownload: Boolean = false,
     val error: String? = null,
 ) {
     val canSubmit: Boolean

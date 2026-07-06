@@ -1,0 +1,67 @@
+package com.jesjobom.ararai.model
+
+import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+sealed interface ModelStartupState {
+    data object Missing : ModelStartupState
+    data class Invalid(val reason: String) : ModelStartupState
+    data object Downloading : ModelStartupState
+    data class Available(val model: LocalModel, val inference: InferenceConfig) : ModelStartupState
+    data class Failed(val message: String) : ModelStartupState
+}
+
+class ModelStartupController(
+    private val config: ModelConfig,
+    appFilesRoot: File,
+    private val downloader: ModelFileDownloader = ModelFileDownloader(appFilesRoot),
+    private val resolver: ModelResolver = ModelResolver(appFilesRoot),
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+) {
+    private val _state = MutableStateFlow<ModelStartupState>(ModelStartupState.Missing)
+    val state: StateFlow<ModelStartupState> = _state.asStateFlow()
+
+    init {
+        resolveAndMaybeDownload()
+    }
+
+    fun retry() {
+        if (_state.value is ModelStartupState.Downloading) return
+        startDownload()
+    }
+
+    private fun resolveAndMaybeDownload() {
+        when (val resolution = resolver.resolve(config)) {
+            is ModelResolutionState.Available -> {
+                _state.value = ModelStartupState.Available(resolution.model, config.inference)
+            }
+            is ModelResolutionState.Missing -> {
+                _state.value = ModelStartupState.Missing
+                startDownload()
+            }
+            is ModelResolutionState.IntegrityFailed -> {
+                _state.value = ModelStartupState.Invalid(resolution.reason)
+                startDownload()
+            }
+        }
+    }
+
+    private fun startDownload() {
+        scope.launch {
+            _state.update { ModelStartupState.Downloading }
+            try {
+                val available = downloader.download(config)
+                _state.value = ModelStartupState.Available(available.model, config.inference)
+            } catch (error: ModelDownloadException) {
+                _state.value = ModelStartupState.Failed(error.message ?: "Configured model download failed")
+            }
+        }
+    }
+}

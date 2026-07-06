@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import com.jesjobom.ararai.engine.FakeLocalLlmEngine
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.model.ModelStartupState
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,6 +35,34 @@ class ChatViewModelTest {
         viewModel.onPromptChanged("hello")
 
         assertFalse(viewModel.uiState.value.canSubmit)
+    }
+
+    @Test
+    fun `enables submit after startup state provides available model`() {
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+            initialModel = null,
+            inferenceConfig = inferenceConfig,
+        )
+
+        viewModel.onModelStartupState(ModelStartupState.Available(model, inferenceConfig))
+        viewModel.onPromptChanged("hello")
+
+        assertTrue(viewModel.uiState.value.canSubmit)
+    }
+
+    @Test
+    fun `exposes retry when startup download fails`() {
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+            initialModel = null,
+            inferenceConfig = inferenceConfig,
+        )
+
+        viewModel.onModelStartupState(ModelStartupState.Failed("network down"))
+
+        assertTrue(viewModel.uiState.value.canRetryModelDownload)
+        assertEquals("Download failed: network down", viewModel.uiState.value.modelStatus)
     }
 
     @Test
