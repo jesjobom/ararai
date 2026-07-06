@@ -13,7 +13,11 @@ import kotlinx.coroutines.launch
 sealed interface ModelStartupState {
     data object Missing : ModelStartupState
     data class Invalid(val reason: String) : ModelStartupState
-    data object Downloading : ModelStartupState
+    data class Downloading(
+        val bytesDownloaded: Long = 0L,
+        val totalBytes: Long? = null,
+    ) : ModelStartupState
+
     data class Available(val model: LocalModel, val inference: InferenceConfig) : ModelStartupState
     data class Failed(val message: String) : ModelStartupState
 }
@@ -55,9 +59,14 @@ class ModelStartupController(
 
     private fun startDownload() {
         scope.launch {
-            _state.update { ModelStartupState.Downloading }
+            _state.update { ModelStartupState.Downloading() }
             try {
-                val available = downloader.download(config)
+                val available = downloader.download(config) { progress ->
+                    _state.value = ModelStartupState.Downloading(
+                        bytesDownloaded = progress.bytesDownloaded,
+                        totalBytes = progress.totalBytes,
+                    )
+                }
                 _state.value = ModelStartupState.Available(available.model, config.inference)
             } catch (error: ModelDownloadException) {
                 _state.value = ModelStartupState.Failed(error.message ?: "Configured model download failed")

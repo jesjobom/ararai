@@ -66,6 +66,22 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `formats model download progress`() {
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+            initialModel = null,
+            inferenceConfig = inferenceConfig,
+        )
+
+        viewModel.onModelStartupState(
+            ModelStartupState.Downloading(bytesDownloaded = 50, totalBytes = 100),
+        )
+
+        assertEquals("Downloading configured model: 50%", viewModel.uiState.value.modelStatus)
+        assertFalse(viewModel.uiState.value.canRetryModelDownload)
+    }
+
+    @Test
     fun `streams fake engine chunks into assistant message`() = runTest {
         val viewModel = ChatViewModel(
             engine = FakeLocalLlmEngine(chunks = listOf("ola", " mundo")),

@@ -60,11 +60,11 @@ class ChatViewModel(
                     )
                 }
             }
-            ModelStartupState.Downloading -> {
+            is ModelStartupState.Downloading -> {
                 model = null
                 _uiState.update {
                     it.copy(
-                        modelStatus = "Downloading configured model",
+                        modelStatus = state.downloadStatusText(),
                         canRetryModelDownload = false,
                     )
                 }
@@ -90,6 +90,16 @@ class ChatViewModel(
                 }
             }
         }
+    }
+
+    private fun ModelStartupState.Downloading.downloadStatusText(): String {
+        val total = totalBytes
+        if (total == null || total <= 0L || bytesDownloaded <= 0L) {
+            return "Downloading configured model"
+        }
+
+        val percent = ((bytesDownloaded * 100) / total).coerceIn(0, 100)
+        return "Downloading configured model: $percent%"
     }
 
     fun submitPrompt() {

@@ -14,17 +14,19 @@ class ModelFileDownloaderTest {
     @Test
     fun `downloads to temp file validates and promotes to final path`() = runTest {
         val root = Files.createTempDirectory("ararai-download").toFile()
+        val progress = mutableListOf<ModelDownloadProgress>()
         val downloader = ModelFileDownloader(
             appFilesRoot = root,
             byteSource = StaticModelByteSource("hello".toByteArray()),
         )
 
-        val result = downloader.download(helloConfig())
+        val result = downloader.download(helloConfig(), progress::add)
 
         assertTrue(result is ModelResolutionState.Available)
         val finalFile = File(root, helloConfig().relativePath)
         assertEquals("hello", finalFile.readText())
         assertFalse(File(finalFile.parentFile, "${finalFile.name}.part").exists())
+        assertEquals(ModelDownloadProgress(bytesDownloaded = 5, totalBytes = 5), progress.last())
     }
 
     @Test

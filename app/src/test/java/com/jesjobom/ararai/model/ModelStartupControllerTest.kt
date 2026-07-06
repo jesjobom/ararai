@@ -24,7 +24,8 @@ class ModelStartupControllerTest {
 
         controller.state.test {
             assertEquals(ModelStartupState.Missing, awaitItem())
-            assertEquals(ModelStartupState.Downloading, awaitItem())
+            assertEquals(ModelStartupState.Downloading(), awaitItem())
+            assertEquals(ModelStartupState.Downloading(bytesDownloaded = 5, totalBytes = 5), awaitItem())
             assertTrue(awaitItem() is ModelStartupState.Available)
             cancelAndIgnoreRemainingEvents()
         }
@@ -46,12 +47,14 @@ class ModelStartupControllerTest {
 
         controller.state.test {
             assertEquals(ModelStartupState.Missing, awaitItem())
-            assertEquals(ModelStartupState.Downloading, awaitItem())
+            assertTrue(awaitItem() is ModelStartupState.Downloading)
+            assertTrue(awaitItem() is ModelStartupState.Downloading)
             assertTrue(awaitItem() is ModelStartupState.Failed)
 
             controller.retry()
 
-            assertEquals(ModelStartupState.Downloading, awaitItem())
+            assertTrue(awaitItem() is ModelStartupState.Downloading)
+            assertTrue(awaitItem() is ModelStartupState.Downloading)
             assertTrue(awaitItem() is ModelStartupState.Available)
             cancelAndIgnoreRemainingEvents()
         }

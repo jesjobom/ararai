@@ -15,6 +15,11 @@ interface ModelByteSource {
     fun open(config: ModelConfig): InputStream
 }
 
+data class ModelDownloadProgress(
+    val bytesDownloaded: Long,
+    val totalBytes: Long?,
+)
+
 class UrlModelByteSource : ModelByteSource {
     override fun open(config: ModelConfig): InputStream {
         val connection = URL(config.url).openConnection() as HttpURLConnection
@@ -36,7 +41,10 @@ class ModelFileDownloader(
     private val byteSource: ModelByteSource = UrlModelByteSource(),
     private val resolver: ModelResolver = ModelResolver(appFilesRoot),
 ) {
-    suspend fun download(config: ModelConfig): ModelResolutionState.Available =
+    suspend fun download(
+        config: ModelConfig,
+        onProgress: (ModelDownloadProgress) -> Unit = {},
+    ): ModelResolutionState.Available =
         withContext(Dispatchers.IO) {
             val finalFile = File(appFilesRoot, config.relativePath)
             val parent = finalFile.parentFile
@@ -51,7 +59,11 @@ class ModelFileDownloader(
             try {
                 byteSource.open(config).use { input ->
                     tempFile.outputStream().use { output ->
-                        input.copyTo(output)
+                        input.copyToWithProgress(
+                            output = output,
+                            totalBytes = config.expectedBytes,
+                            onProgress = onProgress,
+                        )
                     }
                 }
 
@@ -87,4 +99,21 @@ class ModelFileDownloader(
                 throw ModelDownloadException("Configured model download failed: ${error.message}", error)
             }
         }
+}
+
+private fun InputStream.copyToWithProgress(
+    output: java.io.OutputStream,
+    totalBytes: Long?,
+    onProgress: (ModelDownloadProgress) -> Unit,
+) {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var bytesCopied = 0L
+
+    while (true) {
+        val read = read(buffer)
+        if (read == -1) break
+        output.write(buffer, 0, read)
+        bytesCopied += read
+        onProgress(ModelDownloadProgress(bytesCopied, totalBytes))
+    }
 }
