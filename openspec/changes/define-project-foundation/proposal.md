@@ -1,0 +1,25 @@
+# Define ArarAI Project Foundation
+
+## Why
+
+ArarAI is starting as an exploratory Android project for local LLM inference.
+Before generating application code, the core product, runtime, environment, and
+test-loop decisions need a durable home so future implementation work does not
+reopen settled choices or hide assumptions.
+
+## What Changes
+
+- Define ArarAI as an Android SDK 36 local LLM hub.
+- Record the first runtime direction as llama.cpp plus GGUF through JNI/NDK.
+- Declare that the MVP has no external backend, database, or model API.
+- Record that early testing targets a physical Galaxy 26 device instead of an
+  emulator.
+- Define the expected split between building APKs in the OpenClaw container and
+  installing them outside the container with ADB.
+
+## Out Of Scope
+
+- Creating the Android project scaffold.
+- Implementing model download, chat UI, inference, voice, or image support.
+- Configuring release signing.
+- Adding external services or hosted APIs.
