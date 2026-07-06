@@ -32,17 +32,26 @@ goal for the MVP.
 This keeps the compatibility matrix small and matches the reality that local LLM
 inference needs newer hardware anyway.
 
+The Android namespace and application ID start as `com.jesjobom.ararai`.
+
 The initial build toolchain is:
 
 - JDK 17
 - Android Gradle Plugin 9.2.x
 - Gradle wrapper 9.4.1
+- Kotlin 2.3.21
+- Jetpack Compose BOM 2026.06.00
+- Compose Compiler Gradle plugin 2.3.21
 - Android Build Tools 36.0.0
 - Android NDK 28.2.13676358
 - Android SDK CMake 3.22.1
 
 AGP 8.13.2 remains a fallback if AGP 9.2.x causes concrete friction in the first
 Compose plus NDK scaffold.
+
+The Compose setup should use the Compose BOM instead of pinning individual
+Compose library versions. The Compose Compiler Gradle plugin should match the
+Kotlin plugin version.
 
 ## Data And Backend
 
@@ -55,6 +64,30 @@ Local persistence should be introduced only when needed:
 
 The model catalog can start as static in-app data or a checked-in JSON file. A
 remote catalog should be introduced only when the basic local flow is working.
+
+The first model source should be a user-selected local GGUF file through
+Android's file picker. For early development, the model file can be copied to
+the physical device manually and selected locally. Bundling a model in the APK
+is too heavy for the first loop, and remote download adds network, background
+work, storage, and retry complexity before local inference is proven.
+
+## First Slice
+
+The smallest first vertical slice is:
+
+1. Launch the app.
+2. Select one local GGUF model file.
+3. Load the model through the local inference engine boundary.
+4. Send one text prompt.
+5. Stream text output into a single chat screen.
+6. Surface load/generation errors in the UI.
+7. Unload or replace the model cleanly.
+
+This intentionally excludes model downloads, model catalog sync, conversation
+history, Room, voice, image features, release signing, and polished settings.
+Before native llama.cpp integration is connected, automated tests should cover
+the chat state reducer/ViewModel and a fake `LocalLlmEngine` that emits loading,
+token, completion, and error events.
 
 ## Testing Strategy
 
@@ -78,7 +111,8 @@ validated on real hardware.
 Early validation should use a physical Galaxy 26 device:
 
 1. Build the debug APK in the container.
-2. Move the APK to the host or machine that has ADB access.
+2. Copy the APK to `/home/node/.openclaw/jarvis/artifacts/ararai/app-debug.apk`
+   outside the Git-tracked project files.
 3. Run `adb install` outside the container.
 4. Test manually on device.
 5. Use logs and screenshots to feed failures back into development.

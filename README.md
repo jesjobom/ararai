@@ -9,14 +9,16 @@ remote API or external database.
 
 - Product name: ArarAI
 - Platform: Android
+- Android package/application ID: `com.jesjobom.ararai`
 - Target SDK: Android SDK 36
 - Runtime direction: llama.cpp with GGUF models through JNI/NDK
-- Build toolchain: JDK 17, AGP 9.2.x, Gradle 9.4.1, Build Tools 36.0.0,
-  NDK 28.2.13676358
+- Build toolchain: Kotlin 2.3.21, Compose BOM 2026.06.00, JDK 17, AGP
+  9.2.x, Gradle 9.4.1, Build Tools 36.0.0, NDK 28.2.13676358
 - First device target: Galaxy 26 physical device
 - Backend: none for the MVP
 - External database: none for the MVP
-- Model access: open models only, no Hugging Face token required initially
+- Model access: user-selected local GGUF file through Android file picker;
+  model files can be copied to the device manually for early testing
 - Android signing: debug builds only for now
 - Development process: TDD by default; write a failing test before implementing
   each behavior when an automated test is practical

@@ -13,18 +13,23 @@ runtime implementations later.
 ## Product Decisions
 
 - The product name is `ArarAI`.
+- The Android namespace and application ID start as `com.jesjobom.ararai`.
 - The MVP targets Android SDK 36 and does not need to support old Android
   versions.
 - The MVP uses no external application backend, remote database, or hosted API.
-- The MVP uses open models that can be tested without a Hugging Face token.
+- The first model source is a user-selected local GGUF file through Android's
+  file picker. During early testing, model files can be copied to the physical
+  device manually and selected from local storage.
 - Android release signing is out of scope initially; debug builds are enough.
 - Fase 0 model feasibility testing is skipped because representative local
   models have already been tested in other Android applications.
 
 ## Initial Stack
 
-- Kotlin
+- Kotlin 2.3.21
 - Jetpack Compose
+- Jetpack Compose BOM 2026.06.00
+- Compose Compiler Gradle plugin matching Kotlin 2.3.21
 - Gradle wrapper
 - Android Gradle Plugin 9.2.x initially, with AGP 8.13.2 as a fallback only if
   the first Compose plus NDK scaffold hits real compatibility friction
@@ -62,6 +67,22 @@ The UI, model catalog, prompt/session state, media handling, and inference
 runtime should remain separate enough that runtime experiments do not rewrite
 the whole app.
 
+## First Implementation Slice
+
+The first vertical slice is a single-screen debug chat flow:
+
+1. Launch the app.
+2. Select a local GGUF model file through the Android file picker.
+3. Load the selected model through the `LocalLlmEngine` boundary.
+4. Submit one text prompt.
+5. Stream generated text back into the chat view.
+6. Unload the model when leaving the screen or replacing the model.
+
+This slice excludes conversation history, remote downloads, model catalog sync,
+voice, image input/output, release signing, and polished settings. It should
+still include automated tests around prompt/session state, engine-boundary
+events, and failure handling before native runtime work is wired in.
+
 ## Development Process
 
 ArarAI should be developed with TDD by default. For each behavior where an
@@ -87,7 +108,9 @@ It is not expected to run an Android emulator reliably.
 The expected early test split is:
 
 1. Build APK inside the OpenClaw container.
-2. Transfer the generated APK out of the container.
+2. Copy the generated debug APK to
+   `/home/node/.openclaw/jarvis/artifacts/ararai/app-debug.apk`, outside the
+   Git-tracked project files.
 3. Install and run it on the physical Android device using ADB outside the
    container.
 4. Inspect failures through device logs and iterate.
@@ -98,11 +121,6 @@ checklists.
 
 ## Open Questions
 
-- Exact Kotlin and Compose versions.
-- Whether the first model source is bundled, user-selected local file, or remote
-  download.
 - Whether to use Room from the beginning or defer persistence until history or a
   local catalog exists.
-- How APK artifacts will be transferred from the container to the host running
-  ADB.
 - Whether remote device logs can be pulled back into OpenClaw automatically.
