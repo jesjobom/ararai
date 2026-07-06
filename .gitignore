@@ -1,0 +1,11 @@
+.gradle/
+build/
+local.properties
+app/build/
+
+# Android Studio
+.idea/
+*.iml
+
+# Handoff artifacts live outside the Git-tracked project.
+/artifacts/

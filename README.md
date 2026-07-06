@@ -27,9 +27,39 @@ streams text responses without depending on a remote API or external database.
 ## Planning
 
 Project decisions and requirements are tracked under `openspec/`.
-The initial project definition lives in:
+The project definition lives in:
 
 - `openspec/project.md`
-- `openspec/changes/define-project-foundation/`
+- `openspec/specs/local-llm-hub/spec.md`
+- `openspec/changes/implement-phase-1-app-shell/`
 
-No Android application scaffold has been created yet.
+## Build
+
+Run local unit tests:
+
+```sh
+./gradlew testDebugUnitTest
+```
+
+Build the debug APK:
+
+```sh
+./gradlew assembleDebug
+```
+
+Copy the debug APK to the OpenClaw handoff location:
+
+```sh
+scripts/copy-debug-apk.sh
+```
+
+## Manual Device Check
+
+After copying the APK to the handoff location, install it from an environment
+with ADB access and verify:
+
+- the app launches as `ArarAI`
+- the debug chat screen renders without crashing
+- model status is visible
+- prompt submission is disabled until a configured model is available
+- device logs do not show startup crashes or resource failures
