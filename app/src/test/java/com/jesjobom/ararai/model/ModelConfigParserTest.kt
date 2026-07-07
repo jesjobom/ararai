@@ -17,6 +17,7 @@ class ModelConfigParserTest {
             model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             model.expectedBytes=1234
             inference.contextTokens=2048
+            inference.maxTokens=512
             inference.temperature=0.7
             inference.topP=0.9
             """.trimIndent(),
@@ -27,6 +28,7 @@ class ModelConfigParserTest {
         assertEquals("models/smollm2-135m-q4.gguf", config.relativePath)
         assertEquals(1234L, config.expectedBytes)
         assertEquals(2048, config.inference.contextTokens)
+        assertEquals(512, config.inference.maxTokens)
         assertEquals(0.7f, config.inference.temperature)
         assertEquals(0.9f, config.inference.topP)
     }
@@ -68,6 +70,10 @@ class ModelConfigParserTest {
             raw = validRawConfig().replace("inference.topP=0.9", "inference.topP=1.1"),
             expectedMessage = "inference.topP must be between 0 and 1",
         )
+        assertInvalid(
+            raw = validRawConfig().replace("inference.maxTokens=512", "inference.maxTokens=0"),
+            expectedMessage = "inference.maxTokens must be positive",
+        )
     }
 
     private fun assertInvalid(raw: String, expectedMessage: String) {
@@ -89,6 +95,7 @@ class ModelConfigParserTest {
         model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         model.expectedBytes=1234
         inference.contextTokens=2048
+        inference.maxTokens=512
         inference.temperature=0.7
         inference.topP=0.9
         """.trimIndent()

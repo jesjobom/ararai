@@ -17,6 +17,7 @@ object ModelConfigParser {
             expectedBytes = properties.getProperty("model.expectedBytes")?.toLong(),
             inference = InferenceConfig(
                 contextTokens = properties.required("inference.contextTokens").toInt(),
+                maxTokens = properties.required("inference.maxTokens").toInt(),
                 temperature = properties.required("inference.temperature").toFloat(),
                 topP = properties.required("inference.topP").toFloat(),
             ),
@@ -39,6 +40,9 @@ object ModelConfigParser {
         }
         require(inference.contextTokens > 0) {
             "inference.contextTokens must be positive"
+        }
+        require(inference.maxTokens > 0) {
+            "inference.maxTokens must be positive"
         }
         require(inference.temperature >= 0f) {
             "inference.temperature must be non-negative"

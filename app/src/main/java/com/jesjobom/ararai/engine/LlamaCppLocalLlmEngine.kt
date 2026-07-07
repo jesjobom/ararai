@@ -13,15 +13,19 @@ import kotlinx.coroutines.withContext
 class LlamaCppLocalLlmEngine(
     private val bridge: LlamaNativeBridge = JniLlamaNativeBridge,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
-    private val maxTokens: Int = DEFAULT_MAX_TOKENS,
 ) : LocalLlmEngine {
     private val lock = Any()
     private var loadedHandle: Long = 0L
     private var loadedModelPath: String? = null
+    private var loadedMaxTokens: Int = DEFAULT_MAX_TOKENS
 
     override suspend fun load(model: LocalModel, config: InferenceConfig) {
         val alreadyLoaded = synchronized(lock) {
-            loadedHandle != 0L && loadedModelPath == model.filePath
+            val isLoaded = loadedHandle != 0L && loadedModelPath == model.filePath
+            if (isLoaded) {
+                loadedMaxTokens = config.maxTokens
+            }
+            isLoaded
         }
         if (alreadyLoaded) return
 
@@ -40,11 +44,12 @@ class LlamaCppLocalLlmEngine(
         synchronized(lock) {
             loadedHandle = handle
             loadedModelPath = model.filePath
+            loadedMaxTokens = config.maxTokens
         }
     }
 
     override fun generate(request: PromptRequest): Flow<GenerationEvent> = callbackFlow {
-        val handle = synchronized(lock) { loadedHandle }
+        val (handle, maxTokens) = synchronized(lock) { loadedHandle to loadedMaxTokens }
         if (handle == 0L) {
             trySend(GenerationEvent.Failed("Model is not loaded"))
             close()

@@ -49,6 +49,38 @@ class LlamaCppLocalLlmEngineTest {
     }
 
     @Test
+    fun `uses configured max tokens for native generation`() = runTest {
+        val bridge = RecordingBridge(tokens = listOf("ok"))
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+        engine.load(model, config.copy(maxTokens = 384))
+
+        engine.generate(PromptRequest("oi")).test {
+            assertEquals(GenerationEvent.Token("ok"), awaitItem())
+            assertEquals(GenerationEvent.Completed, awaitItem())
+            awaitComplete()
+        }
+
+        assertEquals(384, bridge.generatedMaxTokens)
+    }
+
+    @Test
+    fun `updates max tokens when same model is already loaded`() = runTest {
+        val bridge = RecordingBridge(tokens = listOf("ok"))
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+        engine.load(model, config.copy(maxTokens = 128))
+        engine.load(model, config.copy(maxTokens = 768))
+
+        engine.generate(PromptRequest("oi")).test {
+            assertEquals(GenerationEvent.Token("ok"), awaitItem())
+            assertEquals(GenerationEvent.Completed, awaitItem())
+            awaitComplete()
+        }
+
+        assertEquals(1, bridge.loadCount)
+        assertEquals(768, bridge.generatedMaxTokens)
+    }
+
+    @Test
     fun `formats prompt with chat template before native generation`() = runTest {
         val bridge = RecordingBridge(
             tokens = listOf("ok"),
@@ -128,7 +160,11 @@ class LlamaCppLocalLlmEngineTest {
             private set
         var loadedTopP: Float? = null
             private set
+        var loadCount: Int = 0
+            private set
         var generatedPrompt: String? = null
+            private set
+        var generatedMaxTokens: Int? = null
             private set
         var formatRequestedPrompt: String? = null
             private set
@@ -141,6 +177,7 @@ class LlamaCppLocalLlmEngineTest {
             temperature: Float,
             topP: Float,
         ): Long {
+            loadCount += 1
             loadedPath = modelPath
             loadedContextTokens = contextTokens
             loadedTemperature = temperature
@@ -160,6 +197,7 @@ class LlamaCppLocalLlmEngineTest {
             callback: LlamaTokenCallback,
         ): String? {
             generatedPrompt = prompt
+            generatedMaxTokens = maxTokens
             for (token in tokens) {
                 if (!callback.onToken(token)) {
                     cancel(handle)

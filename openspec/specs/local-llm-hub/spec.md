@@ -149,7 +149,8 @@ Phase 1 SHALL create a buildable Android application scaffold for ArarAI.
 
 ### Requirement: Fixed Model Configuration
 
-Phase 1 SHALL include checked-in configuration for exactly one GGUF model.
+Phase 1 SHALL include checked-in configuration for exactly one GGUF model and
+its default inference limits.
 
 #### Scenario: Parse configured model
 
@@ -157,6 +158,8 @@ Phase 1 SHALL include checked-in configuration for exactly one GGUF model.
 - **THEN** it can parse a single configured model entry
 - **AND** the entry defines the model ID, source URL, expected local path,
   integrity metadata, and default inference parameters
+- **AND** the default inference parameters include context size, sampling
+  values, and maximum generated tokens
 - **AND** no model picker or user-facing model choice is exposed.
 
 ### Requirement: Model Resolution State
@@ -374,8 +377,7 @@ model that is already present and valid on the device.
 ### Requirement: Real Chat Generation Flow
 
 The chat screen SHALL use the real local engine to generate assistant text while
-preserving the existing conversation behavior and formatting prompts for
-instruct/chat models.
+preserving the existing conversation behavior and configured inference limits.
 
 #### Scenario: Stream real assistant output
 
@@ -387,6 +389,7 @@ instruct/chat models.
 - **AND** creates an assistant message for streamed output
 - **AND** formats the prompt using the loaded model's chat template when
   available
+- **AND** limits generated output using the configured maximum generated tokens
 - **AND** appends generated token text as it arrives
 - **AND** re-enables sending after generation completes.
 
@@ -466,4 +469,24 @@ GGUF model's chat template before generation when the model provides one.
 - **WHEN** the user sends a prompt
 - **THEN** the native runtime falls back to the raw user prompt
 - **AND** generation still proceeds without crashing.
+
+### Requirement: Configured Generation Token Limit
+
+The app SHALL read the maximum generated-token count from checked-in model
+configuration.
+
+#### Scenario: Use configured max tokens
+
+- **GIVEN** the configured model is available
+- **AND** the model configuration defines `inference.maxTokens`
+- **WHEN** the chat runtime starts generation
+- **THEN** the real local engine passes that maximum token count to native
+  generation
+- **AND** the value is not hardcoded in the engine.
+
+#### Scenario: Reject invalid max tokens
+
+- **GIVEN** the configured model declares a non-positive `inference.maxTokens`
+- **WHEN** the app parses model configuration
+- **THEN** parsing fails with a configuration error.
 
