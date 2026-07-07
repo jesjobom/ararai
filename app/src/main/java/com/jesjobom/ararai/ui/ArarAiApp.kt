@@ -26,7 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.chat.ChatViewModel
-import com.jesjobom.ararai.engine.FakeLocalLlmEngine
+import com.jesjobom.ararai.engine.LlamaCppLocalLlmEngine
 import com.jesjobom.ararai.model.ModelConfig
 import com.jesjobom.ararai.model.ModelStartupController
 import com.jesjobom.ararai.model.ModelStartupState
@@ -47,7 +47,7 @@ fun ArarAiApp(
     val chatViewModel = remember {
         val availableState = startupState as? ModelStartupState.Available
         ChatViewModel(
-            engine = FakeLocalLlmEngine(),
+            engine = LlamaCppLocalLlmEngine(),
             initialModel = availableState?.model,
             inferenceConfig = availableState?.inference ?: modelConfig.inference,
         )
@@ -65,7 +65,10 @@ fun ArarAiApp(
         )
         AppDestination.Chat -> ChatScreen(
             viewModel = chatViewModel,
-            onBack = { destination = AppDestination.Home },
+            onBack = {
+                chatViewModel.onLeavingChat()
+                destination = AppDestination.Home
+            },
             onRetryModelDownload = startupController::retry,
         )
         AppDestination.ModelStatus -> ModelStatusScreen(

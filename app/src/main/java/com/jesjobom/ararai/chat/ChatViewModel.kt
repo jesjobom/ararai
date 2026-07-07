@@ -8,6 +8,7 @@ import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelStartupState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,7 @@ class ChatViewModel(
 ) {
     private var model = initialModel
     private var inferenceConfig = inferenceConfig
+    private var generationJob: Job? = null
     private val _uiState = MutableStateFlow(
         ChatUiState(
             modelStatus = initialModelStatus,
@@ -44,27 +46,39 @@ class ChatViewModel(
         when (state) {
             ModelStartupState.Missing -> {
                 model = null
+                stopActiveGeneration()
+                unloadEngine()
                 _uiState.update {
                     it.copy(
                         modelStatus = "Model missing; starting download",
+                        isLoadingModel = false,
+                        isGenerating = false,
                         canRetryModelDownload = false,
                     )
                 }
             }
             is ModelStartupState.Invalid -> {
                 model = null
+                stopActiveGeneration()
+                unloadEngine()
                 _uiState.update {
                     it.copy(
                         modelStatus = "Model invalid; redownloading",
+                        isLoadingModel = false,
+                        isGenerating = false,
                         canRetryModelDownload = false,
                     )
                 }
             }
             is ModelStartupState.Downloading -> {
                 model = null
+                stopActiveGeneration()
+                unloadEngine()
                 _uiState.update {
                     it.copy(
                         modelStatus = state.downloadStatusText(),
+                        isLoadingModel = false,
+                        isGenerating = false,
                         canRetryModelDownload = false,
                     )
                 }
@@ -75,6 +89,7 @@ class ChatViewModel(
                 _uiState.update {
                     it.copy(
                         modelStatus = ChatUiState.MODEL_AVAILABLE,
+                        isLoadingModel = false,
                         canRetryModelDownload = false,
                         error = null,
                     )
@@ -82,9 +97,13 @@ class ChatViewModel(
             }
             is ModelStartupState.Failed -> {
                 model = null
+                stopActiveGeneration()
+                unloadEngine()
                 _uiState.update {
                     it.copy(
                         modelStatus = "Download failed: ${state.message}",
+                        isLoadingModel = false,
+                        isGenerating = false,
                         canRetryModelDownload = true,
                     )
                 }
@@ -105,6 +124,7 @@ class ChatViewModel(
     fun submitPrompt() {
         val current = _uiState.value
         if (!current.canSubmit) return
+        if (generationJob?.isActive == true) return
 
         val modelForRequest = model
         val inferenceForRequest = inferenceConfig
@@ -116,35 +136,83 @@ class ChatViewModel(
             it.copy(
                 prompt = submittedPrompt,
                 messages = it.messages + userMessage + assistantMessage,
+                isLoadingModel = true,
                 isGenerating = true,
                 error = null,
             )
         }
 
-        scope.launch {
+        generationJob = scope.launch {
             if (modelForRequest == null) {
                 _uiState.update {
-                    it.copy(isGenerating = false, error = "Model unavailable")
+                    it.copy(
+                        isLoadingModel = false,
+                        isGenerating = false,
+                        error = "Model unavailable",
+                    )
                 }
                 return@launch
             }
 
-            engine.load(modelForRequest, inferenceForRequest)
-            engine.generate(PromptRequest(submittedPrompt)).collect { event ->
-                when (event) {
-                    is GenerationEvent.Token -> appendAssistantToken(event.text)
-                    is GenerationEvent.Failed -> {
-                        _uiState.update {
-                            it.copy(isGenerating = false, error = event.message)
+            try {
+                engine.load(modelForRequest, inferenceForRequest)
+                _uiState.update { it.copy(isLoadingModel = false) }
+
+                engine.generate(PromptRequest(submittedPrompt)).collect { event ->
+                    when (event) {
+                        is GenerationEvent.Token -> appendAssistantToken(event.text)
+                        is GenerationEvent.Failed -> {
+                            _uiState.update {
+                                it.copy(
+                                    isLoadingModel = false,
+                                    isGenerating = false,
+                                    error = event.message,
+                                )
+                            }
                         }
-                    }
-                    GenerationEvent.Completed -> {
-                        _uiState.update {
-                            it.copy(isGenerating = false, prompt = "")
+                        GenerationEvent.Completed -> {
+                            _uiState.update {
+                                it.copy(
+                                    isLoadingModel = false,
+                                    isGenerating = false,
+                                    prompt = "",
+                                )
+                            }
                         }
                     }
                 }
+            } catch (error: Throwable) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _uiState.update {
+                    it.copy(
+                        isLoadingModel = false,
+                        isGenerating = false,
+                        error = error.message ?: "Generation failed",
+                    )
+                }
             }
+        }
+    }
+
+    fun onLeavingChat() {
+        stopActiveGeneration()
+        unloadEngine()
+        _uiState.update {
+            it.copy(
+                isLoadingModel = false,
+                isGenerating = false,
+            )
+        }
+    }
+
+    private fun stopActiveGeneration() {
+        generationJob?.cancel()
+        generationJob = null
+    }
+
+    private fun unloadEngine() {
+        scope.launch {
+            engine.unload()
         }
     }
 

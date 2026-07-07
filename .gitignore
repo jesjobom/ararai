@@ -2,6 +2,7 @@
 build/
 local.properties
 app/build/
+app/.cxx/
 
 # Android Studio
 .idea/

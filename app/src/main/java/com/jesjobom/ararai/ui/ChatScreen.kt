@@ -44,6 +44,11 @@ fun ChatScreen(
     onRetryModelDownload: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
+    val modelStatusText = when {
+        state.isLoadingModel -> "Loading model"
+        state.isGenerating -> "Generating"
+        else -> state.modelStatus
+    }
 
     Column(
         modifier = Modifier
@@ -68,7 +73,7 @@ fun ChatScreen(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = state.modelStatus,
+                    text = modelStatusText,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
