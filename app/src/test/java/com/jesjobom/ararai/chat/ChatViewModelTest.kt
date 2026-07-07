@@ -2,9 +2,14 @@ package com.jesjobom.ararai.chat
 
 import app.cash.turbine.test
 import com.jesjobom.ararai.engine.FakeLocalLlmEngine
+import com.jesjobom.ararai.engine.GenerationEvent
+import com.jesjobom.ararai.engine.LocalLlmEngine
+import com.jesjobom.ararai.engine.PromptRequest
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelStartupState
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -49,6 +54,19 @@ class ChatViewModelTest {
         viewModel.onPromptChanged("hello")
 
         assertTrue(viewModel.uiState.value.canSubmit)
+    }
+
+    @Test
+    fun `keeps submit disabled for blank prompt even when model is available`() {
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+        )
+
+        viewModel.onPromptChanged("   ")
+
+        assertFalse(viewModel.uiState.value.canSubmit)
     }
 
     @Test
@@ -97,6 +115,7 @@ class ChatViewModelTest {
 
             val loading = awaitItem()
             assertTrue(loading.isGenerating)
+            assertFalse(loading.canSubmit)
 
             val firstChunk = awaitItem()
             assertEquals("ola", firstChunk.messages.last().text)
@@ -109,5 +128,42 @@ class ChatViewModelTest {
             assertEquals("", completed.prompt)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `surfaces generation failure and preserves messages`() = runTest {
+        val viewModel = ChatViewModel(
+            engine = FailingEngine("generation failed"),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+        )
+
+        viewModel.uiState.test {
+            awaitItem()
+            viewModel.onPromptChanged("oi")
+            awaitItem()
+            viewModel.submitPrompt()
+
+            val loading = awaitItem()
+            assertEquals(2, loading.messages.size)
+            assertTrue(loading.isGenerating)
+
+            val failed = awaitItem()
+            assertFalse(failed.isGenerating)
+            assertEquals("generation failed", failed.error)
+            assertEquals("oi", failed.messages.first().text)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    private class FailingEngine(
+        private val message: String,
+    ) : LocalLlmEngine {
+        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> =
+            flowOf(GenerationEvent.Failed(message))
+
+        override suspend fun unload() = Unit
     }
 }

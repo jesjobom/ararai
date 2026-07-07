@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,12 +25,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jesjobom.ararai.chat.ChatViewModel
+import com.jesjobom.ararai.engine.FakeLocalLlmEngine
 import com.jesjobom.ararai.model.ModelConfig
 import com.jesjobom.ararai.model.ModelStartupController
 import com.jesjobom.ararai.model.ModelStartupState
 
 private enum class AppDestination {
     Home,
+    Chat,
     ModelStatus,
 }
 
@@ -40,11 +44,29 @@ fun ArarAiApp(
 ) {
     val startupState by startupController.state.collectAsState()
     var destination by remember { mutableStateOf(AppDestination.Home) }
+    val chatViewModel = remember {
+        val availableState = startupState as? ModelStartupState.Available
+        ChatViewModel(
+            engine = FakeLocalLlmEngine(),
+            initialModel = availableState?.model,
+            inferenceConfig = availableState?.inference ?: modelConfig.inference,
+        )
+    }
+
+    LaunchedEffect(startupState) {
+        chatViewModel.onModelStartupState(startupState)
+    }
 
     when (destination) {
         AppDestination.Home -> HomeScreen(
             modelStatus = ModelStatusUiState.from(modelConfig, startupState),
+            onOpenChat = { destination = AppDestination.Chat },
             onOpenModelStatus = { destination = AppDestination.ModelStatus },
+        )
+        AppDestination.Chat -> ChatScreen(
+            viewModel = chatViewModel,
+            onBack = { destination = AppDestination.Home },
+            onRetryModelDownload = startupController::retry,
         )
         AppDestination.ModelStatus -> ModelStatusScreen(
             status = ModelStatusUiState.from(modelConfig, startupState),
@@ -57,6 +79,7 @@ fun ArarAiApp(
 @Composable
 private fun HomeScreen(
     modelStatus: ModelStatusUiState,
+    onOpenChat: () -> Unit,
     onOpenModelStatus: () -> Unit,
 ) {
     Column(
@@ -107,6 +130,13 @@ private fun HomeScreen(
         }
 
         Button(
+            onClick = onOpenChat,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Chat")
+        }
+
+        OutlinedButton(
             onClick = onOpenModelStatus,
             modifier = Modifier.fillMaxWidth(),
         ) {
