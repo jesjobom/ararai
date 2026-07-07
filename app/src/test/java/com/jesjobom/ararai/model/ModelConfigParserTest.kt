@@ -40,4 +40,56 @@ class ModelConfigParserTest {
             // Expected.
         }
     }
+
+    @Test
+    fun `rejects relative path that does not match configured file name`() {
+        try {
+            ModelConfigParser.parse(validRawConfig().replace("model.relativePath=models/smollm2-135m-q4.gguf", "model.relativePath=other/path.gguf"))
+            fail("Expected relative path mismatch to throw")
+        } catch (error: IllegalArgumentException) {
+            assertEquals("model.relativePath must match models/<model.fileName>", error.message)
+        }
+    }
+
+    @Test
+    fun `rejects invalid integrity and inference bounds`() {
+        assertInvalid(
+            raw = validRawConfig().replace(
+                "model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "model.sha256=not-a-sha",
+            ),
+            expectedMessage = "model.sha256 must be a lowercase SHA-256 hex digest",
+        )
+        assertInvalid(
+            raw = validRawConfig().replace("model.expectedBytes=1234", "model.expectedBytes=0"),
+            expectedMessage = "model.expectedBytes must be positive when present",
+        )
+        assertInvalid(
+            raw = validRawConfig().replace("inference.topP=0.9", "inference.topP=1.1"),
+            expectedMessage = "inference.topP must be between 0 and 1",
+        )
+    }
+
+    private fun assertInvalid(raw: String, expectedMessage: String) {
+        try {
+            ModelConfigParser.parse(raw)
+            fail("Expected invalid config to throw")
+        } catch (error: IllegalArgumentException) {
+            assertEquals(expectedMessage, error.message)
+        }
+    }
+
+    private fun validRawConfig(): String =
+        """
+        model.id=smollm2-135m-q4
+        model.name=SmolLM2 135M Q4
+        model.url=https://example.com/smollm2-135m-q4.gguf
+        model.fileName=smollm2-135m-q4.gguf
+        model.relativePath=models/smollm2-135m-q4.gguf
+        model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        model.expectedBytes=1234
+        inference.contextTokens=2048
+        inference.temperature=0.7
+        inference.topP=0.9
+        """.trimIndent()
 }

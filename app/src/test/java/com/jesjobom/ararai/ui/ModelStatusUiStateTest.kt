@@ -25,6 +25,43 @@ class ModelStatusUiStateTest {
     }
 
     @Test
+    fun `omits progress percent until total bytes are known`() {
+        val state = ModelStatusUiState.from(
+            config = config(),
+            startupState = ModelStartupState.Downloading(bytesDownloaded = 50, totalBytes = null),
+        )
+
+        assertEquals("Downloading model", state.title)
+        assertNull(state.progressPercent)
+        assertEquals("Waiting for download progress", state.detail)
+    }
+
+    @Test
+    fun `clamps download progress above one hundred percent`() {
+        val state = ModelStatusUiState.from(
+            config = config(),
+            startupState = ModelStartupState.Downloading(bytesDownloaded = 150, totalBytes = 100),
+        )
+
+        assertEquals(100, state.progressPercent)
+        assertEquals("150 B / 100 B", state.detail)
+    }
+
+    @Test
+    fun `formats large byte counts in megabytes`() {
+        val state = ModelStatusUiState.from(
+            config = config(),
+            startupState = ModelStartupState.Downloading(
+                bytesDownloaded = 2L * 1024L * 1024L,
+                totalBytes = 4L * 1024L * 1024L,
+            ),
+        )
+
+        assertEquals(50, state.progressPercent)
+        assertEquals("2.0 MB / 4.0 MB", state.detail)
+    }
+
+    @Test
     fun `retry is available only on failed state`() {
         val failed = ModelStatusUiState.from(
             config = config(),

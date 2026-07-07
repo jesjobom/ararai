@@ -2,11 +2,11 @@ package com.jesjobom.ararai.model
 
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -22,9 +22,9 @@ class ModelFileDownloaderTest {
 
         val result = downloader.download(helloConfig(), progress::add)
 
-        assertTrue(result is ModelResolutionState.Available)
         val finalFile = File(root, helloConfig().relativePath)
         assertEquals("hello", finalFile.readText())
+        assertEquals(finalFile.absolutePath, result.file.absolutePath)
         assertFalse(File(finalFile.parentFile, "${finalFile.name}.part").exists())
         assertEquals(ModelDownloadProgress(bytesDownloaded = 5, totalBytes = 5), progress.last())
     }
@@ -51,7 +51,7 @@ class ModelFileDownloaderTest {
     fun `validation failure keeps an existing final file unchanged`() = runTest {
         val root = Files.createTempDirectory("ararai-download").toFile()
         val finalFile = File(root, helloConfig().relativePath)
-        finalFile.parentFile.mkdirs()
+        finalFile.parentFile!!.mkdirs()
         finalFile.writeText("old-valid")
         val downloader = ModelFileDownloader(
             appFilesRoot = root,
@@ -63,6 +63,29 @@ class ModelFileDownloaderTest {
             fail("Expected validation failure")
         } catch (_: ModelDownloadException) {
             assertEquals("old-valid", finalFile.readText())
+        }
+    }
+
+    @Test
+    fun `byte source failure removes stale temp file and keeps existing final file`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val finalFile = File(root, helloConfig().relativePath)
+        finalFile.parentFile!!.mkdirs()
+        finalFile.writeText("old-valid")
+        val tempFile = File(finalFile.parentFile, "${finalFile.name}.part")
+        tempFile.writeText("stale")
+        val downloader = ModelFileDownloader(
+            appFilesRoot = root,
+            byteSource = FailingModelByteSource,
+        )
+
+        try {
+            downloader.download(helloConfig())
+            fail("Expected byte source failure")
+        } catch (error: ModelDownloadException) {
+            assertEquals("Configured model download failed: network down", error.message)
+            assertEquals("old-valid", finalFile.readText())
+            assertFalse(tempFile.exists())
         }
     }
 
@@ -83,4 +106,10 @@ private class StaticModelByteSource(
     private val bytes: ByteArray,
 ) : ModelByteSource {
     override fun open(config: ModelConfig): ByteArrayInputStream = ByteArrayInputStream(bytes)
+}
+
+private data object FailingModelByteSource : ModelByteSource {
+    override fun open(config: ModelConfig): ByteArrayInputStream {
+        throw IOException("network down")
+    }
 }
