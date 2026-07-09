@@ -8,8 +8,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.jesjobom.ararai.model.ModelConfigLoader
+import com.jesjobom.ararai.model.ModelCatalogController
 import com.jesjobom.ararai.model.ModelFileDownloader
-import com.jesjobom.ararai.model.ModelStartupController
 import com.jesjobom.ararai.ui.ArarAiApp
 import com.jesjobom.ararai.ui.ArarAiTheme
 
@@ -17,9 +17,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val modelConfig = ModelConfigLoader(this, R.raw.fixed_model).load()
-        val startupController = ModelStartupController(
-            config = modelConfig,
+        val modelCatalog = ModelConfigLoader(this, R.raw.fixed_model).loadCatalog()
+        val modelController = ModelCatalogController(
+            catalog = modelCatalog,
             appFilesRoot = filesDir,
             downloader = ModelFileDownloader(appFilesRoot = filesDir),
         )
@@ -31,8 +31,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background,
                 ) {
                     ArarAiApp(
-                        modelConfig = modelConfig,
-                        startupController = startupController,
+                        modelController = modelController,
                     )
                 }
             }

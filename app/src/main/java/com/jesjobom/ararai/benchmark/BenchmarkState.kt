@@ -1,0 +1,28 @@
+package com.jesjobom.ararai.benchmark
+
+data class BenchmarkUiState(
+    val modelName: String,
+    val backendLabel: String,
+    val promptLabel: String,
+    val contextTokens: Int,
+    val maxTokens: Int,
+    val canRun: Boolean,
+    val isRunning: Boolean = false,
+    val status: String = if (canRun) {
+        "Ready"
+    } else {
+        "Selected model must be available locally"
+    },
+    val result: BenchmarkResult? = null,
+    val error: String? = null,
+)
+
+data class BenchmarkResult(
+    val loadMillis: Long,
+    val firstTokenMillis: Long?,
+    val generationMillis: Long,
+    val totalMillis: Long,
+    val generatedTokens: Int,
+    val generatedCharacters: Int,
+    val tokensPerSecond: Double,
+)

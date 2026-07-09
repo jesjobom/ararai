@@ -18,6 +18,21 @@ data class ModelConfig(
     val inference: InferenceConfig,
 )
 
+data class ModelCatalog(
+    val defaultModelId: String,
+    val models: List<ModelConfig>,
+) {
+    init {
+        require(models.isNotEmpty()) { "Model catalog must contain at least one model" }
+        require(models.map { it.id }.toSet().size == models.size) {
+            "Model catalog model IDs must be unique"
+        }
+        require(models.any { it.id == defaultModelId }) {
+            "Model catalog default model must exist"
+        }
+    }
+}
+
 data class LocalModel(
     val id: String,
     val name: String,

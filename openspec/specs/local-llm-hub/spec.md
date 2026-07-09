@@ -47,25 +47,36 @@ The application SHALL run LLM inference on the Android device for the MVP.
 
 ### Requirement: Configured Model Startup Resolution
 
-The first model source SHALL be one fixed GGUF model declared in checked-in
-application configuration.
+The app SHALL support a configured GGUF model catalog. The existing single-model
+configuration format SHALL remain valid and SHALL be interpreted as a catalog
+with one default model.
 
-#### Scenario: Load existing configured model
+#### Scenario: Load existing selected configured model
 
-- **GIVEN** the configured GGUF model exists at the configured app-owned path
+- **GIVEN** the selected configured GGUF model exists at its configured
+  app-owned path
 - **AND** the file passes the configured integrity check
-- **WHEN** the app starts
+- **WHEN** model resolution runs
 - **THEN** the app can pass that file to the local inference engine
-- **AND** the MVP does not expose model selection.
+- **AND** the model list reports that model as available.
 
-#### Scenario: Download missing configured model
+#### Scenario: Download missing selected configured model
 
-- **GIVEN** the configured GGUF model is missing or fails integrity validation
+- **GIVEN** the selected configured GGUF model is missing or fails integrity
+  validation
+- **AND** no other configured model is available locally
 - **WHEN** the app starts with network access
-- **THEN** the app automatically downloads the configured model to the standard
+- **THEN** the app automatically downloads the configured default model to its
   app-owned location
-- **AND** validates the downloaded file before loading it
-- **AND** does not require the user to choose a model.
+- **AND** validates the downloaded file before loading it.
+
+#### Scenario: Skip default download when another model is available
+
+- **GIVEN** the configured default model is missing
+- **AND** another configured model is already available locally
+- **WHEN** the app starts
+- **THEN** the app does not automatically download the default model
+- **AND** the available model is selected for chat.
 
 ### Requirement: No External Backend For MVP
 
@@ -149,18 +160,23 @@ Phase 1 SHALL create a buildable Android application scaffold for ArarAI.
 
 ### Requirement: Fixed Model Configuration
 
-Phase 1 SHALL include checked-in configuration for exactly one GGUF model and
+Phase 1 SHALL include checked-in configuration for at least one GGUF model and
 its default inference limits.
 
-#### Scenario: Parse configured model
+#### Scenario: Parse configured model catalog
 
 - **WHEN** the app starts
-- **THEN** it can parse a single configured model entry
-- **AND** the entry defines the model ID, source URL, expected local path,
+- **THEN** it can parse a configured model catalog
+- **AND** each entry defines the model ID, source URL, expected local path,
   integrity metadata, and default inference parameters
 - **AND** the default inference parameters include context size, sampling
-  values, and maximum generated tokens
-- **AND** no model picker or user-facing model choice is exposed.
+  values, and maximum generated tokens.
+
+#### Scenario: Keep configured model list static
+
+- **WHEN** the user opens the model management screen
+- **THEN** the app shows only models declared by checked-in configuration
+- **AND** the UI does not allow arbitrary model entries to be added.
 
 ### Requirement: Model Resolution State
 
@@ -281,16 +297,29 @@ The app SHALL start on a home screen that can grow into a feature hub.
 ### Requirement: Model Status Screen
 
 The app SHALL expose model download and availability details on a dedicated
-model status screen.
+model management screen.
 
-#### Scenario: View model status
+#### Scenario: View configured models
 
 - **GIVEN** the user is on `Home`
-- **WHEN** the user opens model status
-- **THEN** the app shows the configured model name
-- **AND** shows the current model availability or download state
-- **AND** shows download progress when available
-- **AND** allows retry only when the model download has failed.
+- **WHEN** the user opens models
+- **THEN** the app shows the configured model list
+- **AND** each model shows its availability or download state
+- **AND** downloading models show progress when available.
+
+#### Scenario: Manage model file
+
+- **GIVEN** the user is viewing the model list
+- **WHEN** a configured model is missing, failed, or available
+- **THEN** the app offers the applicable action to download, retry, update by
+  redownloading, or delete the local model file.
+
+#### Scenario: Select active model
+
+- **GIVEN** the user is viewing the model list
+- **WHEN** the user selects a configured model
+- **THEN** the selected model becomes the active model state used by chat
+- **AND** missing or invalid selected models start the configured download flow.
 
 ### Requirement: Stub Chat Entry Point
 
@@ -489,4 +518,41 @@ configuration.
 - **GIVEN** the configured model declares a non-positive `inference.maxTokens`
 - **WHEN** the app parses model configuration
 - **THEN** parsing fails with a configuration error.
+
+### Requirement: Mobile Inference Benchmark Screen
+
+The app SHALL expose a dedicated benchmark screen for repeatable local
+inference measurements.
+
+#### Scenario: Open benchmark from home
+
+- **GIVEN** the user is on `Home`
+- **WHEN** the user opens benchmark
+- **THEN** the app shows a benchmark screen separate from chat and model
+  management.
+
+#### Scenario: View stable benchmark parameters
+
+- **GIVEN** the user is viewing the benchmark screen
+- **THEN** the app shows the selected model
+- **AND** shows the backend label
+- **AND** shows the benchmark prompt label, context token limit, and maximum
+  generated token limit used for the run.
+
+#### Scenario: Run benchmark for available model
+
+- **GIVEN** the selected configured model is available locally
+- **WHEN** the user starts the benchmark
+- **THEN** the app loads the selected model through the local inference engine
+- **AND** generates text with stable benchmark parameters
+- **AND** reports load time, first-token latency, generated token count, total
+  generation time, and tokens per second.
+
+#### Scenario: Block benchmark for unavailable model
+
+- **GIVEN** the selected configured model is missing, downloading, invalid, or
+  failed
+- **WHEN** the user views the benchmark screen
+- **THEN** the app disables benchmark execution
+- **AND** explains that the selected model must be available locally first.
 

@@ -7,22 +7,49 @@ object ModelConfigParser {
     fun parse(raw: String): ModelConfig {
         val properties = Properties().apply { load(StringReader(raw)) }
 
-        return ModelConfig(
-            id = properties.required("model.id"),
-            name = properties.required("model.name"),
-            url = properties.required("model.url"),
-            fileName = properties.required("model.fileName"),
-            relativePath = properties.required("model.relativePath"),
-            sha256 = properties.required("model.sha256").lowercase(),
-            expectedBytes = properties.getProperty("model.expectedBytes")?.toLong(),
+        return properties.parseModel(modelPrefix = "model.", inferencePrefix = "inference.")
+    }
+
+    fun parseCatalog(raw: String): ModelCatalog {
+        val properties = Properties().apply { load(StringReader(raw)) }
+        val count = properties.getProperty("models.count")?.trim()?.toInt()
+
+        if (count == null) {
+            val model = properties.parseModel(modelPrefix = "model.", inferencePrefix = "inference.")
+            return ModelCatalog(defaultModelId = model.id, models = listOf(model))
+        }
+
+        require(count > 0) { "models.count must be positive" }
+
+        val models = (0 until count).map { index ->
+            properties.parseModel(
+                modelPrefix = "models.$index.",
+                inferencePrefix = "models.$index.inference.",
+            )
+        }
+        val defaultModelId = properties.getProperty("models.defaultId")?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: models.first().id
+
+        return ModelCatalog(defaultModelId = defaultModelId, models = models)
+    }
+
+    private fun Properties.parseModel(modelPrefix: String, inferencePrefix: String): ModelConfig =
+        ModelConfig(
+            id = required("${modelPrefix}id"),
+            name = required("${modelPrefix}name"),
+            url = required("${modelPrefix}url"),
+            fileName = required("${modelPrefix}fileName"),
+            relativePath = required("${modelPrefix}relativePath"),
+            sha256 = required("${modelPrefix}sha256").lowercase(),
+            expectedBytes = getProperty("${modelPrefix}expectedBytes")?.toLong(),
             inference = InferenceConfig(
-                contextTokens = properties.required("inference.contextTokens").toInt(),
-                maxTokens = properties.required("inference.maxTokens").toInt(),
-                temperature = properties.required("inference.temperature").toFloat(),
-                topP = properties.required("inference.topP").toFloat(),
+                contextTokens = required("${inferencePrefix}contextTokens").toInt(),
+                maxTokens = required("${inferencePrefix}maxTokens").toInt(),
+                temperature = required("${inferencePrefix}temperature").toFloat(),
+                topP = required("${inferencePrefix}topP").toFloat(),
             ),
         ).also { it.validate() }
-    }
 
     private fun Properties.required(key: String): String =
         getProperty(key)?.trim()?.takeIf { it.isNotEmpty() }

@@ -11,4 +11,9 @@ class ModelConfigLoader(
         val raw = context.resources.openRawResource(resourceId).bufferedReader().use { it.readText() }
         return ModelConfigParser.parse(raw)
     }
+
+    fun loadCatalog(): ModelCatalog {
+        val raw = context.resources.openRawResource(resourceId).bufferedReader().use { it.readText() }
+        return ModelConfigParser.parseCatalog(raw)
+    }
 }

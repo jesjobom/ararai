@@ -1,9 +1,10 @@
 # ArarAI
 
 ArarAI is an Android application concept for running open local LLMs on-device.
-The first milestone is a focused text-chat MVP that resolves one configured
-open model, downloads it automatically when needed, runs inference locally, and
-streams text responses without depending on a remote API or external database.
+The first milestone is a focused text-chat MVP that resolves configured open
+models, downloads a small default model automatically when no configured model
+is available, runs inference locally, and streams text responses without
+depending on a remote API or external database.
 
 ## Current Direction
 
@@ -17,9 +18,9 @@ streams text responses without depending on a remote API or external database.
 - First device target: Galaxy 26 physical device
 - Backend: none for the MVP
 - External database: none for the MVP
-- Model access: one fixed GGUF model declared in checked-in configuration;
-  startup checks the standard app-owned path and downloads it automatically if
-  missing or invalid
+- Model access: a static checked-in GGUF model catalog; startup downloads the
+  configured small default model only when no configured model is available
+  locally
 - Android signing: debug builds only for now
 - Development process: TDD by default; write a failing test before implementing
   each behavior when an automated test is practical
@@ -60,6 +61,6 @@ with ADB access and verify:
 
 - the app launches as `ArarAI`
 - the debug chat screen renders without crashing
-- model status is visible
+- configured models are visible
 - prompt submission is disabled until a configured model is available
 - device logs do not show startup crashes or resource failures

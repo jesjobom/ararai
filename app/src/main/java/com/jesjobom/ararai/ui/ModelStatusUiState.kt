@@ -15,8 +15,8 @@ data class ModelStatusUiState(
             when (startupState) {
                 ModelStartupState.Missing -> ModelStatusUiState(
                     modelName = config.name,
-                    title = "Preparing model",
-                    detail = "Starting download",
+                    title = "Not downloaded",
+                    detail = "Download this model to use it locally",
                     progressPercent = null,
                     canRetry = false,
                 )
