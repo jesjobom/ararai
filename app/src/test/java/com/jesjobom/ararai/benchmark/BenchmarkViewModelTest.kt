@@ -5,6 +5,7 @@ import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptRequest
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.model.ModelAccelerationPolicy
 import com.jesjobom.ararai.model.ModelConfig
 import com.jesjobom.ararai.model.ModelStartupState
 import kotlinx.coroutines.flow.Flow
@@ -108,7 +109,7 @@ class BenchmarkViewModelTest {
     }
 
     @Test
-    fun `uses gpu default backend label`() = runTest {
+    fun `uses selected model runtime label`() = runTest {
         val viewModel = BenchmarkViewModel(
             engine = RecordingEngine(),
             initialConfig = config,
@@ -116,7 +117,20 @@ class BenchmarkViewModelTest {
             scope = this,
         )
 
-        assertEquals("llama.cpp Vulkan GPU", viewModel.uiState.value.backendLabel)
+        assertEquals("llama.cpp GPU preferred", viewModel.uiState.value.backendLabel)
+    }
+
+    @Test
+    fun `uses selected model acceleration in runtime label`() = runTest {
+        val cpuModel = model.copy(acceleration = ModelAccelerationPolicy.CpuOnly)
+        val viewModel = BenchmarkViewModel(
+            engine = RecordingEngine(),
+            initialConfig = config.copy(acceleration = ModelAccelerationPolicy.GpuPreferred),
+            initialState = ModelStartupState.Available(cpuModel, config.inference),
+            scope = this,
+        )
+
+        assertEquals("llama.cpp CPU only", viewModel.uiState.value.backendLabel)
     }
 
     @Test

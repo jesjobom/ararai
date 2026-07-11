@@ -31,7 +31,7 @@ import com.jesjobom.ararai.benchmark.BenchmarkResult
 import com.jesjobom.ararai.benchmark.BenchmarkUiState
 import com.jesjobom.ararai.benchmark.BenchmarkViewModel
 import com.jesjobom.ararai.chat.ChatViewModel
-import com.jesjobom.ararai.engine.LlamaCppLocalLlmEngine
+import com.jesjobom.ararai.engine.ConfiguredLocalLlmEngine
 import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelCatalogController
 import com.jesjobom.ararai.model.ModelStartupState
@@ -56,14 +56,14 @@ fun ArarAiApp(
     val chatViewModel = remember {
         val availableState = startupState as? ModelStartupState.Available
         ChatViewModel(
-            engine = LlamaCppLocalLlmEngine(),
+            engine = ConfiguredLocalLlmEngine(),
             initialModel = availableState?.model,
             inferenceConfig = availableState?.inference ?: modelConfig.inference,
         )
     }
     val benchmarkViewModel = remember {
         BenchmarkViewModel(
-            engine = LlamaCppLocalLlmEngine(),
+            engine = ConfiguredLocalLlmEngine(),
             initialConfig = modelConfig,
             initialState = startupState,
         )
@@ -263,7 +263,7 @@ private fun BenchmarkDetailsCard(state: BenchmarkUiState) {
                 fontWeight = FontWeight.SemiBold,
             )
             Text(text = "Status: ${state.status}")
-            Text(text = "Backend: ${state.backendLabel}")
+            Text(text = "Runtime: ${state.backendLabel}")
             Text(text = "Prompt: ${state.promptLabel}")
             Text(text = "Context: ${state.contextTokens} tokens")
             Text(text = "Max output: ${state.maxTokens} tokens")

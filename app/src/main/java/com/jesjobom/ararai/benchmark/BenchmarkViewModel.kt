@@ -21,7 +21,6 @@ class BenchmarkViewModel(
     private val engine: LocalLlmEngine,
     initialConfig: ModelConfig,
     initialState: ModelStartupState,
-    private val backendLabel: String = "llama.cpp Vulkan GPU",
     private val clock: BenchmarkClock = SystemBenchmarkClock,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
@@ -153,12 +152,18 @@ class BenchmarkViewModel(
         val canRun = selectedModel != null
         return BenchmarkUiState(
             modelName = selectedModel?.name ?: selectedConfig.name,
-            backendLabel = backendLabel,
+            backendLabel = runtimeLabel(),
             promptLabel = BENCHMARK_PROMPT_LABEL,
             contextTokens = selectedInference.contextTokens,
             maxTokens = selectedInference.maxTokens,
             canRun = canRun,
         )
+    }
+
+    private fun runtimeLabel(): String {
+        val runtime = selectedModel?.runtime ?: selectedConfig.runtime
+        val acceleration = selectedModel?.acceleration ?: selectedConfig.acceleration
+        return "${runtime.displayName} ${acceleration.displayName}"
     }
 
     private companion object {

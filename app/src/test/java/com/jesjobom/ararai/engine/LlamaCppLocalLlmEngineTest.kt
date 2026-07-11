@@ -3,8 +3,11 @@ package com.jesjobom.ararai.engine
 import app.cash.turbine.test
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.model.ModelAccelerationPolicy
+import com.jesjobom.ararai.model.ModelRuntime
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
 import org.junit.Test
 import java.util.ArrayDeque
 
@@ -44,21 +47,31 @@ class LlamaCppLocalLlmEngineTest {
     }
 
     @Test
-    fun `loads known invalid logits models cpu only`() = runTest {
+    fun `loads cpu only models without gpu offload`() = runTest {
         val bridge = RecordingBridge()
         val engine = LlamaCppLocalLlmEngine(bridge = bridge)
 
         engine.load(
-            model.copy(id = "smollm2-135m-instruct-q4-k-m"),
-            config,
-        )
-        engine.unload()
-        engine.load(
-            model.copy(id = "gemma-4-e4b-it-q4-k-m"),
+            model.copy(acceleration = ModelAccelerationPolicy.CpuOnly),
             config,
         )
 
-        assertEquals(listOf(0, 0), bridge.loadedGpuLayerCounts)
+        assertEquals(0, bridge.loadedGpuLayerCount)
+    }
+
+    @Test
+    fun `rejects unsupported runtime before native load`() = runTest {
+        val bridge = RecordingBridge()
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+
+        try {
+            engine.load(model.copy(runtime = ModelRuntime.LiteRtLm), config)
+            fail("Expected unsupported runtime to throw")
+        } catch (error: IllegalStateException) {
+            assertEquals("Unsupported local model runtime: LiteRT-LM", error.message)
+        }
+
+        assertEquals(0, bridge.loadCount)
     }
 
     @Test

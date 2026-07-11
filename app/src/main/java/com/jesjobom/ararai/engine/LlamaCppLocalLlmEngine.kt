@@ -2,6 +2,8 @@ package com.jesjobom.ararai.engine
 
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.model.ModelAccelerationPolicy
+import com.jesjobom.ararai.model.ModelRuntime
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
@@ -25,6 +27,10 @@ class LlamaCppLocalLlmEngine(
     private var loadedGpuLayerCount: Int = 0
 
     override suspend fun load(model: LocalModel, config: InferenceConfig) {
+        check(model.runtime == ModelRuntime.LlamaCpp) {
+            "Unsupported local model runtime: ${model.runtime.displayName}"
+        }
+
         val alreadyLoaded = synchronized(lock) {
             val isLoaded = loadedHandle != 0L &&
                 loadedModelId == model.id &&
@@ -42,7 +48,7 @@ class LlamaCppLocalLlmEngine(
             modelId = model.id,
             modelPath = model.filePath,
             config = config,
-            gpuLayerCount = gpuLayerCountFor(model.id),
+            gpuLayerCount = gpuLayerCountFor(model.acceleration),
         )
     }
 
@@ -249,18 +255,17 @@ class LlamaCppLocalLlmEngine(
                 state.gpuLayerCount > CPU_ONLY_LAYER_COUNT
     }
 
-    private fun gpuLayerCountFor(modelId: String): Int =
-        if (modelId in CPU_ONLY_MODEL_IDS) CPU_ONLY_LAYER_COUNT else DEFAULT_GPU_LAYER_COUNT
+    private fun gpuLayerCountFor(acceleration: ModelAccelerationPolicy): Int =
+        when (acceleration) {
+            ModelAccelerationPolicy.CpuOnly -> CPU_ONLY_LAYER_COUNT
+            ModelAccelerationPolicy.GpuPreferred -> DEFAULT_GPU_LAYER_COUNT
+        }
 
     private companion object {
         const val DEFAULT_MAX_TOKENS = 128
         const val DEFAULT_GPU_LAYER_COUNT = 999
         const val CPU_ONLY_LAYER_COUNT = 0
         const val INVALID_LOGITS_ERROR = "Native sampler received invalid logits"
-        val CPU_ONLY_MODEL_IDS = setOf(
-            "smollm2-135m-instruct-q4-k-m",
-            "gemma-4-e4b-it-q4-k-m",
-        )
     }
 }
 

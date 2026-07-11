@@ -38,6 +38,15 @@ object ModelConfigParser {
         ModelConfig(
             id = required("${modelPrefix}id"),
             name = required("${modelPrefix}name"),
+            runtime = ModelRuntime.fromConfigValue(
+                optional("${modelPrefix}runtime", ModelRuntime.LlamaCpp.configValue),
+            ),
+            artifactFormat = ModelArtifactFormat.fromConfigValue(
+                optional("${modelPrefix}artifactFormat", ModelArtifactFormat.Gguf.configValue),
+            ),
+            acceleration = ModelAccelerationPolicy.fromConfigValue(
+                optional("${modelPrefix}acceleration", ModelAccelerationPolicy.GpuPreferred.configValue),
+            ),
             url = required("${modelPrefix}url"),
             fileName = required("${modelPrefix}fileName"),
             relativePath = required("${modelPrefix}relativePath"),
@@ -55,9 +64,23 @@ object ModelConfigParser {
         getProperty(key)?.trim()?.takeIf { it.isNotEmpty() }
             ?: throw IllegalArgumentException("Missing required model config field: $key")
 
+    private fun Properties.optional(key: String, defaultValue: String): String =
+        getProperty(key)?.trim()?.takeIf { it.isNotEmpty() } ?: defaultValue
+
     private fun ModelConfig.validate() {
-        require(relativePath == "models/$fileName") {
-            "model.relativePath must match models/<model.fileName>"
+        require(relativePath.startsWith("models/")) {
+            "model.relativePath must be under models/"
+        }
+        if (artifactFormat == ModelArtifactFormat.Gguf) {
+            require(relativePath == "models/$fileName") {
+                "model.relativePath must match models/<model.fileName>"
+            }
+        }
+        require(
+            (runtime == ModelRuntime.LlamaCpp && artifactFormat == ModelArtifactFormat.Gguf) ||
+                (runtime == ModelRuntime.LiteRtLm && artifactFormat == ModelArtifactFormat.LiteRtLmBundle),
+        ) {
+            "model.runtime and model.artifactFormat must be compatible"
         }
         require(sha256.length == 64 && sha256.all { it in '0'..'9' || it in 'a'..'f' }) {
             "model.sha256 must be a lowercase SHA-256 hex digest"

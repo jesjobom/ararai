@@ -41,6 +41,9 @@ class ModelResolver(
             model = LocalModel(
                 id = config.id,
                 name = config.name,
+                runtime = config.runtime,
+                artifactFormat = config.artifactFormat,
+                acceleration = config.acceleration,
                 filePath = file.absolutePath,
             ),
         )

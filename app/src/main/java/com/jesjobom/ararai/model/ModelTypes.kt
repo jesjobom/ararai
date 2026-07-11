@@ -7,9 +7,54 @@ data class InferenceConfig(
     val topP: Float,
 )
 
+enum class ModelRuntime(
+    val configValue: String,
+    val displayName: String,
+) {
+    LlamaCpp("llama_cpp", "llama.cpp"),
+    LiteRtLm("litert_lm", "LiteRT-LM");
+
+    companion object {
+        fun fromConfigValue(value: String): ModelRuntime =
+            entries.firstOrNull { it.configValue == value }
+                ?: throw IllegalArgumentException("Unsupported model runtime: $value")
+    }
+}
+
+enum class ModelArtifactFormat(
+    val configValue: String,
+    val displayName: String,
+) {
+    Gguf("gguf", "GGUF"),
+    LiteRtLmBundle("litert_lm_bundle", "LiteRT-LM bundle");
+
+    companion object {
+        fun fromConfigValue(value: String): ModelArtifactFormat =
+            entries.firstOrNull { it.configValue == value }
+                ?: throw IllegalArgumentException("Unsupported model artifact format: $value")
+    }
+}
+
+enum class ModelAccelerationPolicy(
+    val configValue: String,
+    val displayName: String,
+) {
+    GpuPreferred("gpu_preferred", "GPU preferred"),
+    CpuOnly("cpu_only", "CPU only");
+
+    companion object {
+        fun fromConfigValue(value: String): ModelAccelerationPolicy =
+            entries.firstOrNull { it.configValue == value }
+                ?: throw IllegalArgumentException("Unsupported model acceleration policy: $value")
+    }
+}
+
 data class ModelConfig(
     val id: String,
     val name: String,
+    val runtime: ModelRuntime = ModelRuntime.LlamaCpp,
+    val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.Gguf,
+    val acceleration: ModelAccelerationPolicy = ModelAccelerationPolicy.GpuPreferred,
     val url: String,
     val fileName: String,
     val relativePath: String,
@@ -37,4 +82,7 @@ data class LocalModel(
     val id: String,
     val name: String,
     val filePath: String,
+    val runtime: ModelRuntime = ModelRuntime.LlamaCpp,
+    val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.Gguf,
+    val acceleration: ModelAccelerationPolicy = ModelAccelerationPolicy.GpuPreferred,
 )

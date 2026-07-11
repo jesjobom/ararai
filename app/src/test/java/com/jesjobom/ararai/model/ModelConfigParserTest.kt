@@ -25,12 +25,42 @@ class ModelConfigParserTest {
 
         assertEquals("smollm2-135m-q4", config.id)
         assertEquals("SmolLM2 135M Q4", config.name)
+        assertEquals(ModelRuntime.LlamaCpp, config.runtime)
+        assertEquals(ModelArtifactFormat.Gguf, config.artifactFormat)
+        assertEquals(ModelAccelerationPolicy.GpuPreferred, config.acceleration)
         assertEquals("models/smollm2-135m-q4.gguf", config.relativePath)
         assertEquals(1234L, config.expectedBytes)
         assertEquals(2048, config.inference.contextTokens)
         assertEquals(512, config.inference.maxTokens)
         assertEquals(0.7f, config.inference.temperature)
         assertEquals(0.9f, config.inference.topP)
+    }
+
+    @Test
+    fun `parses configured runtime metadata`() {
+        val config = ModelConfigParser.parse(
+            """
+            model.id=gemma-litert
+            model.name=Gemma LiteRT
+            model.runtime=litert_lm
+            model.artifactFormat=litert_lm_bundle
+            model.acceleration=cpu_only
+            model.url=https://example.com/gemma-litert.task
+            model.fileName=gemma-litert.task
+            model.relativePath=models/litert-lm/gemma-litert.task
+            model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            model.expectedBytes=1234
+            inference.contextTokens=2048
+            inference.maxTokens=512
+            inference.temperature=0.7
+            inference.topP=0.9
+            """.trimIndent(),
+        )
+
+        assertEquals(ModelRuntime.LiteRtLm, config.runtime)
+        assertEquals(ModelArtifactFormat.LiteRtLmBundle, config.artifactFormat)
+        assertEquals(ModelAccelerationPolicy.CpuOnly, config.acceleration)
+        assertEquals("models/litert-lm/gemma-litert.task", config.relativePath)
     }
 
     @Test
@@ -128,7 +158,7 @@ class ModelConfigParserTest {
     @Test
     fun `rejects relative path that does not match configured file name`() {
         try {
-            ModelConfigParser.parse(validRawConfig().replace("model.relativePath=models/smollm2-135m-q4.gguf", "model.relativePath=other/path.gguf"))
+            ModelConfigParser.parse(validRawConfig().replace("model.relativePath=models/smollm2-135m-q4.gguf", "model.relativePath=models/other.gguf"))
             fail("Expected relative path mismatch to throw")
         } catch (error: IllegalArgumentException) {
             assertEquals("model.relativePath must match models/<model.fileName>", error.message)
@@ -155,6 +185,13 @@ class ModelConfigParserTest {
         assertInvalid(
             raw = validRawConfig().replace("inference.maxTokens=512", "inference.maxTokens=0"),
             expectedMessage = "inference.maxTokens must be positive",
+        )
+        assertInvalid(
+            raw = validRawConfig().replace(
+                "model.id=smollm2-135m-q4",
+                "model.id=smollm2-135m-q4\nmodel.runtime=litert_lm",
+            ),
+            expectedMessage = "model.runtime and model.artifactFormat must be compatible",
         )
     }
 
