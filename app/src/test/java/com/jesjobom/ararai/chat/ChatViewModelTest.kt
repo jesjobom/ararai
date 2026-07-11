@@ -241,6 +241,30 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `cancel generation stops active job and unloads engine`() = runTest {
+        val engine = SlowEngine()
+        val viewModel = ChatViewModel(
+            engine = engine,
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            scope = this,
+        )
+
+        viewModel.onPromptChanged("hello")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        viewModel.cancelGeneration()
+        runCurrent()
+
+        assertTrue(engine.unloadCalls > 0)
+        assertFalse(viewModel.uiState.value.isGenerating)
+        assertFalse(viewModel.uiState.value.isLoadingModel)
+        assertEquals("partial", viewModel.uiState.value.messages.last().text)
+    }
+
+
+    @Test
     fun `unloads engine when model becomes unavailable`() = runTest {
         val engine = SlowEngine()
         val viewModel = ChatViewModel(

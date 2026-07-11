@@ -32,7 +32,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     ArarAiApp(
                         modelController = modelController,
-                        appVersionLabel = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                        appVersionLabel = "v${BuildConfig.VERSION_NAME}",
                     )
                 }
             }

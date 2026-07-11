@@ -5,12 +5,16 @@ import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import kotlin.io.path.createDirectories
 import kotlin.io.path.writeBytes
+import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ModelCatalogControllerTest {
     @Test
     fun `auto downloads the default missing model and leaves other models untouched`() = runTest {
@@ -111,6 +115,28 @@ class ModelCatalogControllerTest {
         }
     }
 
+    @Test
+    fun `cancel download stops active job and returns model to missing state`() = runTest {
+        val root = Files.createTempDirectory("ararai-catalog").toFile()
+        val downloader = SuspendedDownloader()
+        val controller = ModelCatalogController(
+            catalog = ModelCatalog(defaultModelId = "default", models = listOf(defaultConfig())),
+            appFilesRoot = root,
+            downloader = downloader,
+            scope = this,
+        )
+
+        runCurrent()
+        assertTrue(controller.state.value.selectedStartupState is ModelStartupState.Downloading)
+
+        controller.cancelDownload("default")
+        runCurrent()
+
+        assertTrue(downloader.wasCancelled)
+        assertTrue(controller.state.value.selectedStartupState is ModelStartupState.Missing)
+    }
+
+
     private fun catalog(): ModelCatalog =
         ModelCatalog(
             defaultModelId = "default",
@@ -153,4 +179,19 @@ private class CatalogByteSource(
     }
 
     fun callsFor(modelId: String): Int = calls[modelId] ?: 0
+}
+
+private class SuspendedDownloader : ModelDownloader {
+    var wasCancelled = false
+        private set
+
+    override suspend fun download(
+        config: ModelConfig,
+        onProgress: (ModelDownloadProgress) -> Unit,
+    ): ModelResolutionState.Available =
+        suspendCancellableCoroutine { continuation: CancellableContinuation<ModelResolutionState.Available> ->
+            continuation.invokeOnCancellation {
+                wasCancelled = true
+            }
+        }
 }

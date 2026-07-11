@@ -182,7 +182,7 @@ class ChatViewModel(
                     }
                 }
             } catch (error: Throwable) {
-                if (error is kotlinx.coroutines.CancellationException) throw error
+                if (error is kotlinx.coroutines.CancellationException) return@launch
                 _uiState.update {
                     it.copy(
                         isLoadingModel = false,
@@ -201,6 +201,18 @@ class ChatViewModel(
             it.copy(
                 isLoadingModel = false,
                 isGenerating = false,
+            )
+        }
+    }
+
+    fun cancelGeneration() {
+        stopActiveGeneration()
+        unloadEngine()
+        _uiState.update {
+            it.copy(
+                isLoadingModel = false,
+                isGenerating = false,
+                error = null,
             )
         }
     }

@@ -1,7 +1,16 @@
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+fun buildTimestampVersion(): String =
+    providers.environmentVariable("ARARAI_VERSION_TIMESTAMP").orNull
+        ?: ZonedDateTime.now(ZoneId.of("America/Toronto"))
+            .format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"))
 
 android {
     namespace = "com.jesjobom.ararai"
@@ -12,7 +21,7 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 2
-        versionName = "0.1.1"
+        versionName = buildTimestampVersion()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

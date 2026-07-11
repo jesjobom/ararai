@@ -8,6 +8,7 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -36,14 +37,24 @@ class UrlModelByteSource : ModelByteSource {
 
 class ModelDownloadException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
+interface ModelDownloader {
+    suspend fun download(
+        config: ModelConfig,
+        onProgress: (ModelDownloadProgress) -> Unit = {},
+    ): ModelResolutionState.Available
+}
+
 class ModelFileDownloader(
     private val appFilesRoot: File,
     private val byteSource: ModelByteSource = UrlModelByteSource(),
     private val resolver: ModelResolver = ModelResolver(appFilesRoot),
-) {
-    suspend fun download(
+) : ModelDownloader {
+    suspend fun download(config: ModelConfig): ModelResolutionState.Available =
+        download(config) {}
+
+    override suspend fun download(
         config: ModelConfig,
-        onProgress: (ModelDownloadProgress) -> Unit = {},
+        onProgress: (ModelDownloadProgress) -> Unit,
     ): ModelResolutionState.Available =
         withContext(Dispatchers.IO) {
             val finalFile = File(appFilesRoot, config.relativePath)
@@ -92,6 +103,9 @@ class ModelFileDownloader(
                     }
                 }
             } catch (error: ModelDownloadException) {
+                tempFile.delete()
+                throw error
+            } catch (error: CancellationException) {
                 tempFile.delete()
                 throw error
             } catch (error: Exception) {

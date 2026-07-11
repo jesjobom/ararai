@@ -1,8 +1,10 @@
 package com.jesjobom.ararai.model
 
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,10 +27,11 @@ sealed interface ModelStartupState {
 class ModelStartupController(
     private val config: ModelConfig,
     appFilesRoot: File,
-    private val downloader: ModelFileDownloader = ModelFileDownloader(appFilesRoot),
+    private val downloader: ModelDownloader = ModelFileDownloader(appFilesRoot),
     private val resolver: ModelResolver = ModelResolver(appFilesRoot),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
+    private var downloadJob: Job? = null
     private val _state = MutableStateFlow<ModelStartupState>(ModelStartupState.Missing)
     val state: StateFlow<ModelStartupState> = _state.asStateFlow()
 
@@ -39,6 +42,11 @@ class ModelStartupController(
     fun retry() {
         if (_state.value is ModelStartupState.Downloading) return
         startDownload()
+    }
+
+    fun cancelDownload() {
+        downloadJob?.cancel()
+        downloadJob = null
     }
 
     private fun resolveAndMaybeDownload() {
@@ -58,7 +66,7 @@ class ModelStartupController(
     }
 
     private fun startDownload() {
-        scope.launch {
+        downloadJob = scope.launch {
             _state.update { ModelStartupState.Downloading() }
             try {
                 val available = downloader.download(config) { progress ->
@@ -68,8 +76,16 @@ class ModelStartupController(
                     )
                 }
                 _state.value = ModelStartupState.Available(available.model, config.inference)
+            } catch (_: CancellationException) {
+                _state.value = when (val resolution = resolver.resolve(config)) {
+                    is ModelResolutionState.Available -> ModelStartupState.Available(resolution.model, config.inference)
+                    is ModelResolutionState.Missing -> ModelStartupState.Missing
+                    is ModelResolutionState.IntegrityFailed -> ModelStartupState.Invalid(resolution.reason)
+                }
             } catch (error: ModelDownloadException) {
                 _state.value = ModelStartupState.Failed(error.message ?: "Configured model download failed")
+            } finally {
+                downloadJob = null
             }
         }
     }

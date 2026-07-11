@@ -684,3 +684,115 @@ from the existing Gemma 4 GGUF fallback.
   LiteRT-LM
 - **AND** shows the selected acceleration policy.
 
+### Requirement: Internal Back Navigation
+
+The app SHALL handle Android system back from internal screens by returning to
+Home instead of exiting the application.
+
+#### Scenario: Back from internal screen
+
+- **GIVEN** the user is on Chat, Benchmark, or Models
+- **WHEN** Android system back is pressed
+- **THEN** the app returns to Home
+- **AND** releases active work associated with the internal screen.
+
+### Requirement: Long Running Operation Cancellation
+
+The app SHALL expose cancellation controls for model download, chat generation,
+and benchmark execution.
+
+#### Scenario: Cancel model download
+
+- **GIVEN** a configured model is downloading
+- **WHEN** the user cancels the download
+- **THEN** the active download job is cancelled
+- **AND** the temporary `.part` file is removed
+- **AND** the model returns to a non-downloading state.
+
+#### Scenario: Cancel chat generation
+
+- **GIVEN** chat generation is active
+- **WHEN** the user cancels generation
+- **THEN** active generation is cancelled
+- **AND** local runtime resources are unloaded
+- **AND** the UI becomes ready for another prompt when the model is available.
+
+#### Scenario: Cancel benchmark run
+
+- **GIVEN** benchmark execution is active
+- **WHEN** the user cancels the benchmark
+- **THEN** active benchmark work is cancelled
+- **AND** local runtime resources are unloaded
+- **AND** the benchmark UI reports a cancelled state.
+
+### Requirement: Build Timestamp Version Label
+
+The app SHALL display a build timestamp version label on Home.
+
+#### Scenario: Build creates timestamp version
+
+- **WHEN** the debug APK is built
+- **THEN** the app version name is generated from the build timestamp in
+  `yyyyMMddHHmm` format
+- **AND** Home displays it as `v<timestamp>`.
+
+### Requirement: Stream Model Downloads To Disk
+
+The app SHALL stream model downloads directly to disk instead of buffering the
+entire model in memory.
+
+#### Scenario: Download large model artifact
+
+- **GIVEN** a configured model download starts
+- **WHEN** bytes are received from the network
+- **THEN** the app writes them incrementally to a sibling `.part` file
+- **AND** promotes only the validated file to the final model path.
+
+### Requirement: Pruned Test Model Catalog
+
+The checked-in catalog SHALL include only currently useful test models.
+
+#### Scenario: View configured model list
+
+- **WHEN** the user opens Models
+- **THEN** the list includes SmolLM2, Llama 3.2, and Gemma 4 LiteRT-LM
+- **AND** the list does not include Gemma 4 GGUF CPU or Phi-4.
+
+### Requirement: Material App Foundation
+
+The app SHALL use a consistent Material 3 foundation for primary screens,
+including a shared theme, top-level navigation treatment, and predictable
+spacing/action hierarchy.
+
+#### Scenario: Daily-use screen structure
+
+- **WHEN** the user opens Home, Chat, Models, or Diagnostics
+- **THEN** each screen uses the shared Material app theme
+- **AND** screen titles, back navigation, content spacing, buttons, progress,
+  and error states follow a consistent Material 3 treatment.
+
+### Requirement: Chat-Centered Home
+
+Home SHALL present Chat as the primary daily-use action while keeping model
+management visible and diagnostics secondary.
+
+#### Scenario: Home action hierarchy
+
+- **WHEN** the user opens the app Home screen
+- **THEN** the primary action opens Chat
+- **AND** model management is available from Home
+- **AND** benchmark access is presented as a secondary diagnostic action, not as
+  a model-comparison or benchmark-history workflow.
+
+### Requirement: Benchmark Diagnostic Scope
+
+Benchmark UI SHALL remain an on-demand diagnostics surface and SHALL NOT add
+benchmark history or model-comparison workflows.
+
+#### Scenario: Diagnostic benchmark only
+
+- **WHEN** the user opens the benchmark screen
+- **THEN** the UI presents the selected model's current diagnostic run controls
+- **AND** it does not present benchmark history
+- **AND** it does not compare multiple models.
+

@@ -9,6 +9,7 @@ import com.jesjobom.ararai.model.ModelAccelerationPolicy
 import com.jesjobom.ararai.model.ModelConfig
 import com.jesjobom.ararai.model.ModelStartupState
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -155,6 +156,28 @@ class BenchmarkViewModelTest {
         assertEquals(1, engine.unloadCalls)
     }
 
+    @Test
+    fun `cancel benchmark stops active run and unloads engine`() = runTest {
+        val engine = SlowEngine()
+        val viewModel = BenchmarkViewModel(
+            engine = engine,
+            initialConfig = config,
+            initialState = ModelStartupState.Available(model, config.inference),
+            scope = this,
+        )
+
+        viewModel.runBenchmark()
+        runCurrent()
+
+        viewModel.cancelBenchmark()
+        runCurrent()
+
+        assertEquals("Benchmark canceled", viewModel.uiState.value.status)
+        assertFalse(viewModel.uiState.value.isRunning)
+        assertEquals(1, engine.unloadCalls)
+    }
+
+
     private class RecordingEngine(
         private val events: List<GenerationEvent> = emptyList(),
     ) : LocalLlmEngine {
@@ -190,6 +213,22 @@ class BenchmarkViewModelTest {
         override fun nowNanos(): Long {
             check(values.isNotEmpty()) { "SequenceClock exhausted" }
             return values.removeAt(0)
+        }
+    }
+
+    private class SlowEngine : LocalLlmEngine {
+        var unloadCalls = 0
+            private set
+
+        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
+            emit(GenerationEvent.Token("partial"))
+            kotlinx.coroutines.delay(Long.MAX_VALUE)
+        }
+
+        override suspend fun unload() {
+            unloadCalls += 1
         }
     }
 }

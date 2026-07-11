@@ -122,7 +122,7 @@ class BenchmarkViewModel(
                     )
                 }
             } catch (error: Throwable) {
-                if (error is kotlinx.coroutines.CancellationException) throw error
+                if (error is kotlinx.coroutines.CancellationException) return@launch
                 _uiState.update {
                     it.copy(
                         isRunning = false,
@@ -137,13 +137,31 @@ class BenchmarkViewModel(
     }
 
     fun onLeavingBenchmark() {
-        benchmarkJob?.cancel()
+        val activeJob = benchmarkJob
+        activeJob?.cancel()
         benchmarkJob = null
-        scope.launch { engine.unload() }
+        if (activeJob == null) {
+            scope.launch { engine.unload() }
+        }
         _uiState.update {
             it.copy(
                 isRunning = false,
                 status = if (it.canRun) "Ready" else "Selected model must be available locally",
+            )
+        }
+    }
+
+    fun cancelBenchmark() {
+        val activeJob = benchmarkJob
+        activeJob?.cancel()
+        benchmarkJob = null
+        if (activeJob == null) {
+            scope.launch { engine.unload() }
+        }
+        _uiState.update {
+            it.copy(
+                isRunning = false,
+                status = "Benchmark canceled",
             )
         }
     }

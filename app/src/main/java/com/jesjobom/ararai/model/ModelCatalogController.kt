@@ -1,8 +1,10 @@
 package com.jesjobom.ararai.model
 
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,10 +34,11 @@ data class ModelCatalogState(
 class ModelCatalogController(
     private val catalog: ModelCatalog,
     private val appFilesRoot: File,
-    private val downloader: ModelFileDownloader = ModelFileDownloader(appFilesRoot),
+    private val downloader: ModelDownloader = ModelFileDownloader(appFilesRoot),
     private val resolver: ModelResolver = ModelResolver(appFilesRoot),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
+    private val downloadJobs = mutableMapOf<String, Job>()
     private val initialModels = catalog.models.map { ManagedModelItem(it, resolve(it)) }
     private val _state = MutableStateFlow(
         ModelCatalogState(
@@ -63,6 +66,10 @@ class ModelCatalogController(
         val item = state.value.item(modelId)
         if (item.state is ModelStartupState.Downloading) return
         startDownload(item.config)
+    }
+
+    fun cancelDownload(modelId: String) {
+        downloadJobs.remove(modelId)?.cancel()
     }
 
     fun redownload(modelId: String) {
@@ -99,7 +106,7 @@ class ModelCatalogController(
         }
 
     private fun startDownload(config: ModelConfig) {
-        scope.launch {
+        val job = scope.launch {
             updateModelState(config.id, ModelStartupState.Downloading())
             try {
                 val available = downloader.download(config) { progress ->
@@ -112,13 +119,18 @@ class ModelCatalogController(
                     )
                 }
                 updateModelState(config.id, ModelStartupState.Available(available.model, config.inference))
+            } catch (_: CancellationException) {
+                updateModelState(config.id, resolve(config))
             } catch (error: ModelDownloadException) {
                 updateModelState(
                     config.id,
                     ModelStartupState.Failed(error.message ?: "Configured model download failed"),
                 )
+            } finally {
+                downloadJobs.remove(config.id)
             }
         }
+        downloadJobs[config.id] = job
     }
 
     private fun updateModelState(modelId: String, modelState: ModelStartupState) {

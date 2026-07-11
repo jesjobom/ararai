@@ -3,7 +3,9 @@ package com.jesjobom.ararai.model
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.nio.file.Files
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -89,6 +91,24 @@ class ModelFileDownloaderTest {
         }
     }
 
+    @Test
+    fun `cancellation removes temp file and is not wrapped as download failure`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val downloader = ModelFileDownloader(
+            appFilesRoot = root,
+            byteSource = CancelingModelByteSource,
+        )
+
+        try {
+            downloader.download(helloConfig())
+            fail("Expected cancellation")
+        } catch (_: CancellationException) {
+            val finalFile = File(root, helloConfig().relativePath)
+            assertFalse(finalFile.exists())
+            assertFalse(File(finalFile.parentFile, "${finalFile.name}.part").exists())
+        }
+    }
+
     private fun helloConfig(): ModelConfig =
         ModelConfig(
             id = "hello",
@@ -112,4 +132,19 @@ private data object FailingModelByteSource : ModelByteSource {
     override fun open(config: ModelConfig): ByteArrayInputStream {
         throw IOException("network down")
     }
+}
+
+private data object CancelingModelByteSource : ModelByteSource {
+    override fun open(config: ModelConfig): InputStream =
+        object : InputStream() {
+            private var emitted = false
+
+            override fun read(): Int {
+                if (!emitted) {
+                    emitted = true
+                    return 'h'.code
+                }
+                throw CancellationException("cancelled")
+            }
+        }
 }
