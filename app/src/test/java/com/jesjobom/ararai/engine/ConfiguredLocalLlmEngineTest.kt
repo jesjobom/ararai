@@ -42,9 +42,15 @@ class ConfiguredLocalLlmEngineTest {
     }
 
     @Test
-    fun `fails fast for litert lm until runtime is implemented`() = runTest {
+    fun `delegates litert lm models to litert lm engine`() = runTest {
         val llamaCppEngine = RecordingEngine()
-        val engine = ConfiguredLocalLlmEngine(llamaCppEngine = llamaCppEngine)
+        val liteRtLmEngine = RecordingEngine(
+            events = listOf(GenerationEvent.Token("gemma"), GenerationEvent.Completed),
+        )
+        val engine = ConfiguredLocalLlmEngine(
+            llamaCppEngine = llamaCppEngine,
+            liteRtLmEngine = liteRtLmEngine,
+        )
         val model = LocalModel(
             id = "gemma-litert",
             name = "Gemma LiteRT",
@@ -52,14 +58,15 @@ class ConfiguredLocalLlmEngineTest {
             runtime = ModelRuntime.LiteRtLm,
         )
 
-        try {
-            engine.load(model, config)
-            fail("Expected LiteRT-LM load to throw")
-        } catch (error: IllegalStateException) {
-            assertEquals("LiteRT-LM runtime is not implemented yet", error.message)
-        }
+        engine.load(model, config)
 
         assertEquals(null, llamaCppEngine.loadedModel)
+        assertEquals(model, liteRtLmEngine.loadedModel)
+        engine.generate(PromptRequest("oi")).test {
+            assertEquals(GenerationEvent.Token("gemma"), awaitItem())
+            assertEquals(GenerationEvent.Completed, awaitItem())
+            awaitComplete()
+        }
     }
 
     private class RecordingEngine(

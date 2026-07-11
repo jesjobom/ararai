@@ -8,15 +8,14 @@ import kotlinx.coroutines.flow.flowOf
 
 class ConfiguredLocalLlmEngine(
     private val llamaCppEngine: LocalLlmEngine = LlamaCppLocalLlmEngine(),
+    private val liteRtLmEngine: LocalLlmEngine = LiteRtLmLocalLlmEngine(),
 ) : LocalLlmEngine {
     private var activeEngine: LocalLlmEngine? = null
 
     override suspend fun load(model: LocalModel, config: InferenceConfig) {
         activeEngine = when (model.runtime) {
             ModelRuntime.LlamaCpp -> llamaCppEngine
-            ModelRuntime.LiteRtLm -> {
-                error("LiteRT-LM runtime is not implemented yet")
-            }
+            ModelRuntime.LiteRtLm -> liteRtLmEngine
         }
         activeEngine?.load(model, config)
     }
