@@ -21,7 +21,7 @@ class BenchmarkViewModel(
     private val engine: LocalLlmEngine,
     initialConfig: ModelConfig,
     initialState: ModelStartupState,
-    private val backendLabel: String = "llama.cpp CPU",
+    private val backendLabel: String = "llama.cpp Vulkan GPU",
     private val clock: BenchmarkClock = SystemBenchmarkClock,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {

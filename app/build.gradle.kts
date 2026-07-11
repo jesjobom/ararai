@@ -9,10 +9,10 @@ android {
 
     defaultConfig {
         applicationId = "com.jesjobom.ararai"
-        minSdk = 26
+        minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -47,6 +47,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     ndkVersion = "28.2.13676358"

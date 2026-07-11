@@ -16,12 +16,19 @@ class LlamaCppLocalLlmEngine(
 ) : LocalLlmEngine {
     private val lock = Any()
     private var loadedHandle: Long = 0L
+    private var loadedModelId: String? = null
     private var loadedModelPath: String? = null
+    private var loadedContextTokens: Int = 0
+    private var loadedTemperature: Float = 0f
+    private var loadedTopP: Float = 0f
     private var loadedMaxTokens: Int = DEFAULT_MAX_TOKENS
+    private var loadedGpuLayerCount: Int = 0
 
     override suspend fun load(model: LocalModel, config: InferenceConfig) {
         val alreadyLoaded = synchronized(lock) {
-            val isLoaded = loadedHandle != 0L && loadedModelPath == model.filePath
+            val isLoaded = loadedHandle != 0L &&
+                loadedModelId == model.id &&
+                loadedModelPath == model.filePath
             if (isLoaded) {
                 loadedMaxTokens = config.maxTokens
             }
@@ -31,25 +38,17 @@ class LlamaCppLocalLlmEngine(
 
         unload()
 
-        val handle = withContext(dispatcher) {
-            bridge.loadModel(
-                modelPath = model.filePath,
-                contextTokens = config.contextTokens,
-                temperature = config.temperature,
-                topP = config.topP,
-            )
-        }
-        check(handle != 0L) { "Native model load returned an empty handle" }
-
-        synchronized(lock) {
-            loadedHandle = handle
-            loadedModelPath = model.filePath
-            loadedMaxTokens = config.maxTokens
-        }
+        loadModel(
+            modelId = model.id,
+            modelPath = model.filePath,
+            config = config,
+            gpuLayerCount = gpuLayerCountFor(model.id),
+        )
     }
 
     override fun generate(request: PromptRequest): Flow<GenerationEvent> = callbackFlow {
-        val (handle, maxTokens) = synchronized(lock) { loadedHandle to loadedMaxTokens }
+        val state = synchronized(lock) { loadedState() }
+        val handle = state?.handle ?: 0L
         if (handle == 0L) {
             trySend(GenerationEvent.Failed("Model is not loaded"))
             close()
@@ -58,19 +57,27 @@ class LlamaCppLocalLlmEngine(
 
         val job = launch(dispatcher) {
             try {
-                val prompt = bridge.formatChatPrompt(handle, request.prompt) ?: request.prompt
-                val error = bridge.generate(
-                    handle = handle,
-                    prompt = prompt,
-                    maxTokens = maxTokens,
-                    callback = LlamaTokenCallback { token ->
-                        trySend(GenerationEvent.Token(token)).isSuccess
-                    },
+                val result = generateWithState(
+                    state = state ?: return@launch,
+                    request = request,
+                    emitToken = { token -> trySend(GenerationEvent.Token(token)).isSuccess },
                 )
-                if (error == null) {
+                if (result.error == null) {
                     trySend(GenerationEvent.Completed)
+                } else if (result.shouldRetryCpu) {
+                    val retryState = reloadCpuOnly(result.state)
+                    val retryResult = generateWithState(
+                        state = retryState,
+                        request = request,
+                        emitToken = { token -> trySend(GenerationEvent.Token(token)).isSuccess },
+                    )
+                    if (retryResult.error == null) {
+                        trySend(GenerationEvent.Completed)
+                    } else {
+                        trySend(GenerationEvent.Failed("CPU fallback failed: ${retryResult.error}"))
+                    }
                 } else {
-                    trySend(GenerationEvent.Failed(error))
+                    trySend(GenerationEvent.Failed(result.error))
                 }
             } catch (error: Throwable) {
                 trySend(GenerationEvent.Failed(error.message ?: "Native generation failed"))
@@ -81,7 +88,10 @@ class LlamaCppLocalLlmEngine(
 
         awaitClose {
             if (job.isActive) {
-                bridge.cancel(handle)
+                val currentHandle = synchronized(lock) {
+                    if (loadedHandle != 0L) loadedHandle else handle
+                }
+                bridge.cancel(currentHandle)
             }
             job.cancel()
         }
@@ -91,7 +101,12 @@ class LlamaCppLocalLlmEngine(
         val handle = synchronized(lock) {
             val current = loadedHandle
             loadedHandle = 0L
+            loadedModelId = null
             loadedModelPath = null
+            loadedContextTokens = 0
+            loadedTemperature = 0f
+            loadedTopP = 0f
+            loadedGpuLayerCount = 0
             current
         }
         if (handle != 0L) {
@@ -101,8 +116,151 @@ class LlamaCppLocalLlmEngine(
         }
     }
 
+    private suspend fun loadModel(
+        modelId: String,
+        modelPath: String,
+        config: InferenceConfig,
+        gpuLayerCount: Int,
+    ): LoadedState {
+        val handle = withContext(dispatcher) {
+            bridge.loadModel(
+                modelPath = modelPath,
+                contextTokens = config.contextTokens,
+                temperature = config.temperature,
+                topP = config.topP,
+                gpuLayerCount = gpuLayerCount,
+            )
+        }
+        check(handle != 0L) { "Native model load returned an empty handle" }
+
+        val state = LoadedState(
+            handle = handle,
+            modelId = modelId,
+            modelPath = modelPath,
+            contextTokens = config.contextTokens,
+            temperature = config.temperature,
+            topP = config.topP,
+            maxTokens = config.maxTokens,
+            gpuLayerCount = gpuLayerCount,
+        )
+        synchronized(lock) {
+            loadedHandle = state.handle
+            loadedModelId = state.modelId
+            loadedModelPath = state.modelPath
+            loadedContextTokens = state.contextTokens
+            loadedTemperature = state.temperature
+            loadedTopP = state.topP
+            loadedMaxTokens = state.maxTokens
+            loadedGpuLayerCount = state.gpuLayerCount
+        }
+        return state
+    }
+
+    private suspend fun reloadCpuOnly(state: LoadedState): LoadedState {
+        val currentHandle = synchronized(lock) {
+            if (loadedHandle == state.handle) {
+                loadedHandle = 0L
+                loadedModelId = null
+                loadedModelPath = null
+                loadedContextTokens = 0
+                loadedTemperature = 0f
+                loadedTopP = 0f
+                loadedGpuLayerCount = 0
+                state.handle
+            } else {
+                0L
+            }
+        }
+        if (currentHandle != 0L) {
+            bridge.unloadModel(currentHandle)
+        }
+
+        return loadModel(
+            modelId = state.modelId,
+            modelPath = state.modelPath,
+            config = InferenceConfig(
+                contextTokens = state.contextTokens,
+                maxTokens = state.maxTokens,
+                temperature = state.temperature,
+                topP = state.topP,
+            ),
+            gpuLayerCount = CPU_ONLY_LAYER_COUNT,
+        )
+    }
+
+    private fun generateWithState(
+        state: LoadedState,
+        request: PromptRequest,
+        emitToken: (String) -> Boolean,
+    ): GenerationResult {
+        val prompt = bridge.formatChatPrompt(state.handle, request.prompt) ?: request.prompt
+        var emittedTokens = 0
+        val error = bridge.generate(
+            handle = state.handle,
+            prompt = prompt,
+            maxTokens = state.maxTokens,
+            callback = LlamaTokenCallback { token ->
+                emittedTokens += 1
+                emitToken(token)
+            },
+        )
+        return GenerationResult(
+            state = state,
+            error = error,
+            emittedTokens = emittedTokens,
+        )
+    }
+
+    private fun loadedState(): LoadedState? {
+        val id = loadedModelId ?: return null
+        val path = loadedModelPath ?: return null
+        if (loadedHandle == 0L) return null
+        return LoadedState(
+            handle = loadedHandle,
+            modelId = id,
+            modelPath = path,
+            contextTokens = loadedContextTokens,
+            temperature = loadedTemperature,
+            topP = loadedTopP,
+            maxTokens = loadedMaxTokens,
+            gpuLayerCount = loadedGpuLayerCount,
+        )
+    }
+
+    private data class LoadedState(
+        val handle: Long,
+        val modelId: String,
+        val modelPath: String,
+        val contextTokens: Int,
+        val temperature: Float,
+        val topP: Float,
+        val maxTokens: Int,
+        val gpuLayerCount: Int,
+    )
+
+    private data class GenerationResult(
+        val state: LoadedState,
+        val error: String?,
+        val emittedTokens: Int,
+    ) {
+        val shouldRetryCpu: Boolean =
+            error?.contains(INVALID_LOGITS_ERROR) == true &&
+                emittedTokens == 0 &&
+                state.gpuLayerCount > CPU_ONLY_LAYER_COUNT
+    }
+
+    private fun gpuLayerCountFor(modelId: String): Int =
+        if (modelId in CPU_ONLY_MODEL_IDS) CPU_ONLY_LAYER_COUNT else DEFAULT_GPU_LAYER_COUNT
+
     private companion object {
         const val DEFAULT_MAX_TOKENS = 128
+        const val DEFAULT_GPU_LAYER_COUNT = 999
+        const val CPU_ONLY_LAYER_COUNT = 0
+        const val INVALID_LOGITS_ERROR = "Native sampler received invalid logits"
+        val CPU_ONLY_MODEL_IDS = setOf(
+            "smollm2-135m-instruct-q4-k-m",
+            "gemma-4-e4b-it-q4-k-m",
+        )
     }
 }
 
@@ -116,6 +274,7 @@ interface LlamaNativeBridge {
         contextTokens: Int,
         temperature: Float,
         topP: Float,
+        gpuLayerCount: Int,
     ): Long
 
     fun generate(
@@ -142,6 +301,7 @@ object JniLlamaNativeBridge : LlamaNativeBridge {
         contextTokens: Int,
         temperature: Float,
         topP: Float,
+        gpuLayerCount: Int,
     ): Long
 
     external override fun generate(

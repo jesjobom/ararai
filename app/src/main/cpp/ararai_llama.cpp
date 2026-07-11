@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cmath>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -14,12 +15,15 @@
 namespace {
 
 constexpr const char * LOG_TAG = "ArarAI.NativeLlm";
+constexpr const char * INVALID_LOGITS_ERROR = "Native sampler received invalid logits";
 
 struct NativeLlmHandle {
     llama_model * model = nullptr;
     llama_context * context = nullptr;
     llama_sampler * sampler = nullptr;
     const llama_vocab * vocab = nullptr;
+    std::string model_path;
+    int gpu_layer_count = 0;
     std::atomic_bool cancelled = false;
     std::mutex generate_mutex;
 };
@@ -60,6 +64,63 @@ NativeLlmHandle * from_handle(jlong handle) {
     return reinterpret_cast<NativeLlmHandle *>(static_cast<intptr_t>(handle));
 }
 
+std::string validate_logits(llama_context * context, const llama_vocab * vocab) {
+    const float * logits = llama_get_logits_ith(context, -1);
+    if (logits == nullptr) {
+        return "Native sampler logits are unavailable";
+    }
+
+    const int n_vocab = llama_vocab_n_tokens(vocab);
+    int invalid_count = 0;
+    int first_invalid = -1;
+    int negative_infinity_count = 0;
+    float min_logit = 0.0f;
+    float max_logit = 0.0f;
+    bool has_valid = false;
+
+    for (int token_id = 0; token_id < n_vocab; ++token_id) {
+        const float logit = logits[token_id];
+        if (std::isnan(logit) || logit == INFINITY) {
+            if (first_invalid < 0) {
+                first_invalid = token_id;
+            }
+            invalid_count += 1;
+            continue;
+        }
+        if (logit == -INFINITY) {
+            negative_infinity_count += 1;
+            continue;
+        }
+        if (!has_valid) {
+            min_logit = logit;
+            max_logit = logit;
+            has_valid = true;
+        } else {
+            min_logit = std::min(min_logit, logit);
+            max_logit = std::max(max_logit, logit);
+        }
+    }
+
+    if (invalid_count > 0 || !has_valid) {
+        __android_log_print(
+            ANDROID_LOG_ERROR,
+            LOG_TAG,
+            "%s: invalid=%d neg_inf=%d first_invalid=%d vocab=%d valid=%s min=%f max=%f",
+            INVALID_LOGITS_ERROR,
+            invalid_count,
+            negative_infinity_count,
+            first_invalid,
+            n_vocab,
+            has_valid ? "true" : "false",
+            min_logit,
+            max_logit
+        );
+        return INVALID_LOGITS_ERROR;
+    }
+
+    return "";
+}
+
 } // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -69,7 +130,8 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_loadModel(
     jstring model_path,
     jint context_tokens,
     jfloat temperature,
-    jfloat top_p
+    jfloat top_p,
+    jint gpu_layer_count
 ) {
     initialize_llama();
 
@@ -79,17 +141,40 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_loadModel(
     }
 
     auto handle = std::make_unique<NativeLlmHandle>();
+    handle->model_path = path;
+    handle->gpu_layer_count = std::max(static_cast<int>(gpu_layer_count), 0);
 
     llama_model_params model_params = llama_model_default_params();
-    model_params.n_gpu_layers = 0;
+    model_params.n_gpu_layers = handle->gpu_layer_count;
 
     handle->model = llama_model_load_from_file(path.c_str(), model_params);
+    if (handle->model == nullptr && model_params.n_gpu_layers > 0) {
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            LOG_TAG,
+            "GPU model load failed; retrying CPU-only load: %s",
+            path.c_str()
+        );
+        model_params.n_gpu_layers = 0;
+        handle->gpu_layer_count = 0;
+        handle->model = llama_model_load_from_file(path.c_str(), model_params);
+    }
     if (handle->model == nullptr) {
         __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Unable to load model: %s", path.c_str());
         return 0L;
     }
 
     handle->vocab = llama_model_get_vocab(handle->model);
+    char model_description[256] = {};
+    llama_model_desc(handle->model, model_description, sizeof(model_description));
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        LOG_TAG,
+        "Loaded model: gpu_layers=%d desc=%s path=%s",
+        handle->gpu_layer_count,
+        model_description,
+        path.c_str()
+    );
 
     llama_context_params context_params = llama_context_default_params();
     context_params.n_ctx = static_cast<uint32_t>(std::max(context_tokens, 256));
@@ -244,6 +329,18 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_generate(
         const int decode_result = llama_decode(handle->context, batch);
         if (decode_result != 0) {
             return to_jstring(env, "Native decode failed");
+        }
+
+        const std::string logits_error = validate_logits(handle->context, handle->vocab);
+        if (!logits_error.empty()) {
+            __android_log_print(
+                ANDROID_LOG_ERROR,
+                LOG_TAG,
+                "Stopping generation before sampler: gpu_layers=%d path=%s",
+                handle->gpu_layer_count,
+                handle->model_path.c_str()
+            );
+            return to_jstring(env, logits_error);
         }
 
         const llama_token token = llama_sampler_sample(handle->sampler, handle->context, -1);

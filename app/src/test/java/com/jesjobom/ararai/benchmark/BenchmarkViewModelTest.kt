@@ -108,6 +108,18 @@ class BenchmarkViewModelTest {
     }
 
     @Test
+    fun `uses gpu default backend label`() = runTest {
+        val viewModel = BenchmarkViewModel(
+            engine = RecordingEngine(),
+            initialConfig = config,
+            initialState = ModelStartupState.Available(model, config.inference),
+            scope = this,
+        )
+
+        assertEquals("llama.cpp Vulkan GPU", viewModel.uiState.value.backendLabel)
+    }
+
+    @Test
     fun `surfaces generation failure`() = runTest {
         val engine = RecordingEngine(
             events = listOf(GenerationEvent.Failed("decode failed")),

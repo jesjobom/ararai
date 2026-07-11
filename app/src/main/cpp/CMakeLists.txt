@@ -16,12 +16,38 @@ set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
-set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+set(SPIRV-Headers_DIR "${CMAKE_CURRENT_LIST_DIR}/cmake/SPIRV-Headers" CACHE PATH "" FORCE)
+set(
+    Vulkan_GLSLC_EXECUTABLE
+    "${CMAKE_ANDROID_NDK}/shader-tools/linux-x86_64/glslc"
+    CACHE FILEPATH "" FORCE
+)
+if (DEFINED ENV{ARARAI_HOST_CC} AND DEFINED ENV{ARARAI_HOST_CXX})
+    set(
+        GGML_VULKAN_SHADERS_GEN_TOOLCHAIN
+        "${CMAKE_CURRENT_LIST_DIR}/cmake/host-toolchain-env.cmake"
+        CACHE FILEPATH "" FORCE
+    )
+endif()
+
+FetchContent_Declare(
+    vulkan_headers
+    GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+    GIT_TAG vulkan-sdk-1.3.275.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(vulkan_headers)
+include_directories(SYSTEM "${vulkan_headers_SOURCE_DIR}/include")
+include_directories(
+    SYSTEM
+    "${CMAKE_ANDROID_NDK}/sources/third_party/shaderc/third_party/spirv-tools/external/spirv-headers/include"
+)
 
 FetchContent_Declare(
     llama_cpp
     GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
-    GIT_TAG ee445f93d8a0a5033a46d1960e901ef5caec9a41
+    GIT_TAG 1d1d9a9ed7a4f09c4225ea4cc8fd3bd1cf2c940f
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(llama_cpp)

@@ -6,6 +6,7 @@ import com.jesjobom.ararai.model.LocalModel
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.ArrayDeque
 
 class LlamaCppLocalLlmEngineTest {
     private val model = LocalModel(
@@ -30,6 +31,34 @@ class LlamaCppLocalLlmEngineTest {
         assertEquals(128, bridge.loadedContextTokens)
         assertEquals(0.7f, bridge.loadedTemperature)
         assertEquals(0.9f, bridge.loadedTopP)
+    }
+
+    @Test
+    fun `requests gpu layer offload by default`() = runTest {
+        val bridge = RecordingBridge()
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+
+        engine.load(model, config)
+
+        assertEquals(999, bridge.loadedGpuLayerCount)
+    }
+
+    @Test
+    fun `loads known invalid logits models cpu only`() = runTest {
+        val bridge = RecordingBridge()
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+
+        engine.load(
+            model.copy(id = "smollm2-135m-instruct-q4-k-m"),
+            config,
+        )
+        engine.unload()
+        engine.load(
+            model.copy(id = "gemma-4-e4b-it-q4-k-m"),
+            config,
+        )
+
+        assertEquals(listOf(0, 0), bridge.loadedGpuLayerCounts)
     }
 
     @Test
@@ -127,6 +156,73 @@ class LlamaCppLocalLlmEngineTest {
     }
 
     @Test
+    fun `retries cpu only when gpu generation returns invalid logits before tokens`() = runTest {
+        val bridge = RecordingBridge(
+            generationSteps = ArrayDeque(
+                listOf(
+                    GenerationStep(error = "Native sampler received invalid logits"),
+                    GenerationStep(tokens = listOf("ok")),
+                ),
+            ),
+        )
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+        engine.load(model, config)
+
+        engine.generate(PromptRequest("oi")).test {
+            assertEquals(GenerationEvent.Token("ok"), awaitItem())
+            assertEquals(GenerationEvent.Completed, awaitItem())
+            awaitComplete()
+        }
+
+        assertEquals(listOf(999, 0), bridge.loadedGpuLayerCounts)
+        assertEquals(listOf(42L), bridge.unloadedHandles)
+        assertEquals(listOf(42L, 43L), bridge.generatedHandles)
+    }
+
+    @Test
+    fun `reports cpu fallback failure when retry also returns invalid logits`() = runTest {
+        val bridge = RecordingBridge(
+            generationSteps = ArrayDeque(
+                listOf(
+                    GenerationStep(error = "Native sampler received invalid logits"),
+                    GenerationStep(error = "Native sampler received invalid logits"),
+                ),
+            ),
+        )
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+        engine.load(model, config)
+
+        engine.generate(PromptRequest("oi")).test {
+            assertEquals(
+                GenerationEvent.Failed("CPU fallback failed: Native sampler received invalid logits"),
+                awaitItem(),
+            )
+            awaitComplete()
+        }
+
+        assertEquals(listOf(999, 0), bridge.loadedGpuLayerCounts)
+    }
+
+    @Test
+    fun `does not retry cpu only after native generation emits tokens`() = runTest {
+        val bridge = RecordingBridge(
+            tokens = listOf("partial"),
+            generationError = "Native sampler received invalid logits",
+        )
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+        engine.load(model, config)
+
+        engine.generate(PromptRequest("oi")).test {
+            assertEquals(GenerationEvent.Token("partial"), awaitItem())
+            assertEquals(GenerationEvent.Failed("Native sampler received invalid logits"), awaitItem())
+            awaitComplete()
+        }
+
+        assertEquals(listOf(999), bridge.loadedGpuLayerCounts)
+        assertEquals(1, bridge.loadCount)
+    }
+
+    @Test
     fun `unloads loaded native handle`() = runTest {
         val bridge = RecordingBridge()
         val engine = LlamaCppLocalLlmEngine(bridge = bridge)
@@ -151,6 +247,7 @@ class LlamaCppLocalLlmEngineTest {
         private val tokens: List<String> = emptyList(),
         private val generationError: String? = null,
         private val formattedPrompt: String? = null,
+        private val generationSteps: ArrayDeque<GenerationStep> = ArrayDeque(),
     ) : LlamaNativeBridge {
         var loadedPath: String? = null
             private set
@@ -160,12 +257,16 @@ class LlamaCppLocalLlmEngineTest {
             private set
         var loadedTopP: Float? = null
             private set
+        var loadedGpuLayerCount: Int? = null
+            private set
+        val loadedGpuLayerCounts = mutableListOf<Int>()
         var loadCount: Int = 0
             private set
         var generatedPrompt: String? = null
             private set
         var generatedMaxTokens: Int? = null
             private set
+        val generatedHandles = mutableListOf<Long>()
         var formatRequestedPrompt: String? = null
             private set
         val unloadedHandles = mutableListOf<Long>()
@@ -176,13 +277,16 @@ class LlamaCppLocalLlmEngineTest {
             contextTokens: Int,
             temperature: Float,
             topP: Float,
+            gpuLayerCount: Int,
         ): Long {
             loadCount += 1
             loadedPath = modelPath
             loadedContextTokens = contextTokens
             loadedTemperature = temperature
             loadedTopP = topP
-            return 42L
+            loadedGpuLayerCount = gpuLayerCount
+            loadedGpuLayerCounts += gpuLayerCount
+            return 41L + loadCount
         }
 
         override fun formatChatPrompt(handle: Long, prompt: String): String? {
@@ -196,15 +300,21 @@ class LlamaCppLocalLlmEngineTest {
             maxTokens: Int,
             callback: LlamaTokenCallback,
         ): String? {
+            generatedHandles += handle
             generatedPrompt = prompt
             generatedMaxTokens = maxTokens
-            for (token in tokens) {
+            val step = if (generationSteps.isEmpty()) {
+                GenerationStep(tokens = tokens, error = generationError)
+            } else {
+                generationSteps.removeFirst()
+            }
+            for (token in step.tokens) {
                 if (!callback.onToken(token)) {
                     cancel(handle)
                     return null
                 }
             }
-            return generationError
+            return step.error
         }
 
         override fun cancel(handle: Long) {
@@ -215,5 +325,10 @@ class LlamaCppLocalLlmEngineTest {
             unloadedHandles += handle
         }
     }
+
+    private data class GenerationStep(
+        val tokens: List<String> = emptyList(),
+        val error: String? = null,
+    )
 
 }

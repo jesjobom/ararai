@@ -47,6 +47,7 @@ private enum class AppDestination {
 @Composable
 fun ArarAiApp(
     modelController: ModelCatalogController,
+    appVersionLabel: String,
 ) {
     val modelCatalogState by modelController.state.collectAsState()
     val startupState = modelCatalogState.selectedStartupState
@@ -79,6 +80,7 @@ fun ArarAiApp(
     when (destination) {
         AppDestination.Home -> HomeScreen(
             modelStatus = ModelStatusUiState.from(modelConfig, startupState),
+            appVersionLabel = appVersionLabel,
             onOpenChat = { destination = AppDestination.Chat },
             onOpenBenchmark = { destination = AppDestination.Benchmark },
             onOpenModelStatus = { destination = AppDestination.ModelStatus },
@@ -114,6 +116,7 @@ fun ArarAiApp(
 @Composable
 private fun HomeScreen(
     modelStatus: ModelStatusUiState,
+    appVersionLabel: String,
     onOpenChat: () -> Unit,
     onOpenBenchmark: () -> Unit,
     onOpenModelStatus: () -> Unit,
@@ -134,6 +137,11 @@ private fun HomeScreen(
             Text(
                 text = "Local AI hub",
                 style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = appVersionLabel,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
