@@ -36,6 +36,7 @@ class ModelCatalogController(
     private val appFilesRoot: File,
     private val downloader: ModelDownloader = ModelFileDownloader(appFilesRoot),
     private val resolver: ModelResolver = ModelResolver(appFilesRoot),
+    private val selectionStore: ModelSelectionStore = InMemoryModelSelectionStore(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
     private val downloadJobs = mutableMapOf<String, Job>()
@@ -43,8 +44,7 @@ class ModelCatalogController(
     private val _state = MutableStateFlow(
         ModelCatalogState(
             models = initialModels,
-            selectedModelId = initialModels.firstOrNull { it.state is ModelStartupState.Available }?.config?.id
-                ?: catalog.defaultModelId,
+            selectedModelId = restoredSelectedModelId(initialModels),
         ),
     )
     val state: StateFlow<ModelCatalogState> = _state.asStateFlow()
@@ -55,6 +55,7 @@ class ModelCatalogController(
 
     fun select(modelId: String) {
         require(catalog.models.any { it.id == modelId }) { "Unknown model: $modelId" }
+        selectionStore.saveSelectedModelId(modelId)
         _state.update { it.copy(selectedModelId = modelId) }
     }
 
@@ -94,6 +95,14 @@ class ModelCatalogController(
         if (defaultModel.state is ModelStartupState.Missing || defaultModel.state is ModelStartupState.Invalid) {
             startDownload(defaultModel.config)
         }
+    }
+
+    private fun restoredSelectedModelId(models: List<ManagedModelItem>): String {
+        val stored = selectionStore.selectedModelId()
+            ?.takeIf { modelId -> models.any { it.config.id == modelId } }
+        return stored
+            ?: models.firstOrNull { it.state is ModelStartupState.Available }?.config?.id
+            ?: catalog.defaultModelId
     }
 
     private fun resolve(config: ModelConfig): ModelStartupState =

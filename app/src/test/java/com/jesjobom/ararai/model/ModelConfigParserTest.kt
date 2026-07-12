@@ -69,6 +69,7 @@ class ModelConfigParserTest {
             """
             models.count=2
             models.defaultId=tiny
+            chat.systemPrompt=Be brief.
             models.0.id=tiny
             models.0.name=Tiny Model
             models.0.url=https://example.com/tiny.gguf
@@ -95,6 +96,7 @@ class ModelConfigParserTest {
         )
 
         assertEquals("tiny", catalog.defaultModelId)
+        assertEquals("Be brief.", catalog.chat.systemPrompt)
         assertEquals(2, catalog.models.size)
         assertEquals("Tiny Model", catalog.models[0].name)
         assertEquals("Small Model", catalog.models[1].name)

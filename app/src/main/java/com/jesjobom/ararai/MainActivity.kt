@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import com.jesjobom.ararai.chat.SqliteChatSessionStore
 import com.jesjobom.ararai.model.ModelConfigLoader
 import com.jesjobom.ararai.model.ModelCatalogController
 import com.jesjobom.ararai.model.ModelFileDownloader
+import com.jesjobom.ararai.model.SharedPreferencesModelSelectionStore
 import com.jesjobom.ararai.ui.ArarAiApp
 import com.jesjobom.ararai.ui.ArarAiTheme
 
@@ -22,7 +24,9 @@ class MainActivity : ComponentActivity() {
             catalog = modelCatalog,
             appFilesRoot = filesDir,
             downloader = ModelFileDownloader(appFilesRoot = filesDir),
+            selectionStore = SharedPreferencesModelSelectionStore(this),
         )
+        val chatSessionStore = SqliteChatSessionStore(this)
 
         setContent {
             ArarAiTheme {
@@ -32,6 +36,8 @@ class MainActivity : ComponentActivity() {
                 ) {
                     ArarAiApp(
                         modelController = modelController,
+                        chatSessionStore = chatSessionStore,
+                        systemPrompt = modelCatalog.chat.systemPrompt,
                         appVersionLabel = "v${BuildConfig.VERSION_NAME}",
                     )
                 }

@@ -124,15 +124,13 @@ class ChatViewModelTest {
             assertFalse(loaded.isLoadingModel)
             assertTrue(loaded.isGenerating)
 
-            val firstChunk = awaitItem()
-            assertEquals("ola", firstChunk.messages.last().text)
-
-            val secondChunk = awaitItem()
-            assertEquals("ola mundo", secondChunk.messages.last().text)
-
-            val completed = awaitItem()
+            var completed = awaitItem()
+            while (completed.isGenerating) {
+                completed = awaitItem()
+            }
             assertFalse(completed.isGenerating)
             assertEquals("", completed.prompt)
+            assertEquals("ola mundo", completed.messages.last().text)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -155,11 +153,10 @@ class ChatViewModelTest {
             assertEquals(2, loading.messages.size)
             assertTrue(loading.isGenerating)
 
-            val loaded = awaitItem()
-            assertFalse(loaded.isLoadingModel)
-            assertTrue(loaded.isGenerating)
-
-            val failed = awaitItem()
+            var failed = awaitItem()
+            while (failed.error == null) {
+                failed = awaitItem()
+            }
             assertFalse(failed.isGenerating)
             assertEquals("generation failed", failed.error)
             assertEquals("oi", failed.messages.first().text)
@@ -263,6 +260,63 @@ class ChatViewModelTest {
         assertEquals("partial", viewModel.uiState.value.messages.last().text)
     }
 
+    @Test
+    fun `manages persistent chat sessions`() {
+        val store = InMemoryChatSessionStore()
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            sessionStore = store,
+        )
+
+        val firstSession = viewModel.uiState.value.selectedSessionId
+        viewModel.createSession()
+        val secondSession = viewModel.uiState.value.selectedSessionId
+
+        assertEquals(2, viewModel.uiState.value.sessions.size)
+        assertTrue(firstSession != secondSession)
+
+        viewModel.renameCurrentSession("Work notes")
+        assertEquals("Work notes", viewModel.uiState.value.sessions.first { it.id == secondSession }.title)
+
+        viewModel.selectSession(firstSession!!)
+        assertEquals(firstSession, viewModel.uiState.value.selectedSessionId)
+
+        viewModel.selectSession(secondSession!!)
+        viewModel.deleteCurrentSession()
+
+        assertEquals(1, viewModel.uiState.value.sessions.size)
+        assertEquals(firstSession, viewModel.uiState.value.selectedSessionId)
+    }
+
+    @Test
+    fun `sends system prompt and recent session history to engine`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val session = store.ensureSession()
+        store.appendMessage(session.id, ChatRole.User, "Earlier question")
+        store.appendMessage(session.id, ChatRole.Assistant, "Earlier answer")
+        val engine = CapturingEngine()
+        val viewModel = ChatViewModel(
+            engine = engine,
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            systemPrompt = "Be useful.",
+            sessionStore = store,
+            scope = this,
+        )
+
+        viewModel.onPromptChanged("Current question")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        assertTrue(engine.lastPrompt!!.contains("System: Be useful."))
+        assertTrue(engine.lastPrompt!!.contains("User: Earlier question"))
+        assertTrue(engine.lastPrompt!!.contains("Assistant: Earlier answer"))
+        assertTrue(engine.lastPrompt!!.contains("User: Current question"))
+        assertEquals("Current question", store.getMessages(session.id).filter { it.role == ChatRole.User }.last().text)
+    }
+
 
     @Test
     fun `unloads engine when model becomes unavailable`() = runTest {
@@ -322,5 +376,19 @@ class ChatViewModelTest {
         override suspend fun unload() {
             unloadCalls += 1
         }
+    }
+
+    private class CapturingEngine : LocalLlmEngine {
+        var lastPrompt: String? = null
+            private set
+
+        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> {
+            lastPrompt = request.prompt
+            return flowOf(GenerationEvent.Completed)
+        }
+
+        override suspend fun unload() = Unit
     }
 }

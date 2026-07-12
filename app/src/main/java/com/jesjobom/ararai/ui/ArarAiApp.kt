@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.benchmark.BenchmarkResult
 import com.jesjobom.ararai.benchmark.BenchmarkUiState
 import com.jesjobom.ararai.benchmark.BenchmarkViewModel
+import com.jesjobom.ararai.chat.ChatSessionStore
 import com.jesjobom.ararai.chat.ChatViewModel
 import com.jesjobom.ararai.engine.ConfiguredLocalLlmEngine
 import com.jesjobom.ararai.model.ManagedModelItem
@@ -70,6 +71,8 @@ private enum class AppDestination {
 @Composable
 fun ArarAiApp(
     modelController: ModelCatalogController,
+    chatSessionStore: ChatSessionStore,
+    systemPrompt: String,
     appVersionLabel: String,
 ) {
     val modelCatalogState by modelController.state.collectAsState()
@@ -82,6 +85,8 @@ fun ArarAiApp(
             engine = ConfiguredLocalLlmEngine(),
             initialModel = availableState?.model,
             inferenceConfig = availableState?.inference ?: modelConfig.inference,
+            systemPrompt = systemPrompt,
+            sessionStore = chatSessionStore,
         )
     }
     val benchmarkViewModel = remember {

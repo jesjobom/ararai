@@ -16,7 +16,11 @@ object ModelConfigParser {
 
         if (count == null) {
             val model = properties.parseModel(modelPrefix = "model.", inferencePrefix = "inference.")
-            return ModelCatalog(defaultModelId = model.id, models = listOf(model))
+            return ModelCatalog(
+                defaultModelId = model.id,
+                models = listOf(model),
+                chat = properties.parseChatConfig(),
+            )
         }
 
         require(count > 0) { "models.count must be positive" }
@@ -31,8 +35,17 @@ object ModelConfigParser {
             ?.takeIf { it.isNotEmpty() }
             ?: models.first().id
 
-        return ModelCatalog(defaultModelId = defaultModelId, models = models)
+        return ModelCatalog(
+            defaultModelId = defaultModelId,
+            models = models,
+            chat = properties.parseChatConfig(),
+        )
     }
+
+    private fun Properties.parseChatConfig(): ChatConfig =
+        ChatConfig(
+            systemPrompt = optional("chat.systemPrompt", ModelCatalog.DEFAULT_SYSTEM_PROMPT),
+        )
 
     private fun Properties.parseModel(modelPrefix: String, inferencePrefix: String): ModelConfig =
         ModelConfig(

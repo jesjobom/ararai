@@ -65,6 +65,30 @@ class ModelCatalogControllerTest {
     }
 
     @Test
+    fun `restores selected model from local selection store`() = runTest {
+        val root = Files.createTempDirectory("ararai-catalog").toFile()
+        val optionalPath = root.toPath().resolve("models/optional.gguf")
+        optionalPath.parent.createDirectories()
+        optionalPath.writeBytes("optional".toByteArray())
+        val selectionStore = InMemoryModelSelectionStore("optional")
+
+        val controller = ModelCatalogController(
+            catalog = catalog(),
+            appFilesRoot = root,
+            downloader = ModelFileDownloader(appFilesRoot = root, byteSource = CatalogByteSource(emptyMap())),
+            selectionStore = selectionStore,
+            scope = this,
+        )
+
+        assertEquals("optional", controller.state.value.selectedModelId)
+
+        controller.select("default")
+
+        assertEquals("default", controller.state.value.selectedModelId)
+        assertEquals("default", selectionStore.selectedModelId())
+    }
+
+    @Test
     fun `delete removes an available model file and marks it missing`() = runTest {
         val root = Files.createTempDirectory("ararai-catalog").toFile()
         val controller = ModelCatalogController(

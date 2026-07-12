@@ -7,6 +7,10 @@ data class InferenceConfig(
     val topP: Float,
 )
 
+data class ChatConfig(
+    val systemPrompt: String,
+)
+
 enum class ModelRuntime(
     val configValue: String,
     val displayName: String,
@@ -66,6 +70,7 @@ data class ModelConfig(
 data class ModelCatalog(
     val defaultModelId: String,
     val models: List<ModelConfig>,
+    val chat: ChatConfig = ChatConfig(DEFAULT_SYSTEM_PROMPT),
 ) {
     init {
         require(models.isNotEmpty()) { "Model catalog must contain at least one model" }
@@ -75,6 +80,11 @@ data class ModelCatalog(
         require(models.any { it.id == defaultModelId }) {
             "Model catalog default model must exist"
         }
+    }
+
+    companion object {
+        const val DEFAULT_SYSTEM_PROMPT: String =
+            "You are ArarAI, a concise local assistant. Answer directly and ask for clarification when needed."
     }
 }
 

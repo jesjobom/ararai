@@ -5,6 +5,7 @@ import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptRequest
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.model.ModelCatalog
 import com.jesjobom.ararai.model.ModelStartupState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +21,9 @@ class ChatViewModel(
     private val engine: LocalLlmEngine,
     initialModel: LocalModel?,
     inferenceConfig: InferenceConfig,
+    private val systemPrompt: String = ModelCatalog.DEFAULT_SYSTEM_PROMPT,
+    private val sessionStore: ChatSessionStore = InMemoryChatSessionStore(),
+    private val promptContextBuilder: PromptContextBuilder = PromptContextBuilder(),
     initialModelStatus: String = if (initialModel == null) {
         "Model unavailable"
     } else {
@@ -30,9 +34,14 @@ class ChatViewModel(
     private var model = initialModel
     private var inferenceConfig = inferenceConfig
     private var generationJob: Job? = null
+    private var activeAssistantMessageId: String? = null
+    private val initialSession = sessionStore.ensureSession()
     private val _uiState = MutableStateFlow(
         ChatUiState(
             modelStatus = initialModelStatus,
+            sessions = sessionStore.listSessions().toUiState(),
+            selectedSessionId = initialSession.id,
+            messages = sessionStore.getMessages(initialSession.id).toChatMessages(),
         ),
     )
 
@@ -40,6 +49,66 @@ class ChatViewModel(
 
     fun onPromptChanged(prompt: String) {
         _uiState.update { it.copy(prompt = prompt, error = null) }
+    }
+
+    fun createSession() {
+        if (generationJob?.isActive == true) return
+        val session = sessionStore.createSession("New chat")
+        _uiState.update {
+            it.copy(
+                sessions = sessionStore.listSessions().toUiState(),
+                selectedSessionId = session.id,
+                messages = emptyList(),
+                prompt = "",
+                error = null,
+            )
+        }
+    }
+
+    fun selectSession(sessionId: String) {
+        if (generationJob?.isActive == true) return
+        if (sessionStore.listSessions().none { it.id == sessionId }) return
+        _uiState.update {
+            it.copy(
+                selectedSessionId = sessionId,
+                sessions = sessionStore.listSessions().toUiState(),
+                messages = sessionStore.getMessages(sessionId).toChatMessages(),
+                prompt = "",
+                error = null,
+            )
+        }
+    }
+
+    fun renameCurrentSession(title: String) {
+        val sessionId = _uiState.value.selectedSessionId ?: return
+        sessionStore.renameSession(sessionId, title)
+        _uiState.update { it.copy(sessions = sessionStore.listSessions().toUiState(), error = null) }
+    }
+
+    fun deleteCurrentSession() {
+        val sessionId = _uiState.value.selectedSessionId ?: return
+        deleteSession(sessionId)
+    }
+
+    fun deleteSession(sessionId: String) {
+        val current = _uiState.value
+        if (current.sessions.size <= 1 || generationJob?.isActive == true) return
+
+        sessionStore.deleteSession(sessionId)
+        val next = if (current.selectedSessionId == sessionId) {
+            sessionStore.ensureSession()
+        } else {
+            sessionStore.listSessions().first { it.id == current.selectedSessionId }
+        }
+        _uiState.update {
+            it.copy(
+                sessions = sessionStore.listSessions().toUiState(),
+                selectedSessionId = next.id,
+                messages = sessionStore.getMessages(next.id).toChatMessages(),
+                prompt = "",
+                error = null,
+            )
+        }
     }
 
     fun onModelStartupState(state: ModelStartupState) {
@@ -126,16 +195,27 @@ class ChatViewModel(
         if (!current.canSubmit) return
         if (generationJob?.isActive == true) return
 
+        val sessionId = current.selectedSessionId ?: return
         val modelForRequest = model
         val inferenceForRequest = inferenceConfig
         val submittedPrompt = current.prompt.trim()
-        val userMessage = ChatMessage(ChatRole.User, submittedPrompt)
-        val assistantMessage = ChatMessage(ChatRole.Assistant, "")
+        maybeTitleSession(sessionId, submittedPrompt)
+        val history = sessionStore.getMessages(sessionId).toChatMessages()
+        val requestPrompt = promptContextBuilder.build(
+            systemPrompt = systemPrompt,
+            history = history,
+            userPrompt = submittedPrompt,
+            inferenceConfig = inferenceForRequest,
+        )
+        val userMessage = sessionStore.appendMessage(sessionId, ChatRole.User, submittedPrompt).toChatMessage()
+        val assistantMessage = sessionStore.appendMessage(sessionId, ChatRole.Assistant, "").toChatMessage()
+        activeAssistantMessageId = assistantMessage.id
 
         _uiState.update {
             it.copy(
                 prompt = submittedPrompt,
-                messages = it.messages + userMessage + assistantMessage,
+                sessions = sessionStore.listSessions().toUiState(),
+                messages = sessionStore.getMessages(sessionId).toChatMessages(),
                 isLoadingModel = true,
                 isGenerating = true,
                 error = null,
@@ -158,7 +238,7 @@ class ChatViewModel(
                 engine.load(modelForRequest, inferenceForRequest)
                 _uiState.update { it.copy(isLoadingModel = false) }
 
-                engine.generate(PromptRequest(submittedPrompt)).collect { event ->
+                engine.generate(PromptRequest(requestPrompt)).collect { event ->
                     when (event) {
                         is GenerationEvent.Token -> appendAssistantToken(event.text)
                         is GenerationEvent.Failed -> {
@@ -176,6 +256,7 @@ class ChatViewModel(
                                     isLoadingModel = false,
                                     isGenerating = false,
                                     prompt = "",
+                                    sessions = sessionStore.listSessions().toUiState(),
                                 )
                             }
                         }
@@ -220,6 +301,7 @@ class ChatViewModel(
     private fun stopActiveGeneration() {
         generationJob?.cancel()
         generationJob = null
+        activeAssistantMessageId = null
     }
 
     private fun unloadEngine() {
@@ -229,16 +311,32 @@ class ChatViewModel(
     }
 
     private fun appendAssistantToken(token: String) {
+        val assistantMessageId = activeAssistantMessageId ?: return
         _uiState.update { state ->
             val updatedMessages = state.messages.toMutableList()
-            val lastAssistantIndex = updatedMessages.indexOfLast { it.role == ChatRole.Assistant }
-            if (lastAssistantIndex >= 0) {
-                val currentAssistant = updatedMessages[lastAssistantIndex]
-                updatedMessages[lastAssistantIndex] = currentAssistant.copy(
-                    text = currentAssistant.text + token,
-                )
+            val assistantIndex = updatedMessages.indexOfLast { it.id == assistantMessageId }
+            if (assistantIndex >= 0) {
+                val currentAssistant = updatedMessages[assistantIndex]
+                val updatedAssistant = currentAssistant.copy(text = currentAssistant.text + token)
+                updatedMessages[assistantIndex] = updatedAssistant
+                sessionStore.updateMessage(assistantMessageId, updatedAssistant.text)
             }
             state.copy(messages = updatedMessages)
         }
     }
+
+    private fun maybeTitleSession(sessionId: String, submittedPrompt: String) {
+        val session = sessionStore.listSessions().firstOrNull { it.id == sessionId } ?: return
+        if (session.title != "New chat" || sessionStore.getMessages(sessionId).isNotEmpty()) return
+        sessionStore.renameSession(sessionId, submittedPrompt.take(42))
+    }
+
+    private fun List<ChatSession>.toUiState(): List<ChatSessionUiState> =
+        map { ChatSessionUiState(id = it.id, title = it.title) }
+
+    private fun List<StoredChatMessage>.toChatMessages(): List<ChatMessage> =
+        map { it.toChatMessage() }
+
+    private fun StoredChatMessage.toChatMessage(): ChatMessage =
+        ChatMessage(role = role, text = text, id = id)
 }
