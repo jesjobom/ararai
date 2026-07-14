@@ -1,5 +1,7 @@
 package com.jesjobom.ararai.chat
 
+import com.jesjobom.ararai.engine.PromptChatMessage
+import com.jesjobom.ararai.engine.PromptChatRole
 import com.jesjobom.ararai.model.InferenceConfig
 
 class PromptContextBuilder(
@@ -10,34 +12,37 @@ class PromptContextBuilder(
         history: List<ChatMessage>,
         userPrompt: String,
         inferenceConfig: InferenceConfig,
-    ): String {
-        val header = "System: ${systemPrompt.trim()}\n\n"
-        val currentTurn = "User: ${userPrompt.trim()}\nAssistant:"
+    ): List<PromptChatMessage> {
+        val systemMessage = PromptChatMessage(PromptChatRole.System, systemPrompt.trim())
+        val currentTurn = PromptChatMessage(PromptChatRole.User, userPrompt.trim())
         val maxChars = ((inferenceConfig.contextTokens - inferenceConfig.maxTokens).coerceAtLeast(32) * charsPerToken)
-            .coerceAtLeast(header.length + currentTurn.length)
+            .coerceAtLeast(systemMessage.estimatedLength() + currentTurn.estimatedLength())
         val selectedHistory = mutableListOf<ChatMessage>()
-        var used = header.length + currentTurn.length
+        var used = systemMessage.estimatedLength() + currentTurn.estimatedLength()
 
         history.asReversed().forEach { message ->
-            val formattedLength = message.toPromptLine().length
+            val formattedLength = message.toPromptMessage().estimatedLength()
             if (used + formattedLength <= maxChars) {
                 selectedHistory += message
                 used += formattedLength
             }
         }
 
-        return buildString {
-            append(header)
-            selectedHistory.asReversed().forEach { append(it.toPromptLine()) }
-            append(currentTurn)
+        return buildList {
+            if (systemMessage.text.isNotBlank()) add(systemMessage)
+            selectedHistory.asReversed().forEach { add(it.toPromptMessage()) }
+            if (currentTurn.text.isNotBlank()) add(currentTurn)
         }
     }
 
-    private fun ChatMessage.toPromptLine(): String {
+    private fun ChatMessage.toPromptMessage(): PromptChatMessage {
         val role = when (role) {
-            ChatRole.User -> "User"
-            ChatRole.Assistant -> "Assistant"
+            ChatRole.User -> PromptChatRole.User
+            ChatRole.Assistant -> PromptChatRole.Assistant
         }
-        return "$role: ${text.trim()}\n"
+        return PromptChatMessage(role, text.trim())
     }
+
+    private fun PromptChatMessage.estimatedLength(): Int =
+        role.transcriptLabel.length + text.length + 3
 }

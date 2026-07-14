@@ -2,7 +2,9 @@ package com.jesjobom.ararai.chat
 
 import com.jesjobom.ararai.engine.GenerationEvent
 import com.jesjobom.ararai.engine.LocalLlmEngine
+import com.jesjobom.ararai.engine.PromptChatMessage
 import com.jesjobom.ararai.engine.PromptRequest
+import com.jesjobom.ararai.engine.toPlainChatPrompt
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelCatalog
@@ -269,11 +271,12 @@ class ChatViewModel(
         val submittedTitle = submittedContent.displayText
         maybeTitleSession(sessionId, submittedTitle)
         val history = sessionStore.getMessages(sessionId).toChatMessages()
-        val requestContent = submittedContent.toRequestContent(
+        val requestMessages = submittedContent.toRequestMessages(
             systemPrompt = systemPrompt,
             history = history,
             inferenceConfig = inferenceForRequest,
         )
+        val requestContent = submittedContent.toRequestContent(requestMessages)
         val userMessage = sessionStore.appendMessage(sessionId, ChatRole.User, submittedContent).toChatMessage()
         val assistantMessage = sessionStore.appendMessage(sessionId, ChatRole.Assistant, "").toChatMessage()
         activeAssistantMessageId = assistantMessage.id
@@ -305,7 +308,7 @@ class ChatViewModel(
                 engine.load(modelForRequest, inferenceForRequest)
                 _uiState.update { it.copy(isLoadingModel = false) }
 
-                engine.generate(PromptRequest(requestContent)).collect { event ->
+                engine.generate(PromptRequest(requestContent, requestMessages)).collect { event ->
                     when (event) {
                         is GenerationEvent.Token -> appendAssistantToken(event.text)
                         is GenerationEvent.Failed -> {
@@ -409,22 +412,26 @@ class ChatViewModel(
                 imageAttachments = imageAttachments,
             )
 
-    private fun MessageContent.toRequestContent(
+    private fun MessageContent.toRequestMessages(
         systemPrompt: String,
         history: List<ChatMessage>,
         inferenceConfig: InferenceConfig,
-    ): MessageContent =
+    ): List<PromptChatMessage> =
         when (this) {
-            is MessageContent.TextPrompt -> copy(
-                text = promptContextBuilder.build(
-                    systemPrompt = systemPrompt,
-                    history = history,
-                    userPrompt = text.ifBlank {
-                        if (imageAttachments.isNotEmpty()) "Describe this image." else text
-                    },
-                    inferenceConfig = inferenceConfig,
-                ),
+            is MessageContent.TextPrompt -> promptContextBuilder.build(
+                systemPrompt = systemPrompt,
+                history = history,
+                userPrompt = text.ifBlank {
+                    if (imageAttachments.isNotEmpty()) "Describe this image." else text
+                },
+                inferenceConfig = inferenceConfig,
             )
+            is MessageContent.AudioPromptContent -> emptyList()
+        }
+
+    private fun MessageContent.toRequestContent(messages: List<PromptChatMessage>): MessageContent =
+        when (this) {
+            is MessageContent.TextPrompt -> copy(text = messages.toPlainChatPrompt())
             is MessageContent.AudioPromptContent -> this
         }
 

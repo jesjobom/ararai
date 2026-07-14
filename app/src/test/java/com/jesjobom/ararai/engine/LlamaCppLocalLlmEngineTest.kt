@@ -36,6 +36,9 @@ class LlamaCppLocalLlmEngineTest {
         assertEquals(128, bridge.loadedContextTokens)
         assertEquals(0.7f, bridge.loadedTemperature)
         assertEquals(0.9f, bridge.loadedTopP)
+        assertEquals(40, bridge.loadedTopK)
+        assertEquals(0.05f, bridge.loadedMinP)
+        assertEquals(1.10f, bridge.loadedRepeatPenalty)
     }
 
     @Test
@@ -89,7 +92,7 @@ class LlamaCppLocalLlmEngineTest {
             awaitComplete()
         }
 
-        assertEquals("oi", bridge.generatedPrompt)
+        assertEquals("User: oi\nAssistant:", bridge.generatedPrompt)
     }
 
     @Test
@@ -139,7 +142,7 @@ class LlamaCppLocalLlmEngineTest {
             awaitComplete()
         }
 
-        assertEquals("oi", bridge.formatRequestedPrompt)
+        assertEquals(listOf(PromptChatMessage(PromptChatRole.User, "oi")), bridge.formatRequestedMessages)
         assertEquals("<chat><user>oi</user><assistant>", bridge.generatedPrompt)
     }
 
@@ -155,7 +158,7 @@ class LlamaCppLocalLlmEngineTest {
             awaitComplete()
         }
 
-        assertEquals("oi", bridge.generatedPrompt)
+        assertEquals("User: oi\nAssistant:", bridge.generatedPrompt)
     }
 
     @Test
@@ -296,6 +299,12 @@ class LlamaCppLocalLlmEngineTest {
             private set
         var loadedTopP: Float? = null
             private set
+        var loadedTopK: Int? = null
+            private set
+        var loadedMinP: Float? = null
+            private set
+        var loadedRepeatPenalty: Float? = null
+            private set
         var loadedGpuLayerCount: Int? = null
             private set
         val loadedGpuLayerCounts = mutableListOf<Int>()
@@ -306,7 +315,7 @@ class LlamaCppLocalLlmEngineTest {
         var generatedMaxTokens: Int? = null
             private set
         val generatedHandles = mutableListOf<Long>()
-        var formatRequestedPrompt: String? = null
+        var formatRequestedMessages: List<PromptChatMessage>? = null
             private set
         val unloadedHandles = mutableListOf<Long>()
         val cancelledHandles = mutableListOf<Long>()
@@ -316,6 +325,9 @@ class LlamaCppLocalLlmEngineTest {
             contextTokens: Int,
             temperature: Float,
             topP: Float,
+            topK: Int,
+            minP: Float,
+            repeatPenalty: Float,
             gpuLayerCount: Int,
         ): Long {
             loadCount += 1
@@ -323,13 +335,16 @@ class LlamaCppLocalLlmEngineTest {
             loadedContextTokens = contextTokens
             loadedTemperature = temperature
             loadedTopP = topP
+            loadedTopK = topK
+            loadedMinP = minP
+            loadedRepeatPenalty = repeatPenalty
             loadedGpuLayerCount = gpuLayerCount
             loadedGpuLayerCounts += gpuLayerCount
             return 41L + loadCount
         }
 
-        override fun formatChatPrompt(handle: Long, prompt: String): String? {
-            formatRequestedPrompt = prompt
+        override fun formatChatPrompt(handle: Long, messages: List<PromptChatMessage>): String? {
+            formatRequestedMessages = messages
             return formattedPrompt
         }
 

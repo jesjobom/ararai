@@ -71,6 +71,9 @@ object ModelConfigParser {
                 maxTokens = required("${inferencePrefix}maxTokens").toInt(),
                 temperature = required("${inferencePrefix}temperature").toFloat(),
                 topP = required("${inferencePrefix}topP").toFloat(),
+                topK = optional("${inferencePrefix}topK", "40").toInt(),
+                minP = optional("${inferencePrefix}minP", "0.05").toFloat(),
+                repeatPenalty = optional("${inferencePrefix}repeatPenalty", "1.10").toFloat(),
             ),
             inputCapabilities = ModelInputCapabilities(
                 text = optionalBoolean("${modelPrefix}capabilities.input.text", defaultValue = true),
@@ -137,6 +140,15 @@ object ModelConfigParser {
         }
         require(inference.topP in 0f..1f) {
             "inference.topP must be between 0 and 1"
+        }
+        require(inference.topK > 0) {
+            "inference.topK must be positive"
+        }
+        require(inference.minP in 0f..1f) {
+            "inference.minP must be between 0 and 1"
+        }
+        require(inference.repeatPenalty >= 0f) {
+            "inference.repeatPenalty must be non-negative"
         }
         require(inputCapabilities.text || inputCapabilities.image || inputCapabilities.audio) {
             "model capabilities must enable at least one input modality"

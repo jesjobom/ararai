@@ -16,10 +16,7 @@ namespace {
 
 constexpr const char * LOG_TAG = "ArarAI.NativeLlm";
 constexpr const char * INVALID_LOGITS_ERROR = "Native sampler received invalid logits";
-constexpr int TOP_K = 40;
-constexpr float MIN_P = 0.05f;
 constexpr int REPEAT_PENALTY_LAST_N = 64;
-constexpr float REPEAT_PENALTY = 1.10f;
 
 struct NativeLlmHandle {
     llama_model * model = nullptr;
@@ -237,6 +234,9 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_loadModel(
     jint context_tokens,
     jfloat temperature,
     jfloat top_p,
+    jint top_k,
+    jfloat min_p,
+    jfloat repeat_penalty,
     jint gpu_layer_count
 ) {
     initialize_llama();
@@ -297,13 +297,17 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_loadModel(
     }
 
     handle->sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    llama_sampler_chain_add(handle->sampler, llama_sampler_init_top_k(TOP_K));
+    llama_sampler_chain_add(handle->sampler, llama_sampler_init_top_k(std::max(static_cast<int>(top_k), 1)));
     llama_sampler_chain_add(handle->sampler, llama_sampler_init_top_p(top_p, 1));
-    llama_sampler_chain_add(handle->sampler, llama_sampler_init_min_p(MIN_P, 1));
-    llama_sampler_chain_add(
-        handle->sampler,
-        llama_sampler_init_penalties(REPEAT_PENALTY_LAST_N, REPEAT_PENALTY, 0.0f, 0.0f)
-    );
+    if (min_p > 0.0f) {
+        llama_sampler_chain_add(handle->sampler, llama_sampler_init_min_p(min_p, 1));
+    }
+    if (repeat_penalty > 0.0f && repeat_penalty != 1.0f) {
+        llama_sampler_chain_add(
+            handle->sampler,
+            llama_sampler_init_penalties(REPEAT_PENALTY_LAST_N, repeat_penalty, 0.0f, 0.0f)
+        );
+    }
     llama_sampler_chain_add(handle->sampler, llama_sampler_init_temp(temperature));
     llama_sampler_chain_add(handle->sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
@@ -311,14 +315,18 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_loadModel(
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_formatChatPrompt(
+Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_formatStructuredChatPrompt(
     JNIEnv * env,
     jobject,
     jlong native_handle,
-    jstring prompt
+    jobjectArray roles,
+    jobjectArray contents
 ) {
     NativeLlmHandle * handle = from_handle(native_handle);
     if (handle == nullptr || handle->model == nullptr) {
+        return nullptr;
+    }
+    if (roles == nullptr || contents == nullptr) {
         return nullptr;
     }
 
@@ -327,16 +335,43 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_formatChatPrompt(
         return nullptr;
     }
 
-    const std::string prompt_text = to_string(env, prompt);
-    const llama_chat_message message = {
-        "user",
-        prompt_text.c_str(),
-    };
+    const jsize role_count = env->GetArrayLength(roles);
+    const jsize content_count = env->GetArrayLength(contents);
+    if (role_count <= 0 || role_count != content_count) {
+        return nullptr;
+    }
+
+    std::vector<std::string> role_values;
+    std::vector<std::string> content_values;
+    std::vector<llama_chat_message> messages;
+    role_values.reserve(static_cast<size_t>(role_count));
+    content_values.reserve(static_cast<size_t>(role_count));
+    messages.reserve(static_cast<size_t>(role_count));
+
+    for (jsize index = 0; index < role_count; ++index) {
+        auto role_value = static_cast<jstring>(env->GetObjectArrayElement(roles, index));
+        auto content_value = static_cast<jstring>(env->GetObjectArrayElement(contents, index));
+        role_values.push_back(to_string(env, role_value));
+        content_values.push_back(to_string(env, content_value));
+        env->DeleteLocalRef(role_value);
+        env->DeleteLocalRef(content_value);
+
+        if (role_values.back().empty() || content_values.back().empty()) {
+            continue;
+        }
+        messages.push_back(llama_chat_message{
+            role_values.back().c_str(),
+            content_values.back().c_str(),
+        });
+    }
+    if (messages.empty()) {
+        return nullptr;
+    }
 
     int formatted_size = llama_chat_apply_template(
         chat_template,
-        &message,
-        1,
+        messages.data(),
+        static_cast<int32_t>(messages.size()),
         true,
         nullptr,
         0
@@ -348,8 +383,8 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_formatChatPrompt(
     std::vector<char> formatted(static_cast<size_t>(formatted_size));
     int actual_size = llama_chat_apply_template(
         chat_template,
-        &message,
-        1,
+        messages.data(),
+        static_cast<int32_t>(messages.size()),
         true,
         formatted.data(),
         static_cast<int32_t>(formatted.size())
@@ -358,8 +393,8 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_formatChatPrompt(
         formatted.resize(static_cast<size_t>(actual_size));
         actual_size = llama_chat_apply_template(
             chat_template,
-            &message,
-            1,
+            messages.data(),
+            static_cast<int32_t>(messages.size()),
             true,
             formatted.data(),
             static_cast<int32_t>(formatted.size())
@@ -369,7 +404,7 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_formatChatPrompt(
         return nullptr;
     }
 
-    return env->NewStringUTF(std::string(formatted.data(), static_cast<size_t>(actual_size)).c_str());
+    return utf8_to_jstring(env, std::string(formatted.data(), static_cast<size_t>(actual_size)));
 }
 
 extern "C" JNIEXPORT jstring JNICALL

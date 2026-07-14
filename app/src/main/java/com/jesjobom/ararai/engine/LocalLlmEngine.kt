@@ -15,8 +15,9 @@ interface LocalLlmEngine {
 
 data class PromptRequest(
     val content: MessageContent,
+    val chatMessages: List<PromptChatMessage> = defaultChatMessages(content),
 ) {
-    constructor(prompt: String) : this(MessageContent.TextPrompt(prompt))
+    constructor(prompt: String) : this(MessageContent.TextPrompt(prompt), userChatMessages(prompt))
 
     val prompt: String
         get() = when (content) {
@@ -32,7 +33,52 @@ data class PromptRequest(
 
     val audioPrompt: AudioPrompt?
         get() = (content as? MessageContent.AudioPromptContent)?.audio
+
+    val plainChatPrompt: String
+        get() = chatMessages.toPlainChatPrompt()
+
+    companion object {
+        private fun defaultChatMessages(content: MessageContent): List<PromptChatMessage> =
+            when (content) {
+                is MessageContent.TextPrompt -> userChatMessages(content.text)
+                is MessageContent.AudioPromptContent -> emptyList()
+            }
+
+        private fun userChatMessages(prompt: String): List<PromptChatMessage> =
+            if (prompt.isBlank()) {
+                emptyList()
+            } else {
+                listOf(PromptChatMessage(PromptChatRole.User, prompt))
+            }
+    }
 }
+
+data class PromptChatMessage(
+    val role: PromptChatRole,
+    val text: String,
+)
+
+enum class PromptChatRole(
+    val templateRole: String,
+    val transcriptLabel: String,
+) {
+    System("system", "System"),
+    User("user", "User"),
+    Assistant("assistant", "Assistant"),
+}
+
+fun List<PromptChatMessage>.toPlainChatPrompt(): String =
+    this.filter { it.text.isNotBlank() }.let { messages ->
+        buildString {
+            messages.forEach { message ->
+                append(message.role.transcriptLabel)
+                append(": ")
+                append(message.text.trim())
+                append('\n')
+            }
+            append("Assistant:")
+        }
+    }
 
 sealed interface GenerationEvent {
     data class Token(val text: String) : GenerationEvent

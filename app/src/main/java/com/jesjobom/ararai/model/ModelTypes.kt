@@ -5,6 +5,9 @@ data class InferenceConfig(
     val maxTokens: Int = 128,
     val temperature: Float,
     val topP: Float,
+    val topK: Int = 40,
+    val minP: Float = 0.05f,
+    val repeatPenalty: Float = 1.10f,
 )
 
 data class ChatConfig(

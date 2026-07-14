@@ -1,14 +1,17 @@
 package com.jesjobom.ararai.chat
 
 import com.jesjobom.ararai.model.InferenceConfig
+import com.jesjobom.ararai.engine.PromptChatMessage
+import com.jesjobom.ararai.engine.PromptChatRole
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PromptContextBuilderTest {
     @Test
     fun `builds prompt with system prompt history and current user turn`() {
-        val prompt = PromptContextBuilder().build(
+        val messages = PromptContextBuilder().build(
             systemPrompt = "Be useful.",
             history = listOf(
                 ChatMessage(ChatRole.User, "Earlier question"),
@@ -18,15 +21,20 @@ class PromptContextBuilderTest {
             inferenceConfig = InferenceConfig(contextTokens = 128, maxTokens = 16, temperature = 0.7f, topP = 0.9f),
         )
 
-        assertTrue(prompt.contains("System: Be useful."))
-        assertTrue(prompt.contains("User: Earlier question"))
-        assertTrue(prompt.contains("Assistant: Earlier answer"))
-        assertTrue(prompt.endsWith("User: Current question\nAssistant:"))
+        assertEquals(
+            listOf(
+                PromptChatMessage(PromptChatRole.System, "Be useful."),
+                PromptChatMessage(PromptChatRole.User, "Earlier question"),
+                PromptChatMessage(PromptChatRole.Assistant, "Earlier answer"),
+                PromptChatMessage(PromptChatRole.User, "Current question"),
+            ),
+            messages,
+        )
     }
 
     @Test
     fun `keeps newest history inside budget`() {
-        val prompt = PromptContextBuilder(charsPerToken = 1).build(
+        val messages = PromptContextBuilder(charsPerToken = 1).build(
             systemPrompt = "Short.",
             history = listOf(
                 ChatMessage(ChatRole.User, "old message that should be omitted"),
@@ -35,9 +43,10 @@ class PromptContextBuilderTest {
             userPrompt = "new question",
             inferenceConfig = InferenceConfig(contextTokens = 70, maxTokens = 1, temperature = 0.7f, topP = 0.9f),
         )
+        val text = messages.joinToString("\n") { it.text }
 
-        assertFalse(prompt.contains("old message that should be omitted"))
-        assertTrue(prompt.contains("Assistant: new reply"))
-        assertTrue(prompt.contains("User: new question"))
+        assertFalse(text.contains("old message that should be omitted"))
+        assertTrue(messages.contains(PromptChatMessage(PromptChatRole.Assistant, "new reply")))
+        assertTrue(messages.contains(PromptChatMessage(PromptChatRole.User, "new question")))
     }
 }

@@ -4,6 +4,8 @@ import app.cash.turbine.test
 import com.jesjobom.ararai.engine.FakeLocalLlmEngine
 import com.jesjobom.ararai.engine.GenerationEvent
 import com.jesjobom.ararai.engine.LocalLlmEngine
+import com.jesjobom.ararai.engine.PromptChatMessage
+import com.jesjobom.ararai.engine.PromptChatRole
 import com.jesjobom.ararai.engine.PromptRequest
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
@@ -324,10 +326,15 @@ class ChatViewModelTest {
         viewModel.submitPrompt()
         runCurrent()
 
-        assertTrue(engine.lastPrompt!!.contains("System: Be useful."))
-        assertTrue(engine.lastPrompt!!.contains("User: Earlier question"))
-        assertTrue(engine.lastPrompt!!.contains("Assistant: Earlier answer"))
-        assertTrue(engine.lastPrompt!!.contains("User: Current question"))
+        assertEquals(
+            listOf(
+                PromptChatMessage(PromptChatRole.System, "Be useful."),
+                PromptChatMessage(PromptChatRole.User, "Earlier question"),
+                PromptChatMessage(PromptChatRole.Assistant, "Earlier answer"),
+                PromptChatMessage(PromptChatRole.User, "Current question"),
+            ),
+            engine.lastRequest!!.chatMessages,
+        )
         assertEquals("Current question", store.getMessages(session.id).filter { it.role == ChatRole.User }.last().text)
     }
 

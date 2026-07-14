@@ -23,6 +23,9 @@ class LlamaCppLocalLlmEngine(
     private var loadedContextTokens: Int = 0
     private var loadedTemperature: Float = 0f
     private var loadedTopP: Float = 0f
+    private var loadedTopK: Int = 0
+    private var loadedMinP: Float = 0f
+    private var loadedRepeatPenalty: Float = 0f
     private var loadedMaxTokens: Int = DEFAULT_MAX_TOKENS
     private var loadedGpuLayerCount: Int = 0
 
@@ -112,6 +115,9 @@ class LlamaCppLocalLlmEngine(
             loadedContextTokens = 0
             loadedTemperature = 0f
             loadedTopP = 0f
+            loadedTopK = 0
+            loadedMinP = 0f
+            loadedRepeatPenalty = 0f
             loadedGpuLayerCount = 0
             current
         }
@@ -134,6 +140,9 @@ class LlamaCppLocalLlmEngine(
                 contextTokens = config.contextTokens,
                 temperature = config.temperature,
                 topP = config.topP,
+                topK = config.topK,
+                minP = config.minP,
+                repeatPenalty = config.repeatPenalty,
                 gpuLayerCount = gpuLayerCount,
             )
         }
@@ -146,6 +155,9 @@ class LlamaCppLocalLlmEngine(
             contextTokens = config.contextTokens,
             temperature = config.temperature,
             topP = config.topP,
+            topK = config.topK,
+            minP = config.minP,
+            repeatPenalty = config.repeatPenalty,
             maxTokens = config.maxTokens,
             gpuLayerCount = gpuLayerCount,
         )
@@ -156,6 +168,9 @@ class LlamaCppLocalLlmEngine(
             loadedContextTokens = state.contextTokens
             loadedTemperature = state.temperature
             loadedTopP = state.topP
+            loadedTopK = state.topK
+            loadedMinP = state.minP
+            loadedRepeatPenalty = state.repeatPenalty
             loadedMaxTokens = state.maxTokens
             loadedGpuLayerCount = state.gpuLayerCount
         }
@@ -189,6 +204,9 @@ class LlamaCppLocalLlmEngine(
                 maxTokens = state.maxTokens,
                 temperature = state.temperature,
                 topP = state.topP,
+                topK = state.topK,
+                minP = state.minP,
+                repeatPenalty = state.repeatPenalty,
             ),
             gpuLayerCount = CPU_ONLY_LAYER_COUNT,
         )
@@ -207,7 +225,10 @@ class LlamaCppLocalLlmEngine(
             )
         }
         val textPrompt = request.textPrompt ?: request.prompt
-        val prompt = bridge.formatChatPrompt(state.handle, textPrompt) ?: textPrompt
+        val chatMessages = request.chatMessages.ifEmpty {
+            listOf(PromptChatMessage(PromptChatRole.User, textPrompt))
+        }
+        val prompt = bridge.formatChatPrompt(state.handle, chatMessages) ?: chatMessages.toPlainChatPrompt()
         var emittedTokens = 0
         val error = bridge.generate(
             handle = state.handle,
@@ -236,6 +257,9 @@ class LlamaCppLocalLlmEngine(
             contextTokens = loadedContextTokens,
             temperature = loadedTemperature,
             topP = loadedTopP,
+            topK = loadedTopK,
+            minP = loadedMinP,
+            repeatPenalty = loadedRepeatPenalty,
             maxTokens = loadedMaxTokens,
             gpuLayerCount = loadedGpuLayerCount,
         )
@@ -248,6 +272,9 @@ class LlamaCppLocalLlmEngine(
         val contextTokens: Int,
         val temperature: Float,
         val topP: Float,
+        val topK: Int,
+        val minP: Float,
+        val repeatPenalty: Float,
         val maxTokens: Int,
         val gpuLayerCount: Int,
     )
@@ -287,6 +314,9 @@ interface LlamaNativeBridge {
         contextTokens: Int,
         temperature: Float,
         topP: Float,
+        topK: Int,
+        minP: Float,
+        repeatPenalty: Float,
         gpuLayerCount: Int,
     ): Long
 
@@ -297,7 +327,7 @@ interface LlamaNativeBridge {
         callback: LlamaTokenCallback,
     ): String?
 
-    fun formatChatPrompt(handle: Long, prompt: String): String?
+    fun formatChatPrompt(handle: Long, messages: List<PromptChatMessage>): String?
 
     fun cancel(handle: Long)
 
@@ -314,6 +344,9 @@ object JniLlamaNativeBridge : LlamaNativeBridge {
         contextTokens: Int,
         temperature: Float,
         topP: Float,
+        topK: Int,
+        minP: Float,
+        repeatPenalty: Float,
         gpuLayerCount: Int,
     ): Long
 
@@ -324,7 +357,18 @@ object JniLlamaNativeBridge : LlamaNativeBridge {
         callback: LlamaTokenCallback,
     ): String?
 
-    external override fun formatChatPrompt(handle: Long, prompt: String): String?
+    override fun formatChatPrompt(handle: Long, messages: List<PromptChatMessage>): String? =
+        formatStructuredChatPrompt(
+            handle = handle,
+            roles = messages.map { it.role.templateRole }.toTypedArray(),
+            contents = messages.map { it.text }.toTypedArray(),
+        )
+
+    private external fun formatStructuredChatPrompt(
+        handle: Long,
+        roles: Array<String>,
+        contents: Array<String>,
+    ): String?
 
     external override fun cancel(handle: Long)
 
