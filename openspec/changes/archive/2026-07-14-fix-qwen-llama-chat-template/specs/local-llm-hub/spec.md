@@ -26,18 +26,3 @@ message.
 - **THEN** the app falls back to a plain transcript representation
 - **AND** the fallback transcript preserves the same chronological roles and
   current user prompt.
-
-### Requirement: Qwen3.5 GGUF Compatibility Defaults
-
-Configured Qwen3.5 GGUF entries SHALL use runtime defaults intended to avoid
-known degeneracy from insufficient context or incompatible sampler settings.
-
-#### Scenario: Load Qwen3.5 GGUF defaults
-
-- **GIVEN** the configured catalog includes a Qwen3.5 GGUF model
-- **WHEN** the app parses the catalog
-- **THEN** the Qwen entry uses CPU-only acceleration
-- **AND** the configured context is at least 8192 tokens
-- **AND** top-k is configured as 20 for llama.cpp sampling
-- **AND** min-p is disabled for that model
-- **AND** repeat penalty is disabled for that model.

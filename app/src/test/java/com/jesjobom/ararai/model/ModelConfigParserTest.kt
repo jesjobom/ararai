@@ -2,6 +2,7 @@ package com.jesjobom.ararai.model
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -151,20 +152,9 @@ class ModelConfigParserTest {
         val catalog = ModelConfigParser.parseCatalog(raw)
 
         assertEquals("smollm2-135m-instruct-q4-k-m", catalog.defaultModelId)
-        assertEquals(7, catalog.models.size)
-        assertEquals("Qwen3.5 0.8B Q4_K_M", catalog.models[3].name)
-        assertEquals("Qwen3.5 2B Q4_K_M", catalog.models[4].name)
-        assertEquals("Qwen3.5 4B Q4_K_M", catalog.models[5].name)
-        assertEquals(ModelAccelerationPolicy.CpuOnly, catalog.models[3].acceleration)
-        assertEquals(ModelAccelerationPolicy.CpuOnly, catalog.models[4].acceleration)
-        assertEquals(ModelAccelerationPolicy.CpuOnly, catalog.models[5].acceleration)
-        catalog.models.slice(3..5).forEach { qwen ->
-            assertEquals(8192, qwen.inference.contextTokens)
-            assertEquals(20, qwen.inference.topK)
-            assertEquals(0.0f, qwen.inference.minP)
-            assertEquals(1.0f, qwen.inference.repeatPenalty)
-        }
-        assertEquals("Gemma 4 E2B IT LiteRT-LM", catalog.models[6].name)
+        assertEquals(4, catalog.models.size)
+        assertEquals("Gemma 4 E2B IT LiteRT-LM", catalog.models[3].name)
+        assertFalse(catalog.models.any { it.id.contains("qwen", ignoreCase = true) })
     }
 
     @Test
