@@ -11,6 +11,12 @@ data class ChatConfig(
     val systemPrompt: String,
 )
 
+data class ModelInputCapabilities(
+    val text: Boolean = true,
+    val image: Boolean = false,
+    val audio: Boolean = false,
+)
+
 enum class ModelRuntime(
     val configValue: String,
     val displayName: String,
@@ -60,11 +66,13 @@ data class ModelConfig(
     val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.Gguf,
     val acceleration: ModelAccelerationPolicy = ModelAccelerationPolicy.GpuPreferred,
     val url: String,
+    val fallbackUrls: List<String> = emptyList(),
     val fileName: String,
     val relativePath: String,
     val sha256: String,
     val expectedBytes: Long?,
     val inference: InferenceConfig,
+    val inputCapabilities: ModelInputCapabilities = ModelInputCapabilities(),
 )
 
 data class ModelCatalog(
@@ -95,4 +103,5 @@ data class LocalModel(
     val runtime: ModelRuntime = ModelRuntime.LlamaCpp,
     val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.Gguf,
     val acceleration: ModelAccelerationPolicy = ModelAccelerationPolicy.GpuPreferred,
+    val inputCapabilities: ModelInputCapabilities = ModelInputCapabilities(),
 )

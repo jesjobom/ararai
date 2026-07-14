@@ -29,7 +29,13 @@ class UrlModelByteSource : ModelByteSource {
         connection.instanceFollowRedirects = true
         connection.requestMethod = "GET"
         if (connection.responseCode !in 200..299) {
-            throw ModelDownloadException("HTTP ${connection.responseCode} while downloading ${config.id}")
+            val host = connection.url.host
+            val hint = if (connection.responseCode == HttpURLConnection.HTTP_FORBIDDEN && host.contains("xethub.hf.co")) {
+                " via Hugging Face Xet/CAS"
+            } else {
+                ""
+            }
+            throw ModelDownloadException("HTTP ${connection.responseCode}$hint while downloading ${config.id}")
         }
         return connection.inputStream
     }
@@ -57,6 +63,8 @@ class ModelFileDownloader(
         onProgress: (ModelDownloadProgress) -> Unit,
     ): ModelResolutionState.Available =
         withContext(Dispatchers.IO) {
+            val downloadUrls = listOf(config.url) + config.fallbackUrls
+            val failures = mutableListOf<String>()
             val finalFile = File(appFilesRoot, config.relativePath)
             val parent = finalFile.parentFile
                 ?: throw ModelDownloadException("Configured model path has no parent directory")
@@ -67,51 +75,56 @@ class ModelFileDownloader(
                 throw ModelDownloadException("Could not delete stale temporary model file")
             }
 
-            try {
-                byteSource.open(config).use { input ->
-                    tempFile.outputStream().use { output ->
-                        input.copyToWithProgress(
-                            output = output,
-                            totalBytes = config.expectedBytes,
-                            onProgress = onProgress,
-                        )
-                    }
-                }
-
-                when (val validation = ModelFileIntegrity.validate(tempFile, config)) {
-                    ModelFileValidation.Valid -> Unit
-                    is ModelFileValidation.Invalid -> {
-                        tempFile.delete()
-                        throw ModelDownloadException(validation.reason)
-                    }
-                }
-
+            for (url in downloadUrls) {
+                val attemptConfig = config.copy(url = url)
                 try {
-                    Files.move(tempFile.toPath(), finalFile.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
-                } catch (error: AtomicMoveNotSupportedException) {
-                    tempFile.delete()
-                    throw ModelDownloadException("Atomic model promotion is not supported", error)
-                }
+                    byteSource.open(attemptConfig).use { input ->
+                        tempFile.outputStream().use { output ->
+                            input.copyToWithProgress(
+                                output = output,
+                                totalBytes = config.expectedBytes,
+                                onProgress = onProgress,
+                            )
+                        }
+                    }
 
-                when (val resolution = resolver.resolve(config)) {
-                    is ModelResolutionState.Available -> resolution
-                    is ModelResolutionState.Missing -> {
-                        throw ModelDownloadException("Downloaded model was not found after promotion")
+                    when (val validation = ModelFileIntegrity.validate(tempFile, config)) {
+                        ModelFileValidation.Valid -> Unit
+                        is ModelFileValidation.Invalid -> {
+                            tempFile.delete()
+                            throw ModelDownloadException(validation.reason)
+                        }
                     }
-                    is ModelResolutionState.IntegrityFailed -> {
-                        throw ModelDownloadException(resolution.reason)
+
+                    try {
+                        Files.move(tempFile.toPath(), finalFile.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
+                    } catch (error: AtomicMoveNotSupportedException) {
+                        tempFile.delete()
+                        throw ModelDownloadException("Atomic model promotion is not supported", error)
                     }
+
+                    return@withContext when (val resolution = resolver.resolve(config)) {
+                        is ModelResolutionState.Available -> resolution
+                        is ModelResolutionState.Missing -> {
+                            throw ModelDownloadException("Downloaded model was not found after promotion")
+                        }
+                        is ModelResolutionState.IntegrityFailed -> {
+                            throw ModelDownloadException(resolution.reason)
+                        }
+                    }
+                } catch (error: ModelDownloadException) {
+                    tempFile.delete()
+                    failures += error.message ?: error::class.java.simpleName
+                } catch (error: CancellationException) {
+                    tempFile.delete()
+                    throw error
+                } catch (error: Exception) {
+                    tempFile.delete()
+                    failures += "Configured model download failed: ${error.message}"
                 }
-            } catch (error: ModelDownloadException) {
-                tempFile.delete()
-                throw error
-            } catch (error: CancellationException) {
-                tempFile.delete()
-                throw error
-            } catch (error: Exception) {
-                tempFile.delete()
-                throw ModelDownloadException("Configured model download failed: ${error.message}", error)
             }
+
+            throw ModelDownloadException("All configured download URLs failed for ${config.id}: ${failures.joinToString("; ")}")
         }
 }
 

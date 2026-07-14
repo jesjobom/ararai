@@ -39,6 +39,8 @@ class ChatViewModel(
     private val _uiState = MutableStateFlow(
         ChatUiState(
             modelStatus = initialModelStatus,
+            canAttachImage = initialModel?.inputCapabilities?.image == true,
+            canUseAudioPrompt = initialModel?.inputCapabilities?.audio == true,
             sessions = sessionStore.listSessions().toUiState(),
             selectedSessionId = initialSession.id,
             messages = sessionStore.getMessages(initialSession.id).toChatMessages(),
@@ -48,7 +50,48 @@ class ChatViewModel(
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     fun onPromptChanged(prompt: String) {
-        _uiState.update { it.copy(prompt = prompt, error = null) }
+        _uiState.update {
+            if (it.audioPrompt != null) {
+                it.copy(error = null)
+            } else {
+                it.copy(prompt = prompt, error = null)
+            }
+        }
+    }
+
+    fun attachImage(image: ImageAttachment) {
+        _uiState.update {
+            if (!it.canAttachImage || it.audioPrompt != null) {
+                it
+            } else {
+                it.copy(imageAttachments = it.imageAttachments + image, error = null)
+            }
+        }
+    }
+
+    fun removeImage(uri: String) {
+        _uiState.update {
+            it.copy(imageAttachments = it.imageAttachments.filterNot { image -> image.uri == uri }, error = null)
+        }
+    }
+
+    fun useAudioPrompt(audio: AudioPrompt) {
+        _uiState.update {
+            if (!it.canUseAudioPrompt) {
+                it
+            } else {
+                it.copy(
+                    prompt = "",
+                    imageAttachments = emptyList(),
+                    audioPrompt = audio,
+                    error = null,
+                )
+            }
+        }
+    }
+
+    fun clearAudioPrompt() {
+        _uiState.update { it.copy(audioPrompt = null, error = null) }
     }
 
     fun createSession() {
@@ -60,6 +103,8 @@ class ChatViewModel(
                 selectedSessionId = session.id,
                 messages = emptyList(),
                 prompt = "",
+                imageAttachments = emptyList(),
+                audioPrompt = null,
                 error = null,
             )
         }
@@ -74,6 +119,8 @@ class ChatViewModel(
                 sessions = sessionStore.listSessions().toUiState(),
                 messages = sessionStore.getMessages(sessionId).toChatMessages(),
                 prompt = "",
+                imageAttachments = emptyList(),
+                audioPrompt = null,
                 error = null,
             )
         }
@@ -123,6 +170,10 @@ class ChatViewModel(
                         isLoadingModel = false,
                         isGenerating = false,
                         canRetryModelDownload = false,
+                        canAttachImage = false,
+                        canUseAudioPrompt = false,
+                        imageAttachments = emptyList(),
+                        audioPrompt = null,
                     )
                 }
             }
@@ -136,6 +187,10 @@ class ChatViewModel(
                         isLoadingModel = false,
                         isGenerating = false,
                         canRetryModelDownload = false,
+                        canAttachImage = false,
+                        canUseAudioPrompt = false,
+                        imageAttachments = emptyList(),
+                        audioPrompt = null,
                     )
                 }
             }
@@ -149,6 +204,10 @@ class ChatViewModel(
                         isLoadingModel = false,
                         isGenerating = false,
                         canRetryModelDownload = false,
+                        canAttachImage = false,
+                        canUseAudioPrompt = false,
+                        imageAttachments = emptyList(),
+                        audioPrompt = null,
                     )
                 }
             }
@@ -160,6 +219,10 @@ class ChatViewModel(
                         modelStatus = ChatUiState.MODEL_AVAILABLE,
                         isLoadingModel = false,
                         canRetryModelDownload = false,
+                        canAttachImage = state.model.inputCapabilities.image,
+                        canUseAudioPrompt = state.model.inputCapabilities.audio,
+                        imageAttachments = if (state.model.inputCapabilities.image) it.imageAttachments else emptyList(),
+                        audioPrompt = if (state.model.inputCapabilities.audio) it.audioPrompt else null,
                         error = null,
                     )
                 }
@@ -174,6 +237,10 @@ class ChatViewModel(
                         isLoadingModel = false,
                         isGenerating = false,
                         canRetryModelDownload = true,
+                        canAttachImage = false,
+                        canUseAudioPrompt = false,
+                        imageAttachments = emptyList(),
+                        audioPrompt = null,
                     )
                 }
             }
@@ -198,22 +265,22 @@ class ChatViewModel(
         val sessionId = current.selectedSessionId ?: return
         val modelForRequest = model
         val inferenceForRequest = inferenceConfig
-        val submittedPrompt = current.prompt.trim()
-        maybeTitleSession(sessionId, submittedPrompt)
+        val submittedContent = current.toSubmittedContent()
+        val submittedTitle = submittedContent.displayText
+        maybeTitleSession(sessionId, submittedTitle)
         val history = sessionStore.getMessages(sessionId).toChatMessages()
-        val requestPrompt = promptContextBuilder.build(
+        val requestContent = submittedContent.toRequestContent(
             systemPrompt = systemPrompt,
             history = history,
-            userPrompt = submittedPrompt,
             inferenceConfig = inferenceForRequest,
         )
-        val userMessage = sessionStore.appendMessage(sessionId, ChatRole.User, submittedPrompt).toChatMessage()
+        val userMessage = sessionStore.appendMessage(sessionId, ChatRole.User, submittedContent).toChatMessage()
         val assistantMessage = sessionStore.appendMessage(sessionId, ChatRole.Assistant, "").toChatMessage()
         activeAssistantMessageId = assistantMessage.id
 
         _uiState.update {
             it.copy(
-                prompt = submittedPrompt,
+                prompt = current.prompt,
                 sessions = sessionStore.listSessions().toUiState(),
                 messages = sessionStore.getMessages(sessionId).toChatMessages(),
                 isLoadingModel = true,
@@ -238,7 +305,7 @@ class ChatViewModel(
                 engine.load(modelForRequest, inferenceForRequest)
                 _uiState.update { it.copy(isLoadingModel = false) }
 
-                engine.generate(PromptRequest(requestPrompt)).collect { event ->
+                engine.generate(PromptRequest(requestContent)).collect { event ->
                     when (event) {
                         is GenerationEvent.Token -> appendAssistantToken(event.text)
                         is GenerationEvent.Failed -> {
@@ -256,6 +323,8 @@ class ChatViewModel(
                                     isLoadingModel = false,
                                     isGenerating = false,
                                     prompt = "",
+                                    imageAttachments = emptyList(),
+                                    audioPrompt = null,
                                     sessions = sessionStore.listSessions().toUiState(),
                                 )
                             }
@@ -317,9 +386,11 @@ class ChatViewModel(
             val assistantIndex = updatedMessages.indexOfLast { it.id == assistantMessageId }
             if (assistantIndex >= 0) {
                 val currentAssistant = updatedMessages[assistantIndex]
-                val updatedAssistant = currentAssistant.copy(text = currentAssistant.text + token)
+                val updatedAssistant = currentAssistant.copy(
+                    content = MessageContent.TextPrompt(currentAssistant.text + token),
+                )
                 updatedMessages[assistantIndex] = updatedAssistant
-                sessionStore.updateMessage(assistantMessageId, updatedAssistant.text)
+                sessionStore.updateMessage(assistantMessageId, updatedAssistant.content)
             }
             state.copy(messages = updatedMessages)
         }
@@ -331,6 +402,32 @@ class ChatViewModel(
         sessionStore.renameSession(sessionId, submittedPrompt.take(42))
     }
 
+    private fun ChatUiState.toSubmittedContent(): MessageContent =
+        audioPrompt?.let { MessageContent.AudioPromptContent(it) }
+            ?: MessageContent.TextPrompt(
+                text = prompt.trim(),
+                imageAttachments = imageAttachments,
+            )
+
+    private fun MessageContent.toRequestContent(
+        systemPrompt: String,
+        history: List<ChatMessage>,
+        inferenceConfig: InferenceConfig,
+    ): MessageContent =
+        when (this) {
+            is MessageContent.TextPrompt -> copy(
+                text = promptContextBuilder.build(
+                    systemPrompt = systemPrompt,
+                    history = history,
+                    userPrompt = text.ifBlank {
+                        if (imageAttachments.isNotEmpty()) "Describe this image." else text
+                    },
+                    inferenceConfig = inferenceConfig,
+                ),
+            )
+            is MessageContent.AudioPromptContent -> this
+        }
+
     private fun List<ChatSession>.toUiState(): List<ChatSessionUiState> =
         map { ChatSessionUiState(id = it.id, title = it.title) }
 
@@ -338,5 +435,5 @@ class ChatViewModel(
         map { it.toChatMessage() }
 
     private fun StoredChatMessage.toChatMessage(): ChatMessage =
-        ChatMessage(role = role, text = text, id = id)
+        ChatMessage(role = role, content = content, id = id)
 }

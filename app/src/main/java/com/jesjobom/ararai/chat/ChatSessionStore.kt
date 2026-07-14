@@ -17,9 +17,26 @@ data class StoredChatMessage(
     val id: String,
     val sessionId: String,
     val role: ChatRole,
-    val text: String,
+    val content: MessageContent,
     val createdAtMillis: Long,
-)
+) {
+    constructor(
+        id: String,
+        sessionId: String,
+        role: ChatRole,
+        text: String,
+        createdAtMillis: Long,
+    ) : this(
+        id = id,
+        sessionId = sessionId,
+        role = role,
+        content = MessageContent.TextPrompt(text),
+        createdAtMillis = createdAtMillis,
+    )
+
+    val text: String
+        get() = content.displayText
+}
 
 interface ChatSessionStore {
     fun ensureSession(): ChatSession
@@ -28,8 +45,13 @@ interface ChatSessionStore {
     fun createSession(title: String): ChatSession
     fun renameSession(sessionId: String, title: String): ChatSession
     fun deleteSession(sessionId: String)
-    fun appendMessage(sessionId: String, role: ChatRole, text: String): StoredChatMessage
-    fun updateMessage(messageId: String, text: String)
+    fun appendMessage(sessionId: String, role: ChatRole, content: MessageContent): StoredChatMessage
+    fun appendMessage(sessionId: String, role: ChatRole, text: String): StoredChatMessage =
+        appendMessage(sessionId, role, MessageContent.TextPrompt(text))
+    fun updateMessage(messageId: String, content: MessageContent)
+    fun updateMessage(messageId: String, text: String) {
+        updateMessage(messageId, MessageContent.TextPrompt(text))
+    }
 }
 
 class InMemoryChatSessionStore : ChatSessionStore {
@@ -71,13 +93,13 @@ class InMemoryChatSessionStore : ChatSessionStore {
         messages.values.removeAll { it.sessionId == sessionId }
     }
 
-    override fun appendMessage(sessionId: String, role: ChatRole, text: String): StoredChatMessage {
+    override fun appendMessage(sessionId: String, role: ChatRole, content: MessageContent): StoredChatMessage {
         val now = nextMessageTimestamp(sessionId)
         val message = StoredChatMessage(
             id = newId(),
             sessionId = sessionId,
             role = role,
-            text = text,
+            content = content,
             createdAtMillis = now,
         )
         messages[message.id] = message
@@ -85,9 +107,9 @@ class InMemoryChatSessionStore : ChatSessionStore {
         return message
     }
 
-    override fun updateMessage(messageId: String, text: String) {
+    override fun updateMessage(messageId: String, content: MessageContent) {
         val current = messages.getValue(messageId)
-        messages[messageId] = current.copy(text = text)
+        messages[messageId] = current.copy(content = content)
         touch(current.sessionId)
     }
 
@@ -125,6 +147,8 @@ class SqliteChatSessionStore(
                 session_id TEXT NOT NULL,
                 role TEXT NOT NULL,
                 text TEXT NOT NULL,
+                content_kind TEXT NOT NULL DEFAULT 'text',
+                content_payload TEXT,
                 created_at_millis INTEGER NOT NULL,
                 FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
             )
@@ -133,7 +157,12 @@ class SqliteChatSessionStore(
         db.execSQL("CREATE INDEX chat_messages_session_created ON chat_messages(session_id, created_at_millis)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE chat_messages ADD COLUMN content_kind TEXT NOT NULL DEFAULT 'text'")
+            db.execSQL("ALTER TABLE chat_messages ADD COLUMN content_payload TEXT")
+        }
+    }
 
     @Synchronized
     override fun ensureSession(): ChatSession =
@@ -166,7 +195,7 @@ class SqliteChatSessionStore(
     override fun getMessages(sessionId: String): List<StoredChatMessage> {
         readableDatabase.rawQuery(
             """
-            SELECT id, session_id, role, text, created_at_millis
+            SELECT id, session_id, role, text, content_kind, content_payload, created_at_millis
             FROM chat_messages
             WHERE session_id = ?
             ORDER BY created_at_millis ASC, id ASC
@@ -179,8 +208,12 @@ class SqliteChatSessionStore(
                     id = cursor.getString(0),
                     sessionId = cursor.getString(1),
                     role = ChatRole.valueOf(cursor.getString(2)),
-                    text = cursor.getString(3),
-                    createdAtMillis = cursor.getLong(4),
+                    content = MessageContentCodec.decode(
+                        kind = cursor.getString(4),
+                        payload = if (cursor.isNull(5)) null else cursor.getString(5),
+                        legacyText = cursor.getString(3),
+                    ),
+                    createdAtMillis = cursor.getLong(6),
                 )
             }
             return result
@@ -218,13 +251,13 @@ class SqliteChatSessionStore(
     }
 
     @Synchronized
-    override fun appendMessage(sessionId: String, role: ChatRole, text: String): StoredChatMessage {
+    override fun appendMessage(sessionId: String, role: ChatRole, content: MessageContent): StoredChatMessage {
         val now = nextMessageTimestamp(sessionId)
         val message = StoredChatMessage(
             id = newId(),
             sessionId = sessionId,
             role = role,
-            text = text,
+            content = content,
             createdAtMillis = now,
         )
         val db = writableDatabase
@@ -239,10 +272,15 @@ class SqliteChatSessionStore(
     }
 
     @Synchronized
-    override fun updateMessage(messageId: String, text: String) {
+    override fun updateMessage(messageId: String, content: MessageContent) {
+        val encoded = MessageContentCodec.encode(content)
         writableDatabase.update(
             "chat_messages",
-            ContentValues().apply { put("text", text) },
+            ContentValues().apply {
+                put("text", content.displayText)
+                put("content_kind", encoded.kind)
+                put("content_payload", encoded.payload)
+            },
             "id = ?",
             arrayOf(messageId),
         )
@@ -257,12 +295,16 @@ class SqliteChatSessionStore(
         }
 
     private fun StoredChatMessage.toContentValues(): ContentValues =
-        ContentValues().apply {
-            put("id", id)
-            put("session_id", sessionId)
-            put("role", role.name)
-            put("text", text)
-            put("created_at_millis", createdAtMillis)
+        MessageContentCodec.encode(content).let { encoded ->
+            ContentValues().apply {
+                put("id", id)
+                put("session_id", sessionId)
+                put("role", role.name)
+                put("text", content.displayText)
+                put("content_kind", encoded.kind)
+                put("content_payload", encoded.payload)
+                put("created_at_millis", createdAtMillis)
+            }
         }
 
     private fun nextMessageTimestamp(sessionId: String): Long {
@@ -278,8 +320,84 @@ class SqliteChatSessionStore(
 
     private companion object {
         const val DATABASE_NAME = "ararai_chat.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
     }
+}
+
+private object MessageContentCodec {
+    data class Encoded(
+        val kind: String,
+        val payload: String?,
+    )
+
+    fun encode(content: MessageContent): Encoded =
+        when (content) {
+            is MessageContent.TextPrompt -> Encoded(
+                kind = "text",
+                payload = buildString {
+                    appendLine(content.text.encodeField())
+                    content.imageAttachments.forEach { image ->
+                        append("image")
+                        append('\t')
+                        append(image.uri.encodeField())
+                        append('\t')
+                        append(image.mimeType.encodeField())
+                        append('\t')
+                        append((image.displayName ?: "").encodeField())
+                        append('\t')
+                        append(image.byteSize?.toString().orEmpty().encodeField())
+                        appendLine()
+                    }
+                },
+            )
+            is MessageContent.AudioPromptContent -> Encoded(
+                kind = "audio",
+                payload = listOf(
+                    content.audio.uri,
+                    content.audio.mimeType,
+                    content.audio.displayName.orEmpty(),
+                    content.audio.byteSize?.toString().orEmpty(),
+                    content.audio.durationMillis?.toString().orEmpty(),
+                ).joinToString(separator = "\t") { it.encodeField() },
+            )
+        }
+
+    fun decode(kind: String?, payload: String?, legacyText: String): MessageContent =
+        when (kind) {
+            "audio" -> payload?.split('\t')?.map { it.decodeField() }?.let { fields ->
+                MessageContent.AudioPromptContent(
+                    AudioPrompt(
+                        uri = fields.getOrElse(0) { "" },
+                        mimeType = fields.getOrElse(1) { "audio/*" },
+                        displayName = fields.getOrNull(2)?.takeIf { it.isNotBlank() },
+                        byteSize = fields.getOrNull(3)?.toLongOrNull(),
+                        durationMillis = fields.getOrNull(4)?.toLongOrNull(),
+                    ),
+                )
+            } ?: MessageContent.TextPrompt(legacyText)
+            else -> {
+                if (payload == null) return MessageContent.TextPrompt(legacyText)
+                val lines = payload.lineSequence().toList()
+                val text = lines.firstOrNull()?.decodeField() ?: legacyText
+                val images = lines.drop(1).mapNotNull { line ->
+                    val fields = line.split('\t')
+                    if (fields.firstOrNull() != "image") return@mapNotNull null
+                    ImageAttachment(
+                        uri = fields.getOrElse(1) { "" }.decodeField(),
+                        mimeType = fields.getOrElse(2) { "image/*" }.decodeField(),
+                        displayName = fields.getOrNull(3)?.decodeField()?.takeIf { it.isNotBlank() },
+                        byteSize = fields.getOrNull(4)?.decodeField()?.toLongOrNull(),
+                    )
+                }
+                MessageContent.TextPrompt(text, images)
+            }
+        }
+
+    private fun String.encodeField(): String =
+        java.util.Base64.getEncoder().encodeToString(toByteArray(Charsets.UTF_8))
+
+    private fun String.decodeField(): String =
+        String(java.util.Base64.getDecoder().decode(this), Charsets.UTF_8)
 }
 
 internal fun String.cleanTitle(): String =

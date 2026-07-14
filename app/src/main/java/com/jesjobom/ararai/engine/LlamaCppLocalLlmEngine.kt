@@ -199,7 +199,15 @@ class LlamaCppLocalLlmEngine(
         request: PromptRequest,
         emitToken: (String) -> Boolean,
     ): GenerationResult {
-        val prompt = bridge.formatChatPrompt(state.handle, request.prompt) ?: request.prompt
+        if (request.imageAttachments.isNotEmpty() || request.audioPrompt != null) {
+            return GenerationResult(
+                state = state,
+                error = "Selected llama.cpp model does not support image or audio input",
+                emittedTokens = 0,
+            )
+        }
+        val textPrompt = request.textPrompt ?: request.prompt
+        val prompt = bridge.formatChatPrompt(state.handle, textPrompt) ?: textPrompt
         var emittedTokens = 0
         val error = bridge.generate(
             handle = state.handle,

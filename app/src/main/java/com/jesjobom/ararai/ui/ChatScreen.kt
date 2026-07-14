@@ -1,5 +1,13 @@
 package com.jesjobom.ararai.ui
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.compose.foundation.Image
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +27,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -48,12 +58,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jesjobom.ararai.chat.AudioPrompt
 import com.jesjobom.ararai.chat.ChatMessage
 import com.jesjobom.ararai.chat.ChatRole
 import com.jesjobom.ararai.chat.ChatSessionUiState
 import com.jesjobom.ararai.chat.ChatViewModel
+import com.jesjobom.ararai.chat.ImageAttachment
+import com.jesjobom.ararai.chat.MessageContent
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,7 +121,15 @@ fun ChatScreen(
         bottomBar = {
             ChatInputBar(
                 prompt = state.prompt,
+                imageAttachments = state.imageAttachments,
+                audioPrompt = state.audioPrompt,
+                canAttachImage = state.canAttachImage,
+                canUseAudioPrompt = state.canUseAudioPrompt,
                 onPromptChanged = viewModel::onPromptChanged,
+                onAttachImage = viewModel::attachImage,
+                onRemoveImage = viewModel::removeImage,
+                onUseAudioPrompt = viewModel::useAudioPrompt,
+                onClearAudioPrompt = viewModel::clearAudioPrompt,
                 canSubmit = state.canSubmit,
                 isGenerating = state.isGenerating,
                 error = state.error,
@@ -392,7 +417,15 @@ private fun EmptyChatState(modifier: Modifier = Modifier) {
 @Composable
 private fun ChatInputBar(
     prompt: String,
+    imageAttachments: List<ImageAttachment>,
+    audioPrompt: AudioPrompt?,
+    canAttachImage: Boolean,
+    canUseAudioPrompt: Boolean,
     onPromptChanged: (String) -> Unit,
+    onAttachImage: (ImageAttachment) -> Unit,
+    onRemoveImage: (String) -> Unit,
+    onUseAudioPrompt: (AudioPrompt) -> Unit,
+    onClearAudioPrompt: () -> Unit,
     canSubmit: Boolean,
     isGenerating: Boolean,
     error: String?,
@@ -403,6 +436,36 @@ private fun ChatInputBar(
         tonalElevation = 3.dp,
         shadowElevation = 3.dp,
     ) {
+        val context = LocalContext.current
+        val imagePicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            uri ?: return@rememberLauncherForActivityResult
+            val imported = context.importChatImage(uri)
+            onAttachImage(
+                ImageAttachment(
+                    uri = imported.file.absolutePath,
+                    mimeType = "image/jpeg",
+                    displayName = imported.displayName,
+                    byteSize = imported.file.length(),
+                ),
+            )
+        }
+        val audioPicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            uri ?: return@rememberLauncherForActivityResult
+            val imported = context.importChatMedia(uri, "audio")
+            onUseAudioPrompt(
+                AudioPrompt(
+                    uri = imported.file.absolutePath,
+                    mimeType = context.contentResolver.getType(uri) ?: "audio/*",
+                    displayName = imported.displayName,
+                    byteSize = imported.file.length(),
+                ),
+            )
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -432,6 +495,53 @@ private fun ChatInputBar(
                 }
             }
 
+            if (imageAttachments.isNotEmpty() || audioPrompt != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    imageAttachments.forEach { image ->
+                        AttachmentRow(
+                            label = image.displayName ?: "Image",
+                            imageUri = image.uri,
+                            onRemove = { onRemoveImage(image.uri) },
+                        )
+                    }
+                    audioPrompt?.let { audio ->
+                        AttachmentRow(
+                            label = audio.displayName ?: "Audio prompt",
+                            onRemove = onClearAudioPrompt,
+                        )
+                    }
+                }
+            }
+
+            if (canAttachImage || canUseAudioPrompt) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (canAttachImage && audioPrompt == null) {
+                        OutlinedButton(
+                            onClick = { imagePicker.launch(arrayOf("image/*")) },
+                            enabled = !isGenerating,
+                        ) {
+                            Icon(imageVector = Icons.Filled.AttachFile, contentDescription = null)
+                            Text(
+                                text = "Image",
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                    }
+                    if (canUseAudioPrompt && imageAttachments.isEmpty() && prompt.isBlank()) {
+                        OutlinedButton(
+                            onClick = { audioPicker.launch(arrayOf("audio/*")) },
+                            enabled = !isGenerating,
+                        ) {
+                            Icon(imageVector = Icons.Filled.GraphicEq, contentDescription = null)
+                            Text(
+                                text = "Audio",
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
             OutlinedTextField(
                 value = prompt,
                 onValueChange = onPromptChanged,
@@ -439,7 +549,7 @@ private fun ChatInputBar(
                 minLines = 1,
                 maxLines = 5,
                 label = { Text("Message") },
-                enabled = !isGenerating,
+                enabled = !isGenerating && audioPrompt == null,
                 trailingIcon = {
                     FilledIconButton(
                         onClick = onSubmit,
@@ -460,6 +570,31 @@ private fun ChatInputBar(
                     }
                 },
             )
+        }
+    }
+}
+
+@Composable
+private fun AttachmentRow(
+    label: String,
+    imageUri: String? = null,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        imageUri?.let {
+            ImageThumbnail(uri = it, sizeDp = 44)
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
+            Icon(imageVector = Icons.Filled.Close, contentDescription = "Remove")
         }
     }
 }
@@ -501,11 +636,160 @@ private fun MessageRow(message: ChatMessage) {
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text(
-                    text = message.text.ifBlank { "..." },
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+                MessageContentView(message.content)
             }
         }
     }
 }
+
+@Composable
+private fun MessageContentView(content: MessageContent) {
+    when (content) {
+        is MessageContent.TextPrompt -> {
+            content.imageAttachments.forEach { image ->
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                )
+                {
+                    ImageThumbnail(uri = image.uri, sizeDp = 156)
+                    Text(
+                        text = image.displayName ?: "Image",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
+            Text(
+                text = content.text.ifBlank { "..." },
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+        is MessageContent.AudioPromptContent -> {
+            Text(
+                text = content.audio.displayName ?: "Audio prompt",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImageThumbnail(
+    uri: String,
+    sizeDp: Int,
+) {
+    val bitmap = remember(uri) { decodeThumbnailBitmap(uri) }
+    bitmap?.let {
+        Image(
+            bitmap = it.asImageBitmap(),
+            contentDescription = null,
+            modifier = Modifier.size(sizeDp.dp),
+            contentScale = ContentScale.Crop,
+        )
+    }
+}
+
+private data class ImportedMedia(
+    val file: File,
+    val displayName: String?,
+)
+
+private fun Context.importChatImage(uri: Uri): ImportedMedia {
+    val displayName = uri.displayName(this)
+    val dir = File(filesDir, "chat_media").apply { mkdirs() }
+    val file = File(
+        dir,
+        "image-${System.currentTimeMillis()}-${java.util.UUID.randomUUID()}.jpg",
+    )
+    val sourceBytes = contentResolver.openInputStream(uri)?.use { input ->
+        input.readBytes()
+    } ?: error("Unable to open selected image")
+
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size, bounds)
+    val sampleSize = calculateInSampleSize(
+        width = bounds.outWidth,
+        height = bounds.outHeight,
+        maxSize = MAX_IMAGE_INPUT_DIMENSION,
+    )
+    val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+    val decoded = BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size, decodeOptions)
+        ?: error("Unable to decode selected image")
+    val normalized = decoded.scaleToFit(MAX_IMAGE_INPUT_DIMENSION)
+    file.outputStream().use { output ->
+        normalized.compress(Bitmap.CompressFormat.JPEG, IMAGE_INPUT_JPEG_QUALITY, output)
+    }
+    if (normalized !== decoded) {
+        decoded.recycle()
+    }
+    normalized.recycle()
+    return ImportedMedia(file = file, displayName = displayName)
+}
+
+private fun Context.importChatMedia(uri: Uri, prefix: String): ImportedMedia {
+    val displayName = uri.displayName(this)
+    val extension = displayName?.substringAfterLast('.', missingDelimiterValue = "")?.takeIf { it.isNotBlank() }
+    val dir = File(filesDir, "chat_media").apply { mkdirs() }
+    val file = File(
+        dir,
+        buildString {
+            append(prefix)
+            append('-')
+            append(System.currentTimeMillis())
+            append('-')
+            append(java.util.UUID.randomUUID())
+            if (extension != null) {
+                append('.')
+                append(extension)
+            }
+        },
+    )
+    contentResolver.openInputStream(uri)?.use { input ->
+        file.outputStream().use { output -> input.copyTo(output) }
+    } ?: error("Unable to open selected media")
+    return ImportedMedia(file = file, displayName = displayName)
+}
+
+private fun Bitmap.scaleToFit(maxSize: Int): Bitmap {
+    val largestSide = maxOf(width, height)
+    if (largestSide <= maxSize) return this
+    val scale = maxSize.toFloat() / largestSide.toFloat()
+    val targetWidth = (width * scale).toInt().coerceAtLeast(1)
+    val targetHeight = (height * scale).toInt().coerceAtLeast(1)
+    return Bitmap.createScaledBitmap(this, targetWidth, targetHeight, true)
+}
+
+private fun calculateInSampleSize(width: Int, height: Int, maxSize: Int): Int {
+    var sampleSize = 1
+    var sampledWidth = width
+    var sampledHeight = height
+    while (sampledWidth / 2 >= maxSize || sampledHeight / 2 >= maxSize) {
+        sampleSize *= 2
+        sampledWidth /= 2
+        sampledHeight /= 2
+    }
+    return sampleSize
+}
+
+private fun decodeThumbnailBitmap(path: String): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(path, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    val sampleSize = calculateInSampleSize(
+        width = bounds.outWidth,
+        height = bounds.outHeight,
+        maxSize = THUMBNAIL_DECODE_DIMENSION,
+    )
+    return BitmapFactory.decodeFile(
+        path,
+        BitmapFactory.Options().apply { inSampleSize = sampleSize },
+    )
+}
+
+private fun Uri.displayName(context: Context): String? =
+    context.contentResolver.query(this, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+    } ?: lastPathSegment
+
+private const val MAX_IMAGE_INPUT_DIMENSION = 1024
+private const val IMAGE_INPUT_JPEG_QUALITY = 88
+private const val THUMBNAIL_DECODE_DIMENSION = 256

@@ -2,6 +2,7 @@ package com.jesjobom.ararai.engine
 
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
+import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
@@ -12,6 +13,7 @@ import com.google.ai.edge.litertlm.SamplerConfig
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelAccelerationPolicy
+import com.jesjobom.ararai.model.ModelInputCapabilities
 import com.jesjobom.ararai.model.ModelRuntime
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +33,7 @@ class LiteRtLmLocalLlmEngine(
     private var loadedModelId: String? = null
     private var loadedModelPath: String? = null
     private var loadedConfig: InferenceConfig? = null
+    private var loadedInputCapabilities: ModelInputCapabilities? = null
 
     override suspend fun load(model: LocalModel, config: InferenceConfig) {
         check(model.runtime == ModelRuntime.LiteRtLm) {
@@ -43,6 +46,7 @@ class LiteRtLmLocalLlmEngine(
                 loadedModelPath == model.filePath
             if (isLoaded) {
                 loadedConfig = config
+                loadedInputCapabilities = model.inputCapabilities
             }
             isLoaded
         }
@@ -55,6 +59,7 @@ class LiteRtLmLocalLlmEngine(
                 modelPath = model.filePath,
                 config = config,
                 useGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred,
+                inputCapabilities = model.inputCapabilities,
             )
         }
 
@@ -63,6 +68,7 @@ class LiteRtLmLocalLlmEngine(
             loadedModelId = model.id
             loadedModelPath = model.filePath
             loadedConfig = config
+            loadedInputCapabilities = model.inputCapabilities
         }
     }
 
@@ -70,7 +76,12 @@ class LiteRtLmLocalLlmEngine(
         val state = synchronized(lock) {
             val session = loadedSession
             val config = loadedConfig
-            if (session == null || config == null) null else LoadedState(session, config)
+            val capabilities = loadedInputCapabilities
+            if (session == null || config == null || capabilities == null) {
+                null
+            } else {
+                LoadedState(session, config, capabilities)
+            }
         }
 
         if (state == null) {
@@ -81,8 +92,12 @@ class LiteRtLmLocalLlmEngine(
 
         val job = launch(dispatcher) {
             try {
+                request.validateAgainst(state.capabilities)?.let { failure ->
+                    trySend(GenerationEvent.Failed(failure))
+                    return@launch
+                }
                 var emittedChunks = 0
-                state.session.generate(request.prompt, state.config).collect { chunk ->
+                state.session.generate(request, state.config).collect { chunk ->
                     if (chunk.isNotEmpty()) {
                         emittedChunks += 1
                         trySend(GenerationEvent.Token(chunk))
@@ -114,6 +129,7 @@ class LiteRtLmLocalLlmEngine(
             loadedModelId = null
             loadedModelPath = null
             loadedConfig = null
+            loadedInputCapabilities = null
             current
         }
 
@@ -127,7 +143,16 @@ class LiteRtLmLocalLlmEngine(
     private data class LoadedState(
         val session: LiteRtLmSession,
         val config: InferenceConfig,
+        val capabilities: ModelInputCapabilities,
     )
+
+    private fun PromptRequest.validateAgainst(capabilities: ModelInputCapabilities): String? =
+        when {
+            textPrompt != null && !capabilities.text -> "Selected model does not support text input"
+            imageAttachments.isNotEmpty() && !capabilities.image -> "Selected model does not support image input"
+            audioPrompt != null && !capabilities.audio -> "Selected model does not support audio input"
+            else -> null
+        }
 }
 
 interface LiteRtLmBridge {
@@ -135,11 +160,12 @@ interface LiteRtLmBridge {
         modelPath: String,
         config: InferenceConfig,
         useGpu: Boolean,
+        inputCapabilities: ModelInputCapabilities,
     ): LiteRtLmSession
 }
 
 interface LiteRtLmSession {
-    fun generate(prompt: String, config: InferenceConfig): Flow<String>
+    fun generate(request: PromptRequest, config: InferenceConfig): Flow<String>
     fun cancel()
     fun close()
 }
@@ -151,10 +177,14 @@ class AndroidLiteRtLmBridge(
         modelPath: String,
         config: InferenceConfig,
         useGpu: Boolean,
+        inputCapabilities: ModelInputCapabilities,
     ): LiteRtLmSession {
+        val backend = if (useGpu) Backend.GPU() else Backend.CPU()
         val engineConfig = EngineConfig(
             modelPath = modelPath,
-            backend = if (useGpu) Backend.GPU() else Backend.CPU(),
+            backend = backend,
+            visionBackend = if (inputCapabilities.image) backend else null,
+            audioBackend = if (inputCapabilities.audio) Backend.CPU() else null,
             maxNumTokens = config.contextTokens,
             cacheDir = cacheDir,
         )
@@ -176,7 +206,7 @@ private class AndroidLiteRtLmSession(
     @Volatile
     private var activeConversation: Conversation? = null
 
-    override fun generate(prompt: String, config: InferenceConfig): Flow<String> = callbackFlow {
+    override fun generate(request: PromptRequest, config: InferenceConfig): Flow<String> = callbackFlow {
         val samplerConfig = SamplerConfig(
             topK = DEFAULT_TOP_K,
             topP = config.topP.toDouble(),
@@ -213,7 +243,7 @@ private class AndroidLiteRtLmSession(
                 }
             }
 
-            conversation.sendMessageAsync(prompt, callback)
+            conversation.sendMessageAsync(request.toLiteRtContents(), callback)
         } catch (error: Throwable) {
             close(error)
         }
@@ -240,8 +270,32 @@ private class AndroidLiteRtLmSession(
             .filterIsInstance<Content.Text>()
             .joinToString(separator = "") { it.text }
 
+    private fun PromptRequest.toLiteRtContents(): Contents =
+        audioPrompt?.let { audio ->
+            Contents.of(Content.AudioFile(audio.uri.asFilePath()))
+        } ?: Contents.of(
+            buildList {
+                imageAttachments.forEach { image ->
+                    add(Content.ImageFile(image.uri.asFilePath()))
+                }
+                textPrompt?.takeIf { it.isNotBlank() }?.let { text ->
+                    add(Content.Text(text))
+                }
+            },
+        )
+
+    private fun String.asFilePath(): String =
+        toLiteRtFilePath()
+
     private companion object {
         const val DEFAULT_TOP_K = 40
         const val DEFAULT_SEED = 0
     }
 }
+
+internal fun String.toLiteRtFilePath(): String =
+    when {
+        startsWith("file://") -> removePrefix("file://")
+        startsWith("file:") -> removePrefix("file:")
+        else -> this
+    }

@@ -85,10 +85,38 @@ class ModelFileDownloaderTest {
             downloader.download(helloConfig())
             fail("Expected byte source failure")
         } catch (error: ModelDownloadException) {
-            assertEquals("Configured model download failed: network down", error.message)
+            assertEquals(
+                "All configured download URLs failed for hello: Configured model download failed: network down",
+                error.message,
+            )
             assertEquals("old-valid", finalFile.readText())
             assertFalse(tempFile.exists())
         }
+    }
+
+    @Test
+    fun `tries fallback urls after primary url fails`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val byteSource = UrlSwitchingModelByteSource(
+            bytesByUrl = mapOf("https://example.com/fallback.gguf" to "hello".toByteArray()),
+        )
+        val downloader = ModelFileDownloader(
+            appFilesRoot = root,
+            byteSource = byteSource,
+        )
+        val config = helloConfig().copy(
+            url = "https://example.com/primary.gguf",
+            fallbackUrls = listOf("https://example.com/fallback.gguf"),
+        )
+
+        downloader.download(config)
+
+        val finalFile = File(root, config.relativePath)
+        assertEquals("hello", finalFile.readText())
+        assertEquals(
+            listOf("https://example.com/primary.gguf", "https://example.com/fallback.gguf"),
+            byteSource.openedUrls,
+        )
     }
 
     @Test
@@ -147,4 +175,16 @@ private data object CancelingModelByteSource : ModelByteSource {
                 throw CancellationException("cancelled")
             }
         }
+}
+
+private class UrlSwitchingModelByteSource(
+    private val bytesByUrl: Map<String, ByteArray>,
+) : ModelByteSource {
+    val openedUrls = mutableListOf<String>()
+
+    override fun open(config: ModelConfig): ByteArrayInputStream {
+        openedUrls += config.url
+        return bytesByUrl[config.url]?.let(::ByteArrayInputStream)
+            ?: throw IOException("unavailable")
+    }
 }

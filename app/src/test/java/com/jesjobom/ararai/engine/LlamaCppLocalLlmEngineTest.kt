@@ -1,6 +1,8 @@
 package com.jesjobom.ararai.engine
 
 import app.cash.turbine.test
+import com.jesjobom.ararai.chat.ImageAttachment
+import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelAccelerationPolicy
@@ -166,6 +168,30 @@ class LlamaCppLocalLlmEngineTest {
             assertEquals(GenerationEvent.Failed("native failed"), awaitItem())
             awaitComplete()
         }
+    }
+
+    @Test
+    fun `rejects image request before native generation`() = runTest {
+        val bridge = RecordingBridge(tokens = listOf("unexpected"))
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+        engine.load(model, config)
+
+        engine.generate(
+            PromptRequest(
+                MessageContent.TextPrompt(
+                    text = "describe",
+                    imageAttachments = listOf(ImageAttachment("file:///tmp/image.png", "image/png")),
+                ),
+            ),
+        ).test {
+            assertEquals(
+                GenerationEvent.Failed("Selected llama.cpp model does not support image or audio input"),
+                awaitItem(),
+            )
+            awaitComplete()
+        }
+
+        assertEquals(emptyList<Long>(), bridge.generatedHandles)
     }
 
     @Test

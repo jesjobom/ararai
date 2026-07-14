@@ -1,5 +1,8 @@
 package com.jesjobom.ararai.engine
 
+import com.jesjobom.ararai.chat.AudioPrompt
+import com.jesjobom.ararai.chat.ImageAttachment
+import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import kotlinx.coroutines.flow.Flow
@@ -11,8 +14,25 @@ interface LocalLlmEngine {
 }
 
 data class PromptRequest(
-    val prompt: String,
-)
+    val content: MessageContent,
+) {
+    constructor(prompt: String) : this(MessageContent.TextPrompt(prompt))
+
+    val prompt: String
+        get() = when (content) {
+            is MessageContent.TextPrompt -> content.text
+            is MessageContent.AudioPromptContent -> content.audio.displayName ?: "Audio prompt"
+        }
+
+    val textPrompt: String?
+        get() = (content as? MessageContent.TextPrompt)?.text
+
+    val imageAttachments: List<ImageAttachment>
+        get() = (content as? MessageContent.TextPrompt)?.imageAttachments.orEmpty()
+
+    val audioPrompt: AudioPrompt?
+        get() = (content as? MessageContent.AudioPromptContent)?.audio
+}
 
 sealed interface GenerationEvent {
     data class Token(val text: String) : GenerationEvent

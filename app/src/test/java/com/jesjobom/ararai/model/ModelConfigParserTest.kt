@@ -1,5 +1,6 @@
 package com.jesjobom.ararai.model
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.fail
 import org.junit.Test
@@ -28,12 +29,49 @@ class ModelConfigParserTest {
         assertEquals(ModelRuntime.LlamaCpp, config.runtime)
         assertEquals(ModelArtifactFormat.Gguf, config.artifactFormat)
         assertEquals(ModelAccelerationPolicy.GpuPreferred, config.acceleration)
+        assertEquals(emptyList<String>(), config.fallbackUrls)
+        assertEquals(true, config.inputCapabilities.text)
+        assertEquals(false, config.inputCapabilities.image)
+        assertEquals(false, config.inputCapabilities.audio)
         assertEquals("models/smollm2-135m-q4.gguf", config.relativePath)
         assertEquals(1234L, config.expectedBytes)
         assertEquals(2048, config.inference.contextTokens)
         assertEquals(512, config.inference.maxTokens)
         assertEquals(0.7f, config.inference.temperature)
         assertEquals(0.9f, config.inference.topP)
+    }
+
+    @Test
+    fun `parses optional fallback download urls`() {
+        val config = ModelConfigParser.parse(
+            validRawConfig() + """
+
+            model.fallbackUrls=https://mirror.example.com/a.gguf, https://mirror.example.com/b.gguf
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                "https://mirror.example.com/a.gguf",
+                "https://mirror.example.com/b.gguf",
+            ),
+            config.fallbackUrls,
+        )
+    }
+
+    @Test
+    fun `parses explicit multimodal input capabilities`() {
+        val config = ModelConfigParser.parse(
+            validRawConfig() + """
+
+            model.capabilities.input.image=true
+            model.capabilities.input.audio=true
+            """.trimIndent(),
+        )
+
+        assertEquals(true, config.inputCapabilities.text)
+        assertEquals(true, config.inputCapabilities.image)
+        assertEquals(true, config.inputCapabilities.audio)
     }
 
     @Test
@@ -101,6 +139,23 @@ class ModelConfigParserTest {
         assertEquals("Tiny Model", catalog.models[0].name)
         assertEquals("Small Model", catalog.models[1].name)
         assertEquals(256, catalog.models[1].inference.maxTokens)
+    }
+
+    @Test
+    fun `parses checked in fixed model catalog`() {
+        val raw = fixedModelCatalogFile().readText()
+
+        val catalog = ModelConfigParser.parseCatalog(raw)
+
+        assertEquals("smollm2-135m-instruct-q4-k-m", catalog.defaultModelId)
+        assertEquals(7, catalog.models.size)
+        assertEquals("Qwen3.5 0.8B Q4_K_M", catalog.models[3].name)
+        assertEquals("Qwen3.5 2B Q4_K_M", catalog.models[4].name)
+        assertEquals("Qwen3.5 4B Q4_K_M", catalog.models[5].name)
+        assertEquals(ModelAccelerationPolicy.CpuOnly, catalog.models[3].acceleration)
+        assertEquals(ModelAccelerationPolicy.CpuOnly, catalog.models[4].acceleration)
+        assertEquals(ModelAccelerationPolicy.CpuOnly, catalog.models[5].acceleration)
+        assertEquals("Gemma 4 E2B IT LiteRT-LM", catalog.models[6].name)
     }
 
     @Test
@@ -195,6 +250,14 @@ class ModelConfigParserTest {
             ),
             expectedMessage = "model.runtime and model.artifactFormat must be compatible",
         )
+        assertInvalid(
+            raw = validRawConfig() + "\nmodel.capabilities.input.text=false\n",
+            expectedMessage = "model capabilities must enable at least one input modality",
+        )
+        assertInvalid(
+            raw = validRawConfig() + "\nmodel.capabilities.input.text=false\nmodel.capabilities.input.image=true\n",
+            expectedMessage = "image input requires text input support",
+        )
     }
 
     private fun assertInvalid(raw: String, expectedMessage: String) {
@@ -220,4 +283,13 @@ class ModelConfigParserTest {
         inference.temperature=0.7
         inference.topP=0.9
         """.trimIndent()
+
+    private fun fixedModelCatalogFile(): File {
+        val candidates = listOf(
+            File("app/src/main/res/raw/fixed_model.properties"),
+            File("src/main/res/raw/fixed_model.properties"),
+        )
+        return candidates.firstOrNull { it.isFile }
+            ?: error("Unable to locate fixed_model.properties from ${File(".").absolutePath}")
+    }
 }

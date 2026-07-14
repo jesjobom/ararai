@@ -61,6 +61,7 @@ object ModelConfigParser {
                 optional("${modelPrefix}acceleration", ModelAccelerationPolicy.GpuPreferred.configValue),
             ),
             url = required("${modelPrefix}url"),
+            fallbackUrls = optionalList("${modelPrefix}fallbackUrls"),
             fileName = required("${modelPrefix}fileName"),
             relativePath = required("${modelPrefix}relativePath"),
             sha256 = required("${modelPrefix}sha256").lowercase(),
@@ -71,6 +72,11 @@ object ModelConfigParser {
                 temperature = required("${inferencePrefix}temperature").toFloat(),
                 topP = required("${inferencePrefix}topP").toFloat(),
             ),
+            inputCapabilities = ModelInputCapabilities(
+                text = optionalBoolean("${modelPrefix}capabilities.input.text", defaultValue = true),
+                image = optionalBoolean("${modelPrefix}capabilities.input.image", defaultValue = false),
+                audio = optionalBoolean("${modelPrefix}capabilities.input.audio", defaultValue = false),
+            ),
         ).also { it.validate() }
 
     private fun Properties.required(key: String): String =
@@ -79,6 +85,22 @@ object ModelConfigParser {
 
     private fun Properties.optional(key: String, defaultValue: String): String =
         getProperty(key)?.trim()?.takeIf { it.isNotEmpty() } ?: defaultValue
+
+    private fun Properties.optionalBoolean(key: String, defaultValue: Boolean): Boolean {
+        val raw = getProperty(key)?.trim()?.takeIf { it.isNotEmpty() } ?: return defaultValue
+        return when (raw.lowercase()) {
+            "true" -> true
+            "false" -> false
+            else -> throw IllegalArgumentException("$key must be true or false")
+        }
+    }
+
+    private fun Properties.optionalList(key: String): List<String> =
+        getProperty(key)
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?: emptyList()
 
     private fun ModelConfig.validate() {
         require(relativePath.startsWith("models/")) {
@@ -101,6 +123,9 @@ object ModelConfigParser {
         require(expectedBytes == null || expectedBytes > 0) {
             "model.expectedBytes must be positive when present"
         }
+        require((listOf(url) + fallbackUrls).all { it.startsWith("https://") }) {
+            "model download URLs must use https"
+        }
         require(inference.contextTokens > 0) {
             "inference.contextTokens must be positive"
         }
@@ -112,6 +137,12 @@ object ModelConfigParser {
         }
         require(inference.topP in 0f..1f) {
             "inference.topP must be between 0 and 1"
+        }
+        require(inputCapabilities.text || inputCapabilities.image || inputCapabilities.audio) {
+            "model capabilities must enable at least one input modality"
+        }
+        require(!inputCapabilities.image || inputCapabilities.text) {
+            "image input requires text input support"
         }
     }
 }

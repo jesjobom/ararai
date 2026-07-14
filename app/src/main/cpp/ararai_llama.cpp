@@ -16,6 +16,10 @@ namespace {
 
 constexpr const char * LOG_TAG = "ArarAI.NativeLlm";
 constexpr const char * INVALID_LOGITS_ERROR = "Native sampler received invalid logits";
+constexpr int TOP_K = 40;
+constexpr float MIN_P = 0.05f;
+constexpr int REPEAT_PENALTY_LAST_N = 64;
+constexpr float REPEAT_PENALTY = 1.10f;
 
 struct NativeLlmHandle {
     llama_model * model = nullptr;
@@ -41,6 +45,56 @@ std::string to_string(JNIEnv * env, jstring value) {
 
 jstring to_jstring(JNIEnv * env, const std::string & value) {
     return env->NewStringUTF(value.c_str());
+}
+
+jstring utf8_to_jstring(JNIEnv * env, const std::string & value) {
+    std::vector<jchar> utf16;
+    utf16.reserve(value.size());
+
+    for (size_t index = 0; index < value.size();) {
+        const unsigned char current = static_cast<unsigned char>(value[index]);
+        uint32_t codepoint = 0;
+        size_t sequence_size = 0;
+
+        if (current <= 0x7F) {
+            codepoint = current;
+            sequence_size = 1;
+        } else if ((current & 0xE0) == 0xC0) {
+            codepoint = current & 0x1F;
+            sequence_size = 2;
+        } else if ((current & 0xF0) == 0xE0) {
+            codepoint = current & 0x0F;
+            sequence_size = 3;
+        } else if ((current & 0xF8) == 0xF0) {
+            codepoint = current & 0x07;
+            sequence_size = 4;
+        } else {
+            return nullptr;
+        }
+
+        if (index + sequence_size > value.size()) {
+            return nullptr;
+        }
+
+        for (size_t offset = 1; offset < sequence_size; ++offset) {
+            const unsigned char continuation = static_cast<unsigned char>(value[index + offset]);
+            if ((continuation & 0xC0) != 0x80) {
+                return nullptr;
+            }
+            codepoint = (codepoint << 6) | (continuation & 0x3F);
+        }
+
+        if (codepoint <= 0xFFFF) {
+            utf16.push_back(static_cast<jchar>(codepoint));
+        } else {
+            codepoint -= 0x10000;
+            utf16.push_back(static_cast<jchar>(0xD800 + (codepoint >> 10)));
+            utf16.push_back(static_cast<jchar>(0xDC00 + (codepoint & 0x3FF)));
+        }
+        index += sequence_size;
+    }
+
+    return env->NewString(utf16.data(), static_cast<jsize>(utf16.size()));
 }
 
 int thread_count() {
@@ -121,6 +175,58 @@ std::string validate_logits(llama_context * context, const llama_vocab * vocab) 
     return "";
 }
 
+size_t valid_utf8_prefix_size(const std::string & value) {
+    size_t index = 0;
+    size_t last_valid = 0;
+
+    while (index < value.size()) {
+        const unsigned char current = static_cast<unsigned char>(value[index]);
+        size_t sequence_size = 0;
+
+        if (current <= 0x7F) {
+            sequence_size = 1;
+        } else if ((current & 0xE0) == 0xC0) {
+            sequence_size = 2;
+            if (current < 0xC2) return last_valid;
+        } else if ((current & 0xF0) == 0xE0) {
+            sequence_size = 3;
+        } else if ((current & 0xF8) == 0xF0) {
+            sequence_size = 4;
+            if (current > 0xF4) return last_valid;
+        } else {
+            return last_valid;
+        }
+
+        if (index + sequence_size > value.size()) {
+            return last_valid;
+        }
+
+        for (size_t offset = 1; offset < sequence_size; ++offset) {
+            const unsigned char continuation = static_cast<unsigned char>(value[index + offset]);
+            if ((continuation & 0xC0) != 0x80) {
+                return last_valid;
+            }
+        }
+
+        if (sequence_size == 3) {
+            const unsigned char second = static_cast<unsigned char>(value[index + 1]);
+            if ((current == 0xE0 && second < 0xA0) || (current == 0xED && second >= 0xA0)) {
+                return last_valid;
+            }
+        } else if (sequence_size == 4) {
+            const unsigned char second = static_cast<unsigned char>(value[index + 1]);
+            if ((current == 0xF0 && second < 0x90) || (current == 0xF4 && second >= 0x90)) {
+                return last_valid;
+            }
+        }
+
+        index += sequence_size;
+        last_valid = index;
+    }
+
+    return last_valid;
+}
+
 } // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -191,7 +297,13 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_loadModel(
     }
 
     handle->sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(handle->sampler, llama_sampler_init_top_k(TOP_K));
     llama_sampler_chain_add(handle->sampler, llama_sampler_init_top_p(top_p, 1));
+    llama_sampler_chain_add(handle->sampler, llama_sampler_init_min_p(MIN_P, 1));
+    llama_sampler_chain_add(
+        handle->sampler,
+        llama_sampler_init_penalties(REPEAT_PENALTY_LAST_N, REPEAT_PENALTY, 0.0f, 0.0f)
+    );
     llama_sampler_chain_add(handle->sampler, llama_sampler_init_temp(temperature));
     llama_sampler_chain_add(handle->sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
@@ -324,6 +436,7 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_generate(
     }
 
     llama_token next_token = LLAMA_TOKEN_NULL;
+    std::string pending_utf8;
     llama_batch batch = llama_batch_get_one(prompt_tokens.data(), actual_tokens);
     for (int generated = 0; generated < max_tokens && !handle->cancelled; ++generated) {
         const int decode_result = llama_decode(handle->context, batch);
@@ -372,16 +485,24 @@ Java_com_jesjobom_ararai_engine_JniLlamaNativeBridge_generate(
             return to_jstring(env, "Failed to decode generated token");
         }
 
-        std::string token_piece(piece.data(), static_cast<size_t>(piece_size));
-        jstring token_text = env->NewStringUTF(token_piece.c_str());
-        const jboolean should_continue = env->CallBooleanMethod(callback, on_token, token_text);
-        env->DeleteLocalRef(token_text);
-        if (env->ExceptionCheck()) {
-            return to_jstring(env, "Token callback failed");
-        }
-        if (!should_continue) {
-            handle->cancelled = true;
-            return nullptr;
+        pending_utf8.append(piece.data(), static_cast<size_t>(piece_size));
+        const size_t emit_size = valid_utf8_prefix_size(pending_utf8);
+        if (emit_size > 0) {
+            const std::string token_text_value = pending_utf8.substr(0, emit_size);
+            pending_utf8.erase(0, emit_size);
+            jstring token_text = utf8_to_jstring(env, token_text_value);
+            if (token_text == nullptr) {
+                return to_jstring(env, "Failed to decode generated text");
+            }
+            const jboolean should_continue = env->CallBooleanMethod(callback, on_token, token_text);
+            env->DeleteLocalRef(token_text);
+            if (env->ExceptionCheck()) {
+                return to_jstring(env, "Token callback failed");
+            }
+            if (!should_continue) {
+                handle->cancelled = true;
+                return nullptr;
+            }
         }
 
         next_token = token;

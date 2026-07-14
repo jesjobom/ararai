@@ -7,6 +7,7 @@ import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptRequest
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.model.ModelInputCapabilities
 import com.jesjobom.ararai.model.ModelStartupState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -70,6 +71,19 @@ class ChatViewModelTest {
         viewModel.onPromptChanged("   ")
 
         assertFalse(viewModel.uiState.value.canSubmit)
+    }
+
+    @Test
+    fun `enables submit for image only draft when model supports images`() {
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true)),
+            inferenceConfig = inferenceConfig,
+        )
+
+        viewModel.attachImage(ImageAttachment("/tmp/image.jpg", "image/jpeg", "image.jpg"))
+
+        assertTrue(viewModel.uiState.value.canSubmit)
     }
 
     @Test
@@ -317,6 +331,53 @@ class ChatViewModelTest {
         assertEquals("Current question", store.getMessages(session.id).filter { it.role == ChatRole.User }.last().text)
     }
 
+    @Test
+    fun `submits text prompt with image attachment`() = runTest {
+        val engine = CapturingEngine()
+        val viewModel = ChatViewModel(
+            engine = engine,
+            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true)),
+            inferenceConfig = inferenceConfig,
+            scope = this,
+        )
+
+        viewModel.onPromptChanged("Describe this")
+        viewModel.attachImage(ImageAttachment("file:///tmp/image.png", "image/png", "image.png"))
+        viewModel.submitPrompt()
+        runCurrent()
+
+        val content = engine.lastRequest!!.content as MessageContent.TextPrompt
+        assertTrue(content.text.contains("User: Describe this"))
+        assertEquals(listOf(ImageAttachment("file:///tmp/image.png", "image/png", "image.png")), content.imageAttachments)
+        assertEquals(1, viewModel.uiState.value.messages.first().content.let { it as MessageContent.TextPrompt }.imageAttachments.size)
+    }
+
+    @Test
+    fun `audio prompt is mutually exclusive with text and images`() = runTest {
+        val engine = CapturingEngine()
+        val viewModel = ChatViewModel(
+            engine = engine,
+            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true, audio = true)),
+            inferenceConfig = inferenceConfig,
+            scope = this,
+        )
+
+        viewModel.onPromptChanged("typed text")
+        viewModel.attachImage(ImageAttachment("file:///tmp/image.png", "image/png"))
+        viewModel.useAudioPrompt(AudioPrompt("file:///tmp/audio.wav", "audio/wav", "audio.wav"))
+
+        assertEquals("", viewModel.uiState.value.prompt)
+        assertEquals(emptyList<ImageAttachment>(), viewModel.uiState.value.imageAttachments)
+        assertTrue(viewModel.uiState.value.canSubmit)
+
+        viewModel.onPromptChanged("should be ignored")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        assertTrue(engine.lastRequest!!.content is MessageContent.AudioPromptContent)
+        assertEquals("", viewModel.uiState.value.prompt)
+    }
+
 
     @Test
     fun `unloads engine when model becomes unavailable`() = runTest {
@@ -381,10 +442,13 @@ class ChatViewModelTest {
     private class CapturingEngine : LocalLlmEngine {
         var lastPrompt: String? = null
             private set
+        var lastRequest: PromptRequest? = null
+            private set
 
         override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
 
         override fun generate(request: PromptRequest): Flow<GenerationEvent> {
+            lastRequest = request
             lastPrompt = request.prompt
             return flowOf(GenerationEvent.Completed)
         }
