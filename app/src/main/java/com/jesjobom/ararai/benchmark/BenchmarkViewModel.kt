@@ -87,6 +87,7 @@ class BenchmarkViewModel(
                             generatedTokens += 1
                             generatedCharacters += event.text.length
                         }
+                        is GenerationEvent.ReasoningToken -> Unit
                         is GenerationEvent.Failed -> failure = event.message
                         GenerationEvent.Completed -> completed = true
                     }

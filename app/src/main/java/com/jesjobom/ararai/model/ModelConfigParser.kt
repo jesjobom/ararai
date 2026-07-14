@@ -80,6 +80,10 @@ object ModelConfigParser {
                 image = optionalBoolean("${modelPrefix}capabilities.input.image", defaultValue = false),
                 audio = optionalBoolean("${modelPrefix}capabilities.input.audio", defaultValue = false),
             ),
+            reasoningCapabilities = ModelReasoningCapabilities(
+                request = optionalBoolean("${modelPrefix}capabilities.reasoning.request", defaultValue = false),
+                output = optionalBoolean("${modelPrefix}capabilities.reasoning.output", defaultValue = false),
+            ),
         ).also { it.validate() }
 
     private fun Properties.required(key: String): String =

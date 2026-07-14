@@ -336,6 +336,11 @@ private object MessageContentCodec {
                 kind = "text",
                 payload = buildString {
                     appendLine(content.text.encodeField())
+                    if (content.reasoningText.isNotBlank()) {
+                        append("reasoning")
+                        append('\t')
+                        appendLine(content.reasoningText.encodeField())
+                    }
                     content.imageAttachments.forEach { image ->
                         append("image")
                         append('\t')
@@ -379,6 +384,14 @@ private object MessageContentCodec {
                 if (payload == null) return MessageContent.TextPrompt(legacyText)
                 val lines = payload.lineSequence().toList()
                 val text = lines.firstOrNull()?.decodeField() ?: legacyText
+                val reasoningText = lines.drop(1).firstNotNullOfOrNull { line ->
+                    val fields = line.split('\t')
+                    if (fields.firstOrNull() == "reasoning") {
+                        fields.getOrNull(1)?.decodeField()
+                    } else {
+                        null
+                    }
+                }.orEmpty()
                 val images = lines.drop(1).mapNotNull { line ->
                     val fields = line.split('\t')
                     if (fields.firstOrNull() != "image") return@mapNotNull null
@@ -389,7 +402,7 @@ private object MessageContentCodec {
                         byteSize = fields.getOrNull(4)?.decodeField()?.toLongOrNull(),
                     )
                 }
-                MessageContent.TextPrompt(text, images)
+                MessageContent.TextPrompt(text, images, reasoningText)
             }
         }
 

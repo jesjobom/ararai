@@ -20,6 +20,11 @@ data class ModelInputCapabilities(
     val audio: Boolean = false,
 )
 
+data class ModelReasoningCapabilities(
+    val request: Boolean = false,
+    val output: Boolean = false,
+)
+
 enum class ModelRuntime(
     val configValue: String,
     val displayName: String,
@@ -76,6 +81,7 @@ data class ModelConfig(
     val expectedBytes: Long?,
     val inference: InferenceConfig,
     val inputCapabilities: ModelInputCapabilities = ModelInputCapabilities(),
+    val reasoningCapabilities: ModelReasoningCapabilities = ModelReasoningCapabilities(),
 )
 
 data class ModelCatalog(
@@ -107,4 +113,5 @@ data class LocalModel(
     val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.Gguf,
     val acceleration: ModelAccelerationPolicy = ModelAccelerationPolicy.GpuPreferred,
     val inputCapabilities: ModelInputCapabilities = ModelInputCapabilities(),
+    val reasoningCapabilities: ModelReasoningCapabilities = ModelReasoningCapabilities(),
 )

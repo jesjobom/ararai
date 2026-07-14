@@ -43,6 +43,8 @@ class ChatViewModel(
             modelStatus = initialModelStatus,
             canAttachImage = initialModel?.inputCapabilities?.image == true,
             canUseAudioPrompt = initialModel?.inputCapabilities?.audio == true,
+            canEnableReasoning = initialModel?.reasoningCapabilities?.request == true,
+            canShowReasoning = initialModel?.reasoningCapabilities?.output == true,
             sessions = sessionStore.listSessions().toUiState(),
             selectedSessionId = initialSession.id,
             messages = sessionStore.getMessages(initialSession.id).toChatMessages(),
@@ -94,6 +96,26 @@ class ChatViewModel(
 
     fun clearAudioPrompt() {
         _uiState.update { it.copy(audioPrompt = null, error = null) }
+    }
+
+    fun setReasoningEnabled(enabled: Boolean) {
+        _uiState.update {
+            if (!it.canEnableReasoning && enabled) {
+                it
+            } else {
+                it.copy(reasoningEnabled = enabled && it.canEnableReasoning, error = null)
+            }
+        }
+    }
+
+    fun setShowReasoning(show: Boolean) {
+        _uiState.update {
+            if (!it.canShowReasoning && show) {
+                it
+            } else {
+                it.copy(showReasoning = show && it.canShowReasoning, error = null)
+            }
+        }
     }
 
     fun createSession() {
@@ -174,6 +196,10 @@ class ChatViewModel(
                         canRetryModelDownload = false,
                         canAttachImage = false,
                         canUseAudioPrompt = false,
+                        canEnableReasoning = false,
+                        canShowReasoning = false,
+                        reasoningEnabled = false,
+                        showReasoning = false,
                         imageAttachments = emptyList(),
                         audioPrompt = null,
                     )
@@ -191,6 +217,10 @@ class ChatViewModel(
                         canRetryModelDownload = false,
                         canAttachImage = false,
                         canUseAudioPrompt = false,
+                        canEnableReasoning = false,
+                        canShowReasoning = false,
+                        reasoningEnabled = false,
+                        showReasoning = false,
                         imageAttachments = emptyList(),
                         audioPrompt = null,
                     )
@@ -208,6 +238,10 @@ class ChatViewModel(
                         canRetryModelDownload = false,
                         canAttachImage = false,
                         canUseAudioPrompt = false,
+                        canEnableReasoning = false,
+                        canShowReasoning = false,
+                        reasoningEnabled = false,
+                        showReasoning = false,
                         imageAttachments = emptyList(),
                         audioPrompt = null,
                     )
@@ -223,6 +257,10 @@ class ChatViewModel(
                         canRetryModelDownload = false,
                         canAttachImage = state.model.inputCapabilities.image,
                         canUseAudioPrompt = state.model.inputCapabilities.audio,
+                        canEnableReasoning = state.model.reasoningCapabilities.request,
+                        canShowReasoning = state.model.reasoningCapabilities.output,
+                        reasoningEnabled = it.reasoningEnabled && state.model.reasoningCapabilities.request,
+                        showReasoning = it.showReasoning && state.model.reasoningCapabilities.output,
                         imageAttachments = if (state.model.inputCapabilities.image) it.imageAttachments else emptyList(),
                         audioPrompt = if (state.model.inputCapabilities.audio) it.audioPrompt else null,
                         error = null,
@@ -241,6 +279,10 @@ class ChatViewModel(
                         canRetryModelDownload = true,
                         canAttachImage = false,
                         canUseAudioPrompt = false,
+                        canEnableReasoning = false,
+                        canShowReasoning = false,
+                        reasoningEnabled = false,
+                        showReasoning = false,
                         imageAttachments = emptyList(),
                         audioPrompt = null,
                     )
@@ -308,9 +350,16 @@ class ChatViewModel(
                 engine.load(modelForRequest, inferenceForRequest)
                 _uiState.update { it.copy(isLoadingModel = false) }
 
-                engine.generate(PromptRequest(requestContent, requestMessages)).collect { event ->
+                engine.generate(
+                    PromptRequest(
+                        content = requestContent,
+                        chatMessages = requestMessages,
+                        reasoningEnabled = current.reasoningEnabled && modelForRequest.reasoningCapabilities.request,
+                    ),
+                ).collect { event ->
                     when (event) {
                         is GenerationEvent.Token -> appendAssistantToken(event.text)
+                        is GenerationEvent.ReasoningToken -> appendAssistantReasoningToken(event.text)
                         is GenerationEvent.Failed -> {
                             _uiState.update {
                                 it.copy(
@@ -383,15 +432,26 @@ class ChatViewModel(
     }
 
     private fun appendAssistantToken(token: String) {
+        appendAssistantContent { current ->
+            current.copy(text = current.text + token)
+        }
+    }
+
+    private fun appendAssistantReasoningToken(token: String) {
+        appendAssistantContent { current ->
+            current.copy(reasoningText = current.reasoningText + token)
+        }
+    }
+
+    private fun appendAssistantContent(update: (MessageContent.TextPrompt) -> MessageContent.TextPrompt) {
         val assistantMessageId = activeAssistantMessageId ?: return
         _uiState.update { state ->
             val updatedMessages = state.messages.toMutableList()
             val assistantIndex = updatedMessages.indexOfLast { it.id == assistantMessageId }
             if (assistantIndex >= 0) {
                 val currentAssistant = updatedMessages[assistantIndex]
-                val updatedAssistant = currentAssistant.copy(
-                    content = MessageContent.TextPrompt(currentAssistant.text + token),
-                )
+                val currentContent = currentAssistant.content as? MessageContent.TextPrompt ?: return@update state
+                val updatedAssistant = currentAssistant.copy(content = update(currentContent))
                 updatedMessages[assistantIndex] = updatedAssistant
                 sessionStore.updateMessage(assistantMessageId, updatedAssistant.content)
             }

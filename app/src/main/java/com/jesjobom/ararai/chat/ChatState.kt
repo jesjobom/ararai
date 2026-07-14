@@ -7,6 +7,10 @@ data class ChatUiState(
     val audioPrompt: AudioPrompt? = null,
     val canAttachImage: Boolean = false,
     val canUseAudioPrompt: Boolean = false,
+    val canEnableReasoning: Boolean = false,
+    val canShowReasoning: Boolean = false,
+    val reasoningEnabled: Boolean = false,
+    val showReasoning: Boolean = false,
     val sessions: List<ChatSessionUiState> = emptyList(),
     val selectedSessionId: String? = null,
     val messages: List<ChatMessage> = emptyList(),
@@ -61,6 +65,7 @@ sealed interface MessageContent {
     data class TextPrompt(
         val text: String,
         val imageAttachments: List<ImageAttachment> = emptyList(),
+        val reasoningText: String = "",
     ) : MessageContent
 
     data class AudioPromptContent(

@@ -45,6 +45,7 @@ class ModelResolver(
                 artifactFormat = config.artifactFormat,
                 acceleration = config.acceleration,
                 inputCapabilities = config.inputCapabilities,
+                reasoningCapabilities = config.reasoningCapabilities,
                 filePath = file.absolutePath,
             ),
         )

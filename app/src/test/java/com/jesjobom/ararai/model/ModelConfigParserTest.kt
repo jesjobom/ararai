@@ -34,6 +34,8 @@ class ModelConfigParserTest {
         assertEquals(true, config.inputCapabilities.text)
         assertEquals(false, config.inputCapabilities.image)
         assertEquals(false, config.inputCapabilities.audio)
+        assertEquals(false, config.reasoningCapabilities.request)
+        assertEquals(false, config.reasoningCapabilities.output)
         assertEquals("models/smollm2-135m-q4.gguf", config.relativePath)
         assertEquals(1234L, config.expectedBytes)
         assertEquals(2048, config.inference.contextTokens)
@@ -76,6 +78,20 @@ class ModelConfigParserTest {
         assertEquals(true, config.inputCapabilities.text)
         assertEquals(true, config.inputCapabilities.image)
         assertEquals(true, config.inputCapabilities.audio)
+    }
+
+    @Test
+    fun `parses explicit reasoning capabilities`() {
+        val config = ModelConfigParser.parse(
+            validRawConfig() + """
+
+            model.capabilities.reasoning.request=true
+            model.capabilities.reasoning.output=true
+            """.trimIndent(),
+        )
+
+        assertEquals(true, config.reasoningCapabilities.request)
+        assertEquals(true, config.reasoningCapabilities.output)
     }
 
     @Test
@@ -155,6 +171,12 @@ class ModelConfigParserTest {
         assertEquals(4, catalog.models.size)
         assertEquals("Gemma 4 E2B IT LiteRT-LM", catalog.models[3].name)
         assertFalse(catalog.models.any { it.id.contains("qwen", ignoreCase = true) })
+        assertFalse(catalog.models[0].reasoningCapabilities.request)
+        assertFalse(catalog.models[0].reasoningCapabilities.output)
+        catalog.models.drop(1).forEach { model ->
+            assertEquals("${model.name} reasoning request", true, model.reasoningCapabilities.request)
+            assertEquals("${model.name} reasoning output", true, model.reasoningCapabilities.output)
+        }
     }
 
     @Test

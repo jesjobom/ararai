@@ -21,7 +21,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -48,14 +51,17 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -71,6 +77,7 @@ import com.jesjobom.ararai.chat.ChatViewModel
 import com.jesjobom.ararai.chat.ImageAttachment
 import com.jesjobom.ararai.chat.MessageContent
 import java.io.File
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,13 +88,43 @@ fun ChatScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     var sessionListOpen by remember { mutableStateOf(false) }
+    var settingsOpen by remember { mutableStateOf(false) }
     var renameDialogOpen by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
+    val messageListState = rememberLazyListState()
+    var followLatestMessages by remember { mutableStateOf(true) }
     val currentSessionTitle = state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title ?: "Chat"
     val modelStatusText = when {
         state.isLoadingModel -> "Loading model"
         state.isGenerating -> "Generating"
         else -> state.modelStatus
+    }
+    val latestMessageKey = state.messages.lastOrNull()?.let { message ->
+        val reasoningText = (message.content as? MessageContent.TextPrompt)?.reasoningText.orEmpty()
+        "${message.id}:${message.text}:$reasoningText"
+    }
+
+    LaunchedEffect(messageListState, state.messages.size) {
+        snapshotFlow {
+            messageListState.isScrollInProgress to messageListState.isAtBottom(state.messages.size)
+        }.distinctUntilChanged().collect { (isScrolling, isAtBottom) ->
+            if (isScrolling) {
+                followLatestMessages = isAtBottom
+            }
+        }
+    }
+
+    LaunchedEffect(state.selectedSessionId) {
+        followLatestMessages = true
+        if (state.messages.isNotEmpty()) {
+            messageListState.scrollToItem(state.messages.lastIndex)
+        }
+    }
+
+    LaunchedEffect(state.selectedSessionId, state.messages.size, latestMessageKey) {
+        if (state.messages.isNotEmpty() && followLatestMessages) {
+            messageListState.animateScrollToItem(state.messages.lastIndex)
+        }
     }
 
     Scaffold(
@@ -113,6 +150,14 @@ fun ChatScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { settingsOpen = true }) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Chat settings",
                         )
                     }
                 },
@@ -173,6 +218,7 @@ fun ChatScreen(
                 )
             } else {
                 LazyColumn(
+                    state = messageListState,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
@@ -180,7 +226,7 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(state.messages) { message ->
-                        MessageRow(message = message)
+                        MessageRow(message = message, showReasoning = state.showReasoning)
                     }
                 }
             }
@@ -210,6 +256,18 @@ fun ChatScreen(
         )
     }
 
+    if (settingsOpen) {
+        ChatSettingsDialog(
+            reasoningEnabled = state.reasoningEnabled,
+            showReasoning = state.showReasoning,
+            canEnableReasoning = state.canEnableReasoning,
+            canShowReasoning = state.canShowReasoning,
+            onReasoningEnabledChange = viewModel::setReasoningEnabled,
+            onShowReasoningChange = viewModel::setShowReasoning,
+            onDismiss = { settingsOpen = false },
+        )
+    }
+
     if (renameDialogOpen) {
         RenameSessionDialog(
             title = renameText,
@@ -221,6 +279,12 @@ fun ChatScreen(
             },
         )
     }
+}
+
+private fun LazyListState.isAtBottom(itemCount: Int): Boolean {
+    if (itemCount == 0) return true
+    val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
+    return lastVisible >= itemCount - 1
 }
 
 @Composable
@@ -355,6 +419,80 @@ private fun SessionListItem(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ChatSettingsDialog(
+    reasoningEnabled: Boolean,
+    showReasoning: Boolean,
+    canEnableReasoning: Boolean,
+    canShowReasoning: Boolean,
+    onReasoningEnabledChange: (Boolean) -> Unit,
+    onShowReasoningChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Chat settings") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ChatSettingSwitch(
+                    title = "Enable reasoning",
+                    status = if (canEnableReasoning) null else "Unavailable for this model",
+                    checked = reasoningEnabled,
+                    enabled = canEnableReasoning,
+                    onCheckedChange = onReasoningEnabledChange,
+                )
+                ChatSettingSwitch(
+                    title = "Show reasoning",
+                    status = if (canShowReasoning) null else "Unavailable for this model",
+                    checked = showReasoning,
+                    enabled = canShowReasoning,
+                    onCheckedChange = onShowReasoningChange,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
+@Composable
+private fun ChatSettingSwitch(
+    title: String,
+    status: String?,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            status?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Switch(
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = onCheckedChange,
+        )
     }
 }
 
@@ -600,7 +738,10 @@ private fun AttachmentRow(
 }
 
 @Composable
-private fun MessageRow(message: ChatMessage) {
+private fun MessageRow(
+    message: ChatMessage,
+    showReasoning: Boolean,
+) {
     val isUser = message.role == ChatRole.User
     val containerColor = if (isUser) {
         MaterialTheme.colorScheme.primary
@@ -636,16 +777,41 @@ private fun MessageRow(message: ChatMessage) {
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                MessageContentView(message.content)
+                MessageContentView(message.content, showReasoning = showReasoning)
             }
         }
     }
 }
 
 @Composable
-private fun MessageContentView(content: MessageContent) {
+private fun MessageContentView(
+    content: MessageContent,
+    showReasoning: Boolean,
+) {
     when (content) {
         is MessageContent.TextPrompt -> {
+            if (showReasoning && content.reasoningText.isNotBlank()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = "Reasoning",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = content.reasoningText,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
             content.imageAttachments.forEach { image ->
                 Column(
                     verticalArrangement = Arrangement.spacedBy(4.dp),

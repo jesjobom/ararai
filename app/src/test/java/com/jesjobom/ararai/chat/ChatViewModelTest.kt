@@ -10,6 +10,7 @@ import com.jesjobom.ararai.engine.PromptRequest
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelInputCapabilities
+import com.jesjobom.ararai.model.ModelReasoningCapabilities
 import com.jesjobom.ararai.model.ModelStartupState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -385,6 +386,80 @@ class ChatViewModelTest {
         assertEquals("", viewModel.uiState.value.prompt)
     }
 
+    @Test
+    fun `gates reasoning settings by selected model capabilities`() = runTest {
+        val engine = CapturingEngine()
+        val reasoningModel = model.copy(
+            reasoningCapabilities = ModelReasoningCapabilities(
+                request = true,
+                output = true,
+            ),
+        )
+        val viewModel = ChatViewModel(
+            engine = engine,
+            initialModel = reasoningModel,
+            inferenceConfig = inferenceConfig,
+            scope = this,
+        )
+
+        viewModel.setReasoningEnabled(true)
+        viewModel.setShowReasoning(true)
+        viewModel.onPromptChanged("think")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        assertTrue(viewModel.uiState.value.reasoningEnabled)
+        assertTrue(viewModel.uiState.value.showReasoning)
+        assertTrue(engine.lastRequest!!.reasoningEnabled)
+
+        viewModel.onModelStartupState(ModelStartupState.Available(model, inferenceConfig))
+
+        assertFalse(viewModel.uiState.value.canEnableReasoning)
+        assertFalse(viewModel.uiState.value.canShowReasoning)
+        assertFalse(viewModel.uiState.value.reasoningEnabled)
+        assertFalse(viewModel.uiState.value.showReasoning)
+    }
+
+    @Test
+    fun `ignores reasoning enable request when selected model does not support it`() {
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+        )
+
+        viewModel.setReasoningEnabled(true)
+        viewModel.setShowReasoning(true)
+
+        assertFalse(viewModel.uiState.value.reasoningEnabled)
+        assertFalse(viewModel.uiState.value.showReasoning)
+    }
+
+    @Test
+    fun `stores reasoning tokens separately from assistant answer`() = runTest {
+        val engine = ReasoningEngine()
+        val viewModel = ChatViewModel(
+            engine = engine,
+            initialModel = model.copy(
+                reasoningCapabilities = ModelReasoningCapabilities(
+                    request = true,
+                    output = true,
+                ),
+            ),
+            inferenceConfig = inferenceConfig,
+            scope = this,
+        )
+
+        viewModel.setReasoningEnabled(true)
+        viewModel.onPromptChanged("solve")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        val content = viewModel.uiState.value.messages.last().content as MessageContent.TextPrompt
+        assertEquals("final", content.text)
+        assertEquals("because ", content.reasoningText)
+    }
+
 
     @Test
     fun `unloads engine when model becomes unavailable`() = runTest {
@@ -459,6 +534,19 @@ class ChatViewModelTest {
             lastPrompt = request.prompt
             return flowOf(GenerationEvent.Completed)
         }
+
+        override suspend fun unload() = Unit
+    }
+
+    private class ReasoningEngine : LocalLlmEngine {
+        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> =
+            flowOf(
+                GenerationEvent.ReasoningToken("because "),
+                GenerationEvent.Token("final"),
+                GenerationEvent.Completed,
+            )
 
         override suspend fun unload() = Unit
     }

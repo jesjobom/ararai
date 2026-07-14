@@ -40,6 +40,27 @@ class ChatSessionStoreTest {
         )
     }
 
+    @Test
+    fun `persists assistant reasoning separately from final text`() {
+        val store = SqliteChatSessionStore(context)
+        val session = store.ensureSession()
+        val message = store.appendMessage(
+            sessionId = session.id,
+            role = ChatRole.Assistant,
+            content = MessageContent.TextPrompt(
+                text = "Final answer",
+                reasoningText = "Private scratchpad",
+            ),
+        )
+
+        val restored = SqliteChatSessionStore(context).getMessages(session.id).single { it.id == message.id }
+        val content = restored.content as MessageContent.TextPrompt
+
+        assertEquals("Final answer", content.text)
+        assertEquals("Private scratchpad", content.reasoningText)
+        assertEquals("Final answer", restored.text)
+    }
+
     private fun createLegacyDatabase() {
         val databaseFile = context.getDatabasePath(DATABASE_NAME)
         databaseFile.parentFile?.mkdirs()
