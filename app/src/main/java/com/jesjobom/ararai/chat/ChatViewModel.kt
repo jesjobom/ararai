@@ -94,6 +94,11 @@ class ChatViewModel(
         }
     }
 
+    fun submitAudioPrompt(audio: AudioPrompt) {
+        useAudioPrompt(audio)
+        submitPrompt()
+    }
+
     fun clearAudioPrompt() {
         _uiState.update { it.copy(audioPrompt = null, error = null) }
     }

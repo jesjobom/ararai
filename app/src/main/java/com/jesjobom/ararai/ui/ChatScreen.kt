@@ -1,9 +1,15 @@
 package com.jesjobom.ararai.ui
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaPlayer
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.compose.foundation.Image
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,6 +40,8 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -46,6 +54,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -56,6 +65,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -77,6 +87,9 @@ import com.jesjobom.ararai.chat.ChatViewModel
 import com.jesjobom.ararai.chat.ImageAttachment
 import com.jesjobom.ararai.chat.MessageContent
 import java.io.File
+import java.io.FileOutputStream
+import java.io.RandomAccessFile
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -173,7 +186,7 @@ fun ChatScreen(
                 onPromptChanged = viewModel::onPromptChanged,
                 onAttachImage = viewModel::attachImage,
                 onRemoveImage = viewModel::removeImage,
-                onUseAudioPrompt = viewModel::useAudioPrompt,
+                onSendAudioPrompt = viewModel::submitAudioPrompt,
                 onClearAudioPrompt = viewModel::clearAudioPrompt,
                 canSubmit = state.canSubmit,
                 isGenerating = state.isGenerating,
@@ -562,7 +575,7 @@ private fun ChatInputBar(
     onPromptChanged: (String) -> Unit,
     onAttachImage: (ImageAttachment) -> Unit,
     onRemoveImage: (String) -> Unit,
-    onUseAudioPrompt: (AudioPrompt) -> Unit,
+    onSendAudioPrompt: (AudioPrompt) -> Unit,
     onClearAudioPrompt: () -> Unit,
     canSubmit: Boolean,
     isGenerating: Boolean,
@@ -575,6 +588,75 @@ private fun ChatInputBar(
         shadowElevation = 3.dp,
     ) {
         val context = LocalContext.current
+        var audioRecorderOpen by remember { mutableStateOf(false) }
+        var activeRecorder by remember { mutableStateOf<ChatAudioRecorder?>(null) }
+        var activeRecordingFile by remember { mutableStateOf<File?>(null) }
+        var recordingStartedAtMillis by remember { mutableStateOf(0L) }
+        var recordingDurationMillis by remember { mutableStateOf(0L) }
+        var recordedAudio by remember { mutableStateOf<RecordedAudio?>(null) }
+        var recordingError by remember { mutableStateOf<String?>(null) }
+        fun discardRecording() {
+            activeRecorder?.stopSafely()
+            activeRecorder = null
+            activeRecordingFile?.delete()
+            activeRecordingFile = null
+            recordedAudio?.file?.delete()
+            recordedAudio = null
+            recordingStartedAtMillis = 0L
+            recordingDurationMillis = 0L
+        }
+        fun startAudioRecording() {
+            discardRecording()
+            try {
+                val file = context.createRecordedAudioFile()
+                val recorder = ChatAudioRecorder(file)
+                recorder.start()
+                activeRecordingFile = file
+                activeRecorder = recorder
+                recordingStartedAtMillis = SystemClock.elapsedRealtime()
+                recordingDurationMillis = 0L
+                recordingError = null
+            } catch (error: Throwable) {
+                activeRecorder?.stopSafely()
+                activeRecorder = null
+                activeRecordingFile?.delete()
+                activeRecordingFile = null
+                recordingError = error.message ?: "Unable to start recording"
+            }
+        }
+        fun stopAudioRecording() {
+            val recorder = activeRecorder ?: return
+            val file = activeRecordingFile ?: return
+            val durationMillis = (SystemClock.elapsedRealtime() - recordingStartedAtMillis).coerceAtLeast(0L)
+            activeRecorder = null
+            activeRecordingFile = null
+            val finalized = recorder.stopSafely()
+            if (finalized && durationMillis >= MIN_RECORDED_AUDIO_DURATION_MILLIS) {
+                recordedAudio = RecordedAudio(file = file, durationMillis = durationMillis)
+                recordingDurationMillis = durationMillis
+                recordingError = null
+            } else {
+                file.delete()
+                recordingError = "Recording was too short"
+            }
+        }
+        val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { granted ->
+            if (granted) {
+                startAudioRecording()
+            } else {
+                recordingError = "Microphone permission denied"
+            }
+        }
+        fun openAudioRecorder() {
+            audioRecorderOpen = true
+            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                startAudioRecording()
+            } else {
+                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
         val imagePicker = rememberLauncherForActivityResult(
             ActivityResultContracts.OpenDocument(),
         ) { uri ->
@@ -589,19 +671,16 @@ private fun ChatInputBar(
                 ),
             )
         }
-        val audioPicker = rememberLauncherForActivityResult(
-            ActivityResultContracts.OpenDocument(),
-        ) { uri ->
-            uri ?: return@rememberLauncherForActivityResult
-            val imported = context.importChatMedia(uri, "audio")
-            onUseAudioPrompt(
-                AudioPrompt(
-                    uri = imported.file.absolutePath,
-                    mimeType = context.contentResolver.getType(uri) ?: "audio/*",
-                    displayName = imported.displayName,
-                    byteSize = imported.file.length(),
-                ),
-            )
+        DisposableEffect(Unit) {
+            onDispose {
+                activeRecorder?.stopSafely()
+            }
+        }
+        LaunchedEffect(activeRecorder, recordingStartedAtMillis) {
+            while (activeRecorder != null && recordingStartedAtMillis > 0L) {
+                recordingDurationMillis = SystemClock.elapsedRealtime() - recordingStartedAtMillis
+                delay(250)
+            }
         }
 
         Column(
@@ -667,7 +746,7 @@ private fun ChatInputBar(
                     }
                     if (canUseAudioPrompt && imageAttachments.isEmpty() && prompt.isBlank()) {
                         OutlinedButton(
-                            onClick = { audioPicker.launch(arrayOf("audio/*")) },
+                            onClick = ::openAudioRecorder,
                             enabled = !isGenerating,
                         ) {
                             Icon(imageVector = Icons.Filled.GraphicEq, contentDescription = null)
@@ -709,7 +788,120 @@ private fun ChatInputBar(
                 },
             )
         }
+
+        if (audioRecorderOpen) {
+            AudioRecorderDialog(
+                isRecording = activeRecorder != null,
+                recordedAudio = recordedAudio,
+                recordingDurationMillis = recordingDurationMillis,
+                error = recordingError,
+                onStartRecording = ::openAudioRecorder,
+                onStopRecording = ::stopAudioRecording,
+                onUseRecording = {
+                    val audio = recordedAudio ?: return@AudioRecorderDialog
+                    onSendAudioPrompt(audio.toAudioPrompt())
+                    recordedAudio = null
+                    audioRecorderOpen = false
+                },
+                onDismiss = {
+                    if (activeRecorder == null) {
+                        discardRecording()
+                        audioRecorderOpen = false
+                        recordingError = null
+                    }
+                },
+            )
+        }
     }
+}
+
+@Composable
+private fun AudioRecorderDialog(
+    isRecording: Boolean,
+    recordedAudio: RecordedAudio?,
+    recordingDurationMillis: Long,
+    error: String?,
+    onStartRecording: () -> Unit,
+    onStopRecording: () -> Unit,
+    onUseRecording: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Audio prompt") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                error?.let {
+                    Text(
+                        text = it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                when {
+                    isRecording -> {
+                        Text(
+                            text = formatDuration(recordingDurationMillis),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Recording",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    recordedAudio != null -> {
+                        Text(
+                            text = formatDuration(recordedAudio.durationMillis),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = recordedAudio.file.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        AudioPlaybackRow(
+                            audio = recordedAudio.toAudioPrompt(),
+                            compact = true,
+                        )
+                    }
+                    else -> {
+                        Text(
+                            text = "Preparing microphone.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            when {
+                isRecording -> {
+                    TextButton(onClick = onStopRecording) {
+                        Text("Stop")
+                    }
+                }
+                recordedAudio != null -> {
+                    TextButton(onClick = onUseRecording) {
+                        Text("Send")
+                    }
+                }
+                else -> {
+                    TextButton(onClick = onStartRecording) {
+                        Text("Record")
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isRecording) {
+                Text(if (recordedAudio != null) "Cancel" else "Close")
+            }
+        },
+    )
 }
 
 @Composable
@@ -733,6 +925,97 @@ private fun AttachmentRow(
         )
         IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
             Icon(imageVector = Icons.Filled.Close, contentDescription = "Remove")
+        }
+    }
+}
+
+@Composable
+private fun AudioPlaybackRow(
+    audio: AudioPrompt,
+    compact: Boolean = false,
+) {
+    val context = LocalContext.current
+    val secondaryTextColor = LocalContentColor.current.copy(alpha = 0.74f)
+    val playerState = remember(audio.uri) { mutableStateOf<MediaPlayer?>(null) }
+    var isPlaying by remember(audio.uri) { mutableStateOf(false) }
+    var playbackError by remember(audio.uri) { mutableStateOf<String?>(null) }
+    fun releasePlayer() {
+        playerState.value?.release()
+        playerState.value = null
+        isPlaying = false
+    }
+    fun ensurePlayer(): MediaPlayer? {
+        playerState.value?.let { return it }
+        return try {
+            MediaPlayer().apply {
+                if (audio.uri.startsWith("content://")) {
+                    setDataSource(context, Uri.parse(audio.uri))
+                } else {
+                    setDataSource(audio.uri)
+                }
+                setOnCompletionListener {
+                    isPlaying = false
+                    it.seekTo(0)
+                }
+                prepare()
+                playerState.value = this
+            }
+        } catch (error: Throwable) {
+            playbackError = error.message ?: "Unable to play audio"
+            releasePlayer()
+            null
+        }
+    }
+
+    DisposableEffect(audio.uri) {
+        onDispose { releasePlayer() }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = {
+                    val player = ensurePlayer() ?: return@IconButton
+                    if (player.isPlaying) {
+                        player.pause()
+                        isPlaying = false
+                    } else {
+                        player.start()
+                        isPlaying = true
+                        playbackError = null
+                    }
+                },
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause audio" else "Play audio",
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                if (!compact) {
+                    Text(
+                        text = audio.displayName ?: "Audio prompt",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Text(
+                    text = audio.durationMillis?.let(::formatDuration) ?: "Audio",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = secondaryTextColor,
+                )
+            }
+        }
+        playbackError?.let {
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.labelMedium,
+            )
         }
     }
 }
@@ -830,10 +1113,7 @@ private fun MessageContentView(
             )
         }
         is MessageContent.AudioPromptContent -> {
-            Text(
-                text = content.audio.displayName ?: "Audio prompt",
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            AudioPlaybackRow(audio = content.audio)
         }
     }
 }
@@ -858,6 +1138,29 @@ private data class ImportedMedia(
     val file: File,
     val displayName: String?,
 )
+
+internal data class RecordedAudio(
+    val file: File,
+    val durationMillis: Long,
+) {
+    fun toAudioPrompt(): AudioPrompt =
+        recordedAudioPrompt(
+            file = file,
+            durationMillis = durationMillis,
+        )
+}
+
+internal fun recordedAudioPrompt(
+    file: File,
+    durationMillis: Long,
+): AudioPrompt =
+    AudioPrompt(
+        uri = file.absolutePath,
+        mimeType = RECORDED_AUDIO_MIME_TYPE,
+        displayName = file.name,
+        byteSize = file.length(),
+        durationMillis = durationMillis,
+    )
 
 private fun Context.importChatImage(uri: Uri): ImportedMedia {
     val displayName = uri.displayName(this)
@@ -891,28 +1194,155 @@ private fun Context.importChatImage(uri: Uri): ImportedMedia {
     return ImportedMedia(file = file, displayName = displayName)
 }
 
-private fun Context.importChatMedia(uri: Uri, prefix: String): ImportedMedia {
-    val displayName = uri.displayName(this)
-    val extension = displayName?.substringAfterLast('.', missingDelimiterValue = "")?.takeIf { it.isNotBlank() }
+private fun Context.createRecordedAudioFile(): File {
     val dir = File(filesDir, "chat_media").apply { mkdirs() }
-    val file = File(
+    return File(
         dir,
-        buildString {
-            append(prefix)
-            append('-')
-            append(System.currentTimeMillis())
-            append('-')
-            append(java.util.UUID.randomUUID())
-            if (extension != null) {
-                append('.')
-                append(extension)
-            }
-        },
+        "recording-${System.currentTimeMillis()}-${java.util.UUID.randomUUID()}.wav",
     )
-    contentResolver.openInputStream(uri)?.use { input ->
-        file.outputStream().use { output -> input.copyTo(output) }
-    } ?: error("Unable to open selected media")
-    return ImportedMedia(file = file, displayName = displayName)
+}
+
+internal class ChatAudioRecorder(
+    private val file: File,
+    private val sampleRate: Int = RECORDED_AUDIO_SAMPLE_RATE_HZ,
+) {
+    private val bufferSize: Int = maxOf(
+        AudioRecord.getMinBufferSize(
+            sampleRate,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+        ),
+        RECORDED_AUDIO_BUFFER_SIZE_BYTES,
+    )
+    private var audioRecord: AudioRecord? = null
+    private var recordingThread: Thread? = null
+    @Volatile
+    private var isRecording: Boolean = false
+    @Volatile
+    private var dataSize: Long = 0L
+
+    @Suppress("MissingPermission")
+    fun start() {
+        require(bufferSize > 0) { "Unable to initialize audio input" }
+        file.parentFile?.mkdirs()
+        dataSize = 0L
+        val recorder = AudioRecord(
+            android.media.MediaRecorder.AudioSource.MIC,
+            sampleRate,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+            bufferSize,
+        )
+        if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+            recorder.release()
+            error("Unable to initialize microphone")
+        }
+        audioRecord = recorder
+        file.outputStream().use { output ->
+            output.write(createWavHeader(dataSize = 0L, sampleRate = sampleRate))
+        }
+        recorder.startRecording()
+        isRecording = true
+        recordingThread = Thread(
+            {
+                FileOutputStream(file, true).buffered().use { output ->
+                    val buffer = ByteArray(bufferSize)
+                    while (isRecording) {
+                        val read = recorder.read(buffer, 0, buffer.size)
+                        if (read > 0) {
+                            output.write(buffer, 0, read)
+                            dataSize += read.toLong()
+                        }
+                    }
+                }
+            },
+            "ChatAudioRecorder",
+        ).apply { start() }
+    }
+
+    fun stopSafely(): Boolean =
+        try {
+            isRecording = false
+            audioRecord?.stopSafely()
+            recordingThread?.join(1_000)
+            audioRecord?.release()
+            audioRecord = null
+            recordingThread = null
+            if (dataSize > 0L) {
+                file.writeWavHeader(dataSize = dataSize, sampleRate = sampleRate)
+            }
+            dataSize > 0L
+        } catch (_: RuntimeException) {
+            false
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        }
+}
+
+private fun AudioRecord.stopSafely() {
+    try {
+        stop()
+    } catch (_: RuntimeException) {
+        // The recorder may already be stopped after a setup/read failure.
+    }
+}
+
+internal fun createWavHeader(
+    dataSize: Long,
+    sampleRate: Int = RECORDED_AUDIO_SAMPLE_RATE_HZ,
+): ByteArray {
+    val channels = 1
+    val bitsPerSample = 16
+    val byteRate = sampleRate * channels * bitsPerSample / 8
+    val blockAlign = channels * bitsPerSample / 8
+    val riffSize = (dataSize + WAV_HEADER_SIZE_BYTES - 8).coerceAtMost(UInt.MAX_VALUE.toLong()).toInt()
+    val dataChunkSize = dataSize.coerceAtMost(UInt.MAX_VALUE.toLong()).toInt()
+    return ByteArray(WAV_HEADER_SIZE_BYTES).apply {
+        writeAscii(0, "RIFF")
+        writeLittleEndianInt(4, riffSize)
+        writeAscii(8, "WAVE")
+        writeAscii(12, "fmt ")
+        writeLittleEndianInt(16, 16)
+        writeLittleEndianShort(20, 1)
+        writeLittleEndianShort(22, channels)
+        writeLittleEndianInt(24, sampleRate)
+        writeLittleEndianInt(28, byteRate)
+        writeLittleEndianShort(32, blockAlign)
+        writeLittleEndianShort(34, bitsPerSample)
+        writeAscii(36, "data")
+        writeLittleEndianInt(40, dataChunkSize)
+    }
+}
+
+private fun File.writeWavHeader(dataSize: Long, sampleRate: Int) {
+    RandomAccessFile(this, "rw").use { file ->
+        file.seek(0)
+        file.write(createWavHeader(dataSize = dataSize, sampleRate = sampleRate))
+    }
+}
+
+private fun ByteArray.writeAscii(offset: Int, value: String) {
+    value.forEachIndexed { index, char -> this[offset + index] = char.code.toByte() }
+}
+
+private fun ByteArray.writeLittleEndianInt(offset: Int, value: Int) {
+    this[offset] = value.toByte()
+    this[offset + 1] = (value shr 8).toByte()
+    this[offset + 2] = (value shr 16).toByte()
+    this[offset + 3] = (value shr 24).toByte()
+}
+
+private fun ByteArray.writeLittleEndianShort(offset: Int, value: Int) {
+    this[offset] = value.toByte()
+    this[offset + 1] = (value shr 8).toByte()
+}
+
+internal fun formatDuration(durationMillis: Long): String {
+    val totalSeconds = (durationMillis / 1000).coerceAtLeast(0L)
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%d:%02d".format(minutes, seconds)
 }
 
 private fun Bitmap.scaleToFit(maxSize: Int): Bitmap {
@@ -959,3 +1389,8 @@ private fun Uri.displayName(context: Context): String? =
 private const val MAX_IMAGE_INPUT_DIMENSION = 1024
 private const val IMAGE_INPUT_JPEG_QUALITY = 88
 private const val THUMBNAIL_DECODE_DIMENSION = 256
+private const val RECORDED_AUDIO_MIME_TYPE = "audio/wav"
+private const val RECORDED_AUDIO_SAMPLE_RATE_HZ = 16_000
+private const val RECORDED_AUDIO_BUFFER_SIZE_BYTES = 4096
+private const val MIN_RECORDED_AUDIO_DURATION_MILLIS = 250L
+private const val WAV_HEADER_SIZE_BYTES = 44

@@ -387,6 +387,25 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `submits recorded audio prompt directly`() = runTest {
+        val engine = CapturingEngine()
+        val viewModel = ChatViewModel(
+            engine = engine,
+            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(audio = true)),
+            inferenceConfig = inferenceConfig,
+            scope = this,
+        )
+        val audio = AudioPrompt("/tmp/recording.wav", "audio/wav", "recording.wav", durationMillis = 1_000)
+
+        viewModel.submitAudioPrompt(audio)
+        runCurrent()
+
+        assertTrue(engine.lastRequest!!.content is MessageContent.AudioPromptContent)
+        assertEquals(audio, (engine.lastRequest!!.content as MessageContent.AudioPromptContent).audio)
+        assertEquals(audio, (viewModel.uiState.value.messages.first().content as MessageContent.AudioPromptContent).audio)
+    }
+
+    @Test
     fun `gates reasoning settings by selected model capabilities`() = runTest {
         val engine = CapturingEngine()
         val reasoningModel = model.copy(
