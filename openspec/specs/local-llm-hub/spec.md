@@ -1226,3 +1226,242 @@ selected model and runtime support audio input.
 - **WHEN** the Chat composer is displayed
 - **THEN** no audio recording action is presented.
 
+### Requirement: Clear All Chat Sessions
+
+The Chat session list SHALL provide a confirmed bulk action that permanently
+deletes all locally stored chat sessions and their messages while preserving a
+valid empty Chat state.
+
+#### Scenario: Request bulk session deletion
+
+- **GIVEN** one or more Chat sessions exist
+- **WHEN** the user selects `Clear all` from the Chat session list
+- **THEN** the app asks for confirmation before deleting any session or message
+- **AND** the confirmation explains that the deletion is permanent
+- **AND** the user can cancel without changing stored Chat data.
+
+#### Scenario: Confirm bulk session deletion
+
+- **GIVEN** the bulk-delete confirmation is displayed
+- **WHEN** the user confirms `Clear all`
+- **THEN** all existing Chat sessions and their messages are deleted atomically
+- **AND** the app creates and selects one new empty session
+- **AND** no message from a deleted session is displayed
+- **AND** draft text and pending image or audio attachments are cleared.
+
+#### Scenario: Preserve unrelated local data
+
+- **GIVEN** the user confirms clearing all Chat sessions
+- **WHEN** the deletion completes
+- **THEN** downloaded models and application settings remain unchanged.
+
+#### Scenario: Generation is active
+
+- **GIVEN** assistant generation is active
+- **WHEN** bulk session deletion would otherwise be available
+- **THEN** the app does not clear sessions or messages until generation is no
+  longer active.
+
+### Requirement: Basic Markdown Chat Rendering
+
+The Chat screen SHALL render a basic Markdown subset in textual Chat message
+content without modifying the stored source text.
+
+#### Scenario: Render block formatting
+
+- **GIVEN** a text message contains Markdown headings, unordered or ordered
+  lists, block quotes, fenced code, or horizontal rules
+- **WHEN** the message appears in Chat history
+- **THEN** each supported block is presented with visually distinct formatting
+- **AND** the original Markdown source remains unchanged in session storage.
+
+#### Scenario: Render inline formatting
+
+- **GIVEN** a text message contains bold, italic, inline code, or link syntax
+- **WHEN** the message appears in Chat history
+- **THEN** the supported inline content is styled without displaying its
+  formatting delimiters.
+
+#### Scenario: Render visible reasoning
+
+- **GIVEN** an assistant message contains reasoning text
+- **AND** `Show reasoning` is enabled
+- **WHEN** the message appears in Chat history
+- **THEN** the same supported basic Markdown formatting is applied to the
+  visible reasoning text.
+
+#### Scenario: Preserve unsupported or malformed input
+
+- **GIVEN** a message contains unsupported or malformed Markdown syntax
+- **WHEN** the message appears in Chat history
+- **THEN** the app displays readable text for that content
+- **AND** message rendering does not fail.
+
+#### Scenario: Empty streamed response
+
+- **GIVEN** an assistant response has not emitted visible text yet
+- **WHEN** its message placeholder appears in Chat history
+- **THEN** the existing loading placeholder remains visible.
+
+### Requirement: Retain Loaded Chat Model Across Internal Navigation
+
+The app SHALL retain the selected Chat model engine while the user navigates
+between screens inside the same running app process unless model state requires
+the engine to be unloaded.
+
+#### Scenario: Leave Chat with an idle loaded model
+
+- **GIVEN** the selected model is loaded for Chat
+- **AND** no generation is active
+- **WHEN** the user leaves Chat for another app screen
+- **THEN** the app retains the loaded model engine
+- **AND** returning to Chat with the same selected model does not require a full
+  model reload before the next request.
+
+#### Scenario: Leave Chat during generation
+
+- **GIVEN** assistant generation is active
+- **WHEN** the user leaves Chat for another app screen
+- **THEN** the active generation is cancelled
+- **AND** the unchanged selected model remains loaded after cancellation.
+
+#### Scenario: Selected model changes
+
+- **GIVEN** a model is loaded for Chat
+- **WHEN** another model is selected
+- **THEN** the previously loaded model is unloaded before the new selected
+  model is used.
+
+#### Scenario: Selected model becomes unusable
+
+- **GIVEN** a model is loaded for Chat
+- **WHEN** that model becomes missing, invalid, deleted, or otherwise
+  unavailable
+- **THEN** the app cancels active generation if necessary
+- **AND** unloads the unusable model engine.
+
+#### Scenario: Android destroys the app process
+
+- **GIVEN** the selected model was retained during internal navigation
+- **WHEN** Android destroys the app process
+- **THEN** the app does not promise to retain the loaded model
+- **AND** a later process start may load the model again when needed.
+
+### Requirement: Textual Context for Audio Prompts
+
+When the selected model supports audio input, the app SHALL send the current
+audio file together with bounded textual context from the selected Chat
+session.
+
+#### Scenario: Send audio with system instruction
+
+- **GIVEN** the selected model declares audio input support
+- **AND** Chat has a configured system prompt
+- **WHEN** the user submits a current audio prompt
+- **THEN** the generation request contains the current audio file
+- **AND** includes the configured system instruction as textual context.
+
+#### Scenario: Send audio with recent textual history
+
+- **GIVEN** the selected session contains prior user and assistant messages
+- **WHEN** the user submits a current audio prompt
+- **THEN** the generation request includes recent textual history from that
+  selected session
+- **AND** preserves user and assistant roles
+- **AND** applies the configured context budget before generation.
+
+#### Scenario: Historical messages contain media
+
+- **GIVEN** the selected session contains historical image or audio attachments
+- **WHEN** the user submits a current audio prompt
+- **THEN** this change does not re-send those historical media files
+- **AND** any textual representation already used by the bounded history may
+  remain in the context.
+
+#### Scenario: Current model does not support audio
+
+- **GIVEN** the selected model does not declare audio input support
+- **WHEN** an audio prompt would otherwise be submitted
+- **THEN** the app does not send the audio generation request to that model.
+
+#### Scenario: Context exceeds the configured budget
+
+- **GIVEN** the system instruction and session history exceed the available
+  input context budget
+- **WHEN** the user submits a current audio prompt
+- **THEN** the app retains the system instruction
+- **AND** selects the most recent fitting textual history
+- **AND** reserves output capacity according to the current inference
+  configuration.
+
+### Requirement: User-controlled scrolling during streamed responses
+
+Chat SHALL keep the end of a growing response visible while automatic
+following is enabled. Chat SHALL stop automatic following when the user drags
+the message history and SHALL NOT force the user back to the generated text
+while they inspect another position. Automatic following SHALL become enabled
+again when the user returns to the bottom.
+
+#### Scenario: User inspects earlier text during generation
+
+- **WHEN** an assistant response is streaming and the user drags the message
+  history away from the bottom
+- **THEN** subsequent streamed content does not change the user's scroll
+  position
+
+#### Scenario: User returns to the latest content
+
+- **WHEN** the user scrolls back to the bottom during generation
+- **THEN** Chat follows the actual end of subsequent streamed content
+
+### Requirement: Long generation has no app-level time or chunk limit
+
+Chat SHALL NOT cancel a generation because of elapsed time or the number of
+streaming callbacks. Generation MAY end when the runtime completes or fails,
+the configured runtime output limit is reached, the user selects `Cancel
+Generation`, or an applicable app lifecycle event cancels active work.
+
+#### Scenario: LiteRT-LM emits many callback chunks
+
+- **WHEN** LiteRT-LM emits more callback chunks than the configured maximum
+  output-token value
+- **THEN** the app continues consuming the stream without calling runtime
+  cancellation solely because of the callback count
+
+### Requirement: Compact session-dialog actions
+
+The Chat session dialog SHALL display `New` beside the `Chat sessions` title.
+The bottom action row SHALL display only `Clear all` followed by `Close`. Each
+action SHALL include an icon. The dialog SHALL NOT display a separate bottom
+rename action.
+
+#### Scenario: Session dialog is opened
+
+- **WHEN** the user opens the Chat session dialog
+- **THEN** `New` is displayed beside the dialog title
+- **AND** the bottom action row presents `Clear all` followed by `Close`
+
+### Requirement: Rename a session from its card
+
+Chat SHALL open the rename dialog for the specific session card that the user
+presses and holds. Renaming a non-selected session SHALL NOT require selecting
+that session first.
+
+#### Scenario: User long-presses a non-selected session
+
+- **WHEN** the user presses and holds a non-selected session card
+- **THEN** Chat opens a rename dialog initialized with that session's title
+- **AND** confirming updates that session without changing the selected session
+
+### Requirement: Compact active-session indication
+
+The Chat session dialog SHALL indicate the active session through its
+differentiated card color and SHALL NOT display an additional `Current` text
+label.
+
+#### Scenario: Active session is displayed
+
+- **WHEN** the session dialog lists the active session
+- **THEN** its card uses the selected-session color
+- **AND** no `Current` label consumes space in the card
+

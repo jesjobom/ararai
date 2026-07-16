@@ -45,6 +45,7 @@ interface ChatSessionStore {
     fun createSession(title: String): ChatSession
     fun renameSession(sessionId: String, title: String): ChatSession
     fun deleteSession(sessionId: String)
+    fun clearSessions()
     fun appendMessage(sessionId: String, role: ChatRole, content: MessageContent): StoredChatMessage
     fun appendMessage(sessionId: String, role: ChatRole, text: String): StoredChatMessage =
         appendMessage(sessionId, role, MessageContent.TextPrompt(text))
@@ -91,6 +92,11 @@ class InMemoryChatSessionStore : ChatSessionStore {
     override fun deleteSession(sessionId: String) {
         sessions.remove(sessionId)
         messages.values.removeAll { it.sessionId == sessionId }
+    }
+
+    override fun clearSessions() {
+        messages.clear()
+        sessions.clear()
     }
 
     override fun appendMessage(sessionId: String, role: ChatRole, content: MessageContent): StoredChatMessage {
@@ -251,6 +257,14 @@ class SqliteChatSessionStore(
     }
 
     @Synchronized
+    override fun clearSessions() {
+        writableDatabase.inTransaction {
+            delete("chat_messages", null, null)
+            delete("chat_sessions", null, null)
+        }
+    }
+
+    @Synchronized
     override fun appendMessage(sessionId: String, role: ChatRole, content: MessageContent): StoredChatMessage {
         val now = nextMessageTimestamp(sessionId)
         val message = StoredChatMessage(
@@ -321,6 +335,16 @@ class SqliteChatSessionStore(
     private companion object {
         const val DATABASE_NAME = "ararai_chat.db"
         const val DATABASE_VERSION = 2
+    }
+}
+
+private inline fun SQLiteDatabase.inTransaction(block: SQLiteDatabase.() -> Unit) {
+    beginTransaction()
+    try {
+        block()
+        setTransactionSuccessful()
+    } finally {
+        endTransaction()
     }
 }
 

@@ -69,10 +69,27 @@ class ConfiguredLocalLlmEngineTest {
         }
     }
 
+    @Test
+    fun `unloads previous runtime before switching engines`() = runTest {
+        val llamaCppEngine = RecordingEngine()
+        val liteRtLmEngine = RecordingEngine()
+        val engine = ConfiguredLocalLlmEngine(llamaCppEngine, liteRtLmEngine)
+        val llama = LocalModel("llama", "Llama", "/tmp/llama.gguf", runtime = ModelRuntime.LlamaCpp)
+        val gemma = LocalModel("gemma", "Gemma", "/tmp/gemma.litertlm", runtime = ModelRuntime.LiteRtLm)
+
+        engine.load(llama, config)
+        engine.load(gemma, config)
+
+        assertEquals(1, llamaCppEngine.unloadCalls)
+        assertEquals(gemma, liteRtLmEngine.loadedModel)
+    }
+
     private class RecordingEngine(
         private val events: List<GenerationEvent> = emptyList(),
     ) : LocalLlmEngine {
         var loadedModel: LocalModel? = null
+            private set
+        var unloadCalls: Int = 0
             private set
 
         override suspend fun load(model: LocalModel, config: InferenceConfig) {
@@ -82,6 +99,8 @@ class ConfiguredLocalLlmEngineTest {
         override fun generate(request: PromptRequest): Flow<GenerationEvent> =
             flowOf(*events.toTypedArray())
 
-        override suspend fun unload() = Unit
+        override suspend fun unload() {
+            unloadCalls += 1
+        }
     }
 }

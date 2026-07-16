@@ -233,7 +233,7 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `leaving chat cancels active generation and unloads engine`() = runTest {
+    fun `leaving chat cancels active generation and keeps engine loaded`() = runTest {
         val engine = SlowEngine()
         val viewModel = ChatViewModel(
             engine = engine,
@@ -249,7 +249,7 @@ class ChatViewModelTest {
         viewModel.onLeavingChat()
         runCurrent()
 
-        assertTrue(engine.unloadCalls > 0)
+        assertEquals(0, engine.unloadCalls)
         assertFalse(viewModel.uiState.value.isGenerating)
         assertFalse(viewModel.uiState.value.isLoadingModel)
     }
@@ -297,7 +297,11 @@ class ChatViewModelTest {
         viewModel.renameCurrentSession("Work notes")
         assertEquals("Work notes", viewModel.uiState.value.sessions.first { it.id == secondSession }.title)
 
-        viewModel.selectSession(firstSession!!)
+        viewModel.renameSession(firstSession!!, "Earlier chat")
+        assertEquals("Earlier chat", viewModel.uiState.value.sessions.first { it.id == firstSession }.title)
+        assertEquals(secondSession, viewModel.uiState.value.selectedSessionId)
+
+        viewModel.selectSession(firstSession)
         assertEquals(firstSession, viewModel.uiState.value.selectedSessionId)
 
         viewModel.selectSession(secondSession!!)
@@ -305,6 +309,31 @@ class ChatViewModelTest {
 
         assertEquals(1, viewModel.uiState.value.sessions.size)
         assertEquals(firstSession, viewModel.uiState.value.selectedSessionId)
+    }
+
+    @Test
+    fun `clears every session and creates a new empty session`() {
+        val store = InMemoryChatSessionStore()
+        val first = store.ensureSession()
+        store.appendMessage(first.id, ChatRole.User, "first message")
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            sessionStore = store,
+        )
+        viewModel.createSession()
+        val second = viewModel.uiState.value.selectedSessionId!!
+        store.appendMessage(second, ChatRole.User, "second message")
+
+        viewModel.clearAllSessions()
+
+        val state = viewModel.uiState.value
+        assertEquals(1, state.sessions.size)
+        assertTrue(state.selectedSessionId != first.id)
+        assertTrue(state.selectedSessionId != second)
+        assertTrue(state.messages.isEmpty())
+        assertTrue(store.getMessages(state.selectedSessionId!!).isEmpty())
     }
 
     @Test
@@ -403,6 +432,44 @@ class ChatViewModelTest {
         assertTrue(engine.lastRequest!!.content is MessageContent.AudioPromptContent)
         assertEquals(audio, (engine.lastRequest!!.content as MessageContent.AudioPromptContent).audio)
         assertEquals(audio, (viewModel.uiState.value.messages.first().content as MessageContent.AudioPromptContent).audio)
+    }
+
+    @Test
+    fun `audio prompt includes system prompt and recent textual history`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val session = store.ensureSession()
+        store.appendMessage(session.id, ChatRole.User, "Earlier question")
+        store.appendMessage(session.id, ChatRole.Assistant, "Earlier answer")
+        store.appendMessage(
+            session.id,
+            ChatRole.User,
+            MessageContent.TextPrompt(
+                text = "Image question",
+                imageAttachments = listOf(ImageAttachment("/tmp/old.png", "image/png")),
+            ),
+        )
+        val engine = CapturingEngine()
+        val viewModel = ChatViewModel(
+            engine = engine,
+            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(audio = true)),
+            inferenceConfig = inferenceConfig,
+            systemPrompt = "Be useful.",
+            sessionStore = store,
+            scope = this,
+        )
+        val audio = AudioPrompt("/tmp/current.wav", "audio/wav")
+
+        viewModel.submitAudioPrompt(audio)
+        runCurrent()
+
+        val request = engine.lastRequest!!
+        assertEquals(audio, request.audioPrompt)
+        assertTrue(request.chatMessages.any { it.role == PromptChatRole.System && it.text == "Be useful." })
+        assertTrue(request.chatMessages.any { it.role == PromptChatRole.User && it.text == "Earlier question" })
+        assertTrue(request.chatMessages.any { it.role == PromptChatRole.Assistant && it.text == "Earlier answer" })
+        assertTrue(request.chatMessages.any { it.role == PromptChatRole.User && it.text == "Image question" })
+        assertEquals(listOf(audio), listOfNotNull(request.audioPrompt))
+        assertTrue(request.imageAttachments.isEmpty())
     }
 
     @Test

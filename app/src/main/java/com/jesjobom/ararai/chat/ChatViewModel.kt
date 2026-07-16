@@ -157,6 +157,11 @@ class ChatViewModel(
 
     fun renameCurrentSession(title: String) {
         val sessionId = _uiState.value.selectedSessionId ?: return
+        renameSession(sessionId, title)
+    }
+
+    fun renameSession(sessionId: String, title: String) {
+        if (_uiState.value.sessions.none { it.id == sessionId }) return
         sessionStore.renameSession(sessionId, title)
         _uiState.update { it.copy(sessions = sessionStore.listSessions().toUiState(), error = null) }
     }
@@ -182,6 +187,25 @@ class ChatViewModel(
                 selectedSessionId = next.id,
                 messages = sessionStore.getMessages(next.id).toChatMessages(),
                 prompt = "",
+                error = null,
+            )
+        }
+    }
+
+    fun clearAllSessions() {
+        if (generationJob?.isActive == true) return
+
+        sessionStore.clearSessions()
+        val replacement = sessionStore.ensureSession()
+        activeAssistantMessageId = null
+        _uiState.update {
+            it.copy(
+                sessions = sessionStore.listSessions().toUiState(),
+                selectedSessionId = replacement.id,
+                messages = emptyList(),
+                prompt = "",
+                imageAttachments = emptyList(),
+                audioPrompt = null,
                 error = null,
             )
         }
@@ -403,7 +427,6 @@ class ChatViewModel(
 
     fun onLeavingChat() {
         stopActiveGeneration()
-        unloadEngine()
         _uiState.update {
             it.copy(
                 isLoadingModel = false,
@@ -491,7 +514,12 @@ class ChatViewModel(
                 },
                 inferenceConfig = inferenceConfig,
             )
-            is MessageContent.AudioPromptContent -> emptyList()
+            is MessageContent.AudioPromptContent -> promptContextBuilder.build(
+                systemPrompt = systemPrompt,
+                history = history,
+                userPrompt = "",
+                inferenceConfig = inferenceConfig,
+            )
         }
 
     private fun MessageContent.toRequestContent(messages: List<PromptChatMessage>): MessageContent =

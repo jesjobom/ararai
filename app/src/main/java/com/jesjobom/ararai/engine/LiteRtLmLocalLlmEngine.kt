@@ -96,14 +96,12 @@ class LiteRtLmLocalLlmEngine(
                     trySend(GenerationEvent.Failed(failure))
                     return@launch
                 }
-                var emittedChunks = 0
                 state.session.generate(request, state.config).collect { chunk ->
-                    if (chunk.isNotEmpty()) {
-                        emittedChunks += 1
-                        trySend(GenerationEvent.Token(chunk))
+                    if (chunk.text.isNotEmpty()) {
+                        trySend(GenerationEvent.Token(chunk.text))
                     }
-                    if (emittedChunks >= state.config.maxTokens) {
-                        state.session.cancel()
+                    if (chunk.reasoning.isNotEmpty()) {
+                        trySend(GenerationEvent.ReasoningToken(chunk.reasoning))
                     }
                 }
                 trySend(GenerationEvent.Completed)
@@ -165,10 +163,15 @@ interface LiteRtLmBridge {
 }
 
 interface LiteRtLmSession {
-    fun generate(request: PromptRequest, config: InferenceConfig): Flow<String>
+    fun generate(request: PromptRequest, config: InferenceConfig): Flow<LiteRtLmChunk>
     fun cancel()
     fun close()
 }
+
+data class LiteRtLmChunk(
+    val text: String = "",
+    val reasoning: String = "",
+)
 
 class AndroidLiteRtLmBridge(
     private val cacheDir: String? = null,
@@ -206,7 +209,7 @@ private class AndroidLiteRtLmSession(
     @Volatile
     private var activeConversation: Conversation? = null
 
-    override fun generate(request: PromptRequest, config: InferenceConfig): Flow<String> = callbackFlow {
+    override fun generate(request: PromptRequest, config: InferenceConfig): Flow<LiteRtLmChunk> = callbackFlow {
         val samplerConfig = SamplerConfig(
             topK = DEFAULT_TOP_K,
             topP = config.topP.toDouble(),
@@ -214,23 +217,26 @@ private class AndroidLiteRtLmSession(
             seed = DEFAULT_SEED,
         )
         val conversation = engine.createConversation(
-            ConversationConfig(samplerConfig = samplerConfig),
+            ConversationConfig(
+                samplerConfig = samplerConfig,
+                extraContext = mapOf(ENABLE_THINKING_CONTEXT_KEY to request.reasoningEnabled),
+            ),
         )
 
         try {
             activeConversation = conversation
             var previousText = ""
+            var previousReasoning = ""
             val callback = object : MessageCallback {
                 override fun onMessage(message: Message) {
                     val currentText = message.text()
-                    val delta = if (currentText.startsWith(previousText)) {
-                        currentText.removePrefix(previousText)
-                    } else {
-                        currentText
-                    }
+                    val currentReasoning = message.reasoning()
+                    val textDelta = currentText.deltaAfter(previousText)
+                    val reasoningDelta = currentReasoning.deltaAfter(previousReasoning)
                     previousText = currentText
-                    if (delta.isNotEmpty()) {
-                        trySend(delta)
+                    previousReasoning = currentReasoning
+                    if (textDelta.isNotEmpty() || reasoningDelta.isNotEmpty()) {
+                        trySend(LiteRtLmChunk(text = textDelta, reasoning = reasoningDelta))
                     }
                 }
 
@@ -270,28 +276,51 @@ private class AndroidLiteRtLmSession(
             .filterIsInstance<Content.Text>()
             .joinToString(separator = "") { it.text }
 
-    private fun PromptRequest.toLiteRtContents(): Contents =
-        audioPrompt?.let { audio ->
-            Contents.of(Content.AudioFile(audio.uri.asFilePath()))
-        } ?: Contents.of(
-            buildList {
-                imageAttachments.forEach { image ->
-                    add(Content.ImageFile(image.uri.asFilePath()))
-                }
-                textPrompt?.takeIf { it.isNotBlank() }?.let { text ->
-                    add(Content.Text(text))
-                }
-            },
-        )
+    private fun Message.reasoning(): String =
+        channels.values.joinToString(separator = "")
 
-    private fun String.asFilePath(): String =
-        toLiteRtFilePath()
+    private fun String.deltaAfter(previous: String): String =
+        if (startsWith(previous)) removePrefix(previous) else this
 
     private companion object {
         const val DEFAULT_TOP_K = 40
         const val DEFAULT_SEED = 0
+        const val ENABLE_THINKING_CONTEXT_KEY = "enable_thinking"
     }
 }
+
+internal fun PromptRequest.toLiteRtContents(): Contents =
+    Contents.of(
+        toLiteRtInputParts().map { part ->
+            when (part) {
+                is LiteRtInputPart.AudioFile -> Content.AudioFile(part.path)
+                is LiteRtInputPart.ImageFile -> Content.ImageFile(part.path)
+                is LiteRtInputPart.Text -> Content.Text(part.text)
+            }
+        },
+    )
+
+internal sealed interface LiteRtInputPart {
+    data class AudioFile(val path: String) : LiteRtInputPart
+    data class ImageFile(val path: String) : LiteRtInputPart
+    data class Text(val text: String) : LiteRtInputPart
+}
+
+internal fun PromptRequest.toLiteRtInputParts(): List<LiteRtInputPart> =
+    buildList {
+            audioPrompt?.let { audio ->
+                add(LiteRtInputPart.AudioFile(audio.uri.toLiteRtFilePath()))
+            } ?: imageAttachments.forEach { image ->
+                add(LiteRtInputPart.ImageFile(image.uri.toLiteRtFilePath()))
+            }
+
+            val contextText = if (audioPrompt != null) {
+                chatMessages.takeIf { it.isNotEmpty() }?.toPlainChatPrompt()
+            } else {
+                textPrompt
+            }
+            contextText?.takeIf { it.isNotBlank() }?.let { add(LiteRtInputPart.Text(it)) }
+        }
 
 internal fun String.toLiteRtFilePath(): String =
     when {

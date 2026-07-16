@@ -14,6 +14,7 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class ChatSessionStoreTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
+    private val openStores = mutableListOf<SqliteChatSessionStore>()
 
     @Before
     fun setUp() {
@@ -22,6 +23,8 @@ class ChatSessionStoreTest {
 
     @After
     fun tearDown() {
+        openStores.forEach(SqliteChatSessionStore::close)
+        openStores.clear()
         context.deleteDatabase(DATABASE_NAME)
     }
 
@@ -29,7 +32,7 @@ class ChatSessionStoreTest {
     fun `upgrades legacy text history to structured text prompts`() {
         createLegacyDatabase()
 
-        val messages = SqliteChatSessionStore(context).getMessages("session-1")
+        val messages = store().getMessages("session-1")
 
         assertEquals(1, messages.size)
         assertEquals("Legacy question", messages.single().text)
@@ -42,7 +45,7 @@ class ChatSessionStoreTest {
 
     @Test
     fun `persists assistant reasoning separately from final text`() {
-        val store = SqliteChatSessionStore(context)
+        val store = store()
         val session = store.ensureSession()
         val message = store.appendMessage(
             sessionId = session.id,
@@ -53,12 +56,27 @@ class ChatSessionStoreTest {
             ),
         )
 
-        val restored = SqliteChatSessionStore(context).getMessages(session.id).single { it.id == message.id }
+        val restored = store().getMessages(session.id).single { it.id == message.id }
         val content = restored.content as MessageContent.TextPrompt
 
         assertEquals("Final answer", content.text)
         assertEquals("Private scratchpad", content.reasoningText)
         assertEquals("Final answer", restored.text)
+    }
+
+    @Test
+    fun `clears every session and message`() {
+        val store = store()
+        val first = store.ensureSession()
+        store.appendMessage(first.id, ChatRole.User, "first")
+        val second = store.createSession("Second")
+        store.appendMessage(second.id, ChatRole.Assistant, "second")
+
+        store.clearSessions()
+
+        assertTrue(store.listSessions().isEmpty())
+        assertTrue(store.getMessages(first.id).isEmpty())
+        assertTrue(store.getMessages(second.id).isEmpty())
     }
 
     private fun createLegacyDatabase() {
@@ -103,6 +121,9 @@ class ChatSessionStoreTest {
             db.version = 1
         }
     }
+
+    private fun store(): SqliteChatSessionStore =
+        SqliteChatSessionStore(context).also(openStores::add)
 
     private companion object {
         const val DATABASE_NAME = "ararai_chat.db"

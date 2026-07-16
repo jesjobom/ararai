@@ -13,11 +13,15 @@ class ConfiguredLocalLlmEngine(
     private var activeEngine: LocalLlmEngine? = null
 
     override suspend fun load(model: LocalModel, config: InferenceConfig) {
-        activeEngine = when (model.runtime) {
+        val targetEngine = when (model.runtime) {
             ModelRuntime.LlamaCpp -> llamaCppEngine
             ModelRuntime.LiteRtLm -> liteRtLmEngine
         }
-        activeEngine?.load(model, config)
+        if (activeEngine !== targetEngine) {
+            activeEngine?.unload()
+            activeEngine = targetEngine
+        }
+        targetEngine.load(model, config)
     }
 
     override fun generate(request: PromptRequest): Flow<GenerationEvent> =

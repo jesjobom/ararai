@@ -12,6 +12,9 @@ import android.net.Uri
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -21,13 +24,15 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -39,7 +44,6 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -71,7 +75,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -90,7 +93,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,10 +103,14 @@ fun ChatScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     var sessionListOpen by remember { mutableStateOf(false) }
+    var clearSessionsConfirmationOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var renameDialogOpen by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
+    var renameSessionId by remember { mutableStateOf<String?>(null) }
     val messageListState = rememberLazyListState()
+    val bottomRequester = remember { BringIntoViewRequester() }
+    val isUserDragging by messageListState.interactionSource.collectIsDraggedAsState()
     var followLatestMessages by remember { mutableStateOf(true) }
     val currentSessionTitle = state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title ?: "Chat"
     val modelStatusText = when {
@@ -117,26 +123,24 @@ fun ChatScreen(
         "${message.id}:${message.text}:$reasoningText"
     }
 
-    LaunchedEffect(messageListState, state.messages.size) {
-        snapshotFlow {
-            messageListState.isScrollInProgress to messageListState.isAtBottom(state.messages.size)
-        }.distinctUntilChanged().collect { (isScrolling, isAtBottom) ->
-            if (isScrolling) {
-                followLatestMessages = isAtBottom
-            }
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) {
+            followLatestMessages = false
+        } else if (!messageListState.canScrollForward) {
+            followLatestMessages = true
         }
     }
 
     LaunchedEffect(state.selectedSessionId) {
         followLatestMessages = true
         if (state.messages.isNotEmpty()) {
-            messageListState.scrollToItem(state.messages.lastIndex)
+            bottomRequester.bringIntoView()
         }
     }
 
     LaunchedEffect(state.selectedSessionId, state.messages.size, latestMessageKey) {
         if (state.messages.isNotEmpty() && followLatestMessages) {
-            messageListState.animateScrollToItem(state.messages.lastIndex)
+            bottomRequester.bringIntoView()
         }
     }
 
@@ -241,6 +245,14 @@ fun ChatScreen(
                     items(state.messages) { message ->
                         MessageRow(message = message, showReasoning = state.showReasoning)
                     }
+                    item(key = "message-list-bottom") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .bringIntoViewRequester(bottomRequester),
+                        )
+                    }
                 }
             }
         }
@@ -260,12 +272,28 @@ fun ChatScreen(
                 viewModel.selectSession(it)
                 sessionListOpen = false
             },
-            onRename = {
-                renameText = currentSessionTitle
+            onRename = { session ->
+                renameSessionId = session.id
+                renameText = session.title
                 renameDialogOpen = true
                 sessionListOpen = false
             },
             onDelete = viewModel::deleteSession,
+            onClearAll = {
+                sessionListOpen = false
+                clearSessionsConfirmationOpen = true
+            },
+        )
+    }
+
+    if (clearSessionsConfirmationOpen) {
+        ClearSessionsConfirmationDialog(
+            sessionCount = state.sessions.size,
+            onDismiss = { clearSessionsConfirmationOpen = false },
+            onConfirm = {
+                viewModel.clearAllSessions()
+                clearSessionsConfirmationOpen = false
+            },
         )
     }
 
@@ -285,19 +313,17 @@ fun ChatScreen(
         RenameSessionDialog(
             title = renameText,
             onTitleChange = { renameText = it },
-            onDismiss = { renameDialogOpen = false },
+            onDismiss = {
+                renameSessionId = null
+                renameDialogOpen = false
+            },
             onConfirm = {
-                viewModel.renameCurrentSession(renameText)
+                renameSessionId?.let { viewModel.renameSession(it, renameText) }
+                renameSessionId = null
                 renameDialogOpen = false
             },
         )
     }
-}
-
-private fun LazyListState.isAtBottom(itemCount: Int): Boolean {
-    if (itemCount == 0) return true
-    val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
-    return lastVisible >= itemCount - 1
 }
 
 @Composable
@@ -332,12 +358,30 @@ private fun SessionListDialog(
     onDismiss: () -> Unit,
     onCreate: () -> Unit,
     onSelect: (String) -> Unit,
-    onRename: () -> Unit,
+    onRename: (ChatSessionUiState) -> Unit,
     onDelete: (String) -> Unit,
+    onClearAll: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Chat sessions") },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Chat sessions",
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onCreate) {
+                    Icon(imageVector = Icons.Filled.Add, contentDescription = null)
+                    Text(
+                        text = "New",
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
+            }
+        },
         text = {
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
@@ -349,31 +393,27 @@ private fun SessionListDialog(
                         isSelected = session.id == selectedSessionId,
                         canDelete = canDelete,
                         onSelect = { onSelect(session.id) },
+                        onRename = { onRename(session) },
                         onDelete = { onDelete(session.id) },
                     )
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onCreate) {
-                Icon(imageVector = Icons.Filled.Add, contentDescription = null)
-                Text(
-                    text = "New",
-                    modifier = Modifier.padding(start = 6.dp),
-                )
-            }
-        },
-        dismissButton = {
             Row {
-                TextButton(onClick = onRename, enabled = selectedSessionId != null) {
-                    Icon(imageVector = Icons.Filled.Edit, contentDescription = null)
+                TextButton(onClick = onClearAll, enabled = sessions.isNotEmpty()) {
+                    Icon(imageVector = Icons.Filled.Delete, contentDescription = null)
                     Text(
-                        text = "Rename",
+                        text = "Clear all",
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }
                 TextButton(onClick = onDismiss) {
-                    Text("Close")
+                    Icon(imageVector = Icons.Filled.Close, contentDescription = null)
+                    Text(
+                        text = "Close",
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
                 }
             }
         },
@@ -381,14 +421,48 @@ private fun SessionListDialog(
 }
 
 @Composable
+private fun ClearSessionsConfirmationDialog(
+    sessionCount: Int,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Clear all sessions?") },
+        text = {
+            Text(
+                "This permanently deletes ${if (sessionCount == 1) "the current session" else "all $sessionCount sessions"} and their messages. A new empty session will be created.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Clear all")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun SessionListItem(
     session: ChatSessionUiState,
     isSelected: Boolean,
     canDelete: Boolean,
     onSelect: () -> Unit,
+    onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Surface(
+        modifier = Modifier.combinedClickable(
+            onClick = onSelect,
+            onLongClick = onRename,
+            onLongClickLabel = "Rename chat",
+        ),
         color = if (isSelected) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
@@ -408,27 +482,16 @@ private fun SessionListItem(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(
-                onClick = onSelect,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(
-                    text = session.title,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+            Text(
+                text = session.title,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            )
             IconButton(onClick = onDelete, enabled = canDelete) {
                 Icon(
                     imageVector = Icons.Filled.Delete,
                     contentDescription = "Delete chat",
-                )
-            }
-            if (isSelected) {
-                Text(
-                    text = "Current",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(end = 8.dp),
                 )
             }
         }
@@ -1088,10 +1151,7 @@ private fun MessageContentView(
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
-                        Text(
-                            text = content.reasoningText,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                        MarkdownText(text = content.reasoningText)
                     }
                 }
             }
@@ -1107,10 +1167,7 @@ private fun MessageContentView(
                     )
                 }
             }
-            Text(
-                text = content.text.ifBlank { "..." },
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            MarkdownText(text = content.text.ifBlank { "..." })
         }
         is MessageContent.AudioPromptContent -> {
             AudioPlaybackRow(audio = content.audio)
