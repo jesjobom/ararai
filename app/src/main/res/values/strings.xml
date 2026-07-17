@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ArarAI</string>
+    <string name="play_response_speech">Read response aloud</string>
+    <string name="stop_response_speech">Stop reading response</string>
 </resources>

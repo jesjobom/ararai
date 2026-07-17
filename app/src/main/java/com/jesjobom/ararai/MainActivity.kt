@@ -17,6 +17,7 @@ import com.jesjobom.ararai.model.ModelFileDownloader
 import com.jesjobom.ararai.model.SharedPreferencesModelSelectionStore
 import com.jesjobom.ararai.ui.ArarAiApp
 import com.jesjobom.ararai.ui.ArarAiTheme
+import com.jesjobom.ararai.ui.AndroidChatTextToSpeechService
 import com.jesjobom.ararai.ui.androidChatMediaServices
 
 class MainActivity : ComponentActivity() {
@@ -46,6 +47,7 @@ class MainActivity : ComponentActivity() {
                         chatSessionStore = chatSessionStore,
                         chatMediaRepository = chatMediaRepository,
                         chatMediaServices = chatMediaServices,
+                        chatTextToSpeechServiceFactory = { AndroidChatTextToSpeechService(this) },
                         systemPrompt = modelCatalog.chat.systemPrompt,
                         appVersionLabel = "v${BuildConfig.VERSION_NAME}",
                         liteRtLmCacheDir = prepareLiteRtLmCacheDir(cacheDir) { error ->

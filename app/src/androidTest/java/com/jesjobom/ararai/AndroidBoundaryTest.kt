@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.speech.tts.TextToSpeech
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -13,9 +14,12 @@ import com.jesjobom.ararai.chat.FileChatMediaRepository
 import com.jesjobom.ararai.engine.JniLlamaNativeBridge
 import com.jesjobom.ararai.ui.chatImageImporter
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -70,5 +74,24 @@ class AndroidBoundaryTest {
         JniLlamaNativeBridge.cancel(0L)
         JniLlamaNativeBridge.unloadModel(0L)
         assertFalse(Thread.currentThread().isInterrupted)
+    }
+
+    @Test
+    fun nativeTextToSpeechInitializesWhenAvailable() {
+        val initialized = CountDownLatch(1)
+        var initializationStatus = TextToSpeech.ERROR
+        val engine = TextToSpeech(context) { status ->
+            initializationStatus = status
+            initialized.countDown()
+        }
+
+        try {
+            assertTrue("TextToSpeech initialization timed out", initialized.await(10, TimeUnit.SECONDS))
+            assumeTrue("No native TextToSpeech engine is available", initializationStatus == TextToSpeech.SUCCESS)
+            assertTrue("No default TextToSpeech voice is available", engine.voice != null)
+        } finally {
+            engine.stop()
+            engine.shutdown()
+        }
     }
 }

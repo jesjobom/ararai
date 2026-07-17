@@ -10,9 +10,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -33,6 +35,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.jesjobom.ararai.R
 import com.jesjobom.ararai.chat.AudioPrompt
 import com.jesjobom.ararai.chat.ChatMessage
 import com.jesjobom.ararai.chat.ChatRole
@@ -150,6 +154,9 @@ internal fun MessageRow(
     message: ChatMessage,
     showReasoning: Boolean,
     mediaServices: ChatMediaServices,
+    isStreaming: Boolean = false,
+    isSpeaking: Boolean = false,
+    onToggleSpeech: () -> Unit = {},
 ) {
     val isUser = message.role == ChatRole.User
     val containerColor = if (isUser) {
@@ -186,7 +193,22 @@ internal fun MessageRow(
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-        MessageContentView(message.content, showReasoning = showReasoning, mediaServices = mediaServices)
+                MessageContentView(message.content, showReasoning = showReasoning, mediaServices = mediaServices)
+                if (message.isEligibleForTextToSpeech(isStreaming)) {
+                    IconButton(
+                        onClick = onToggleSpeech,
+                        modifier = Modifier
+                            .align(Alignment.End)
+                            .size(36.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (isSpeaking) Icons.Filled.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = stringResource(
+                                if (isSpeaking) R.string.stop_response_speech else R.string.play_response_speech,
+                            ),
+                        )
+                    }
+                }
             }
         }
     }

@@ -56,6 +56,7 @@ import com.jesjobom.ararai.benchmark.BenchmarkViewModel
 import com.jesjobom.ararai.chat.ChatSessionStore
 import com.jesjobom.ararai.chat.ChatMediaRepository
 import com.jesjobom.ararai.chat.ChatViewModel
+import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.ConfiguredLocalLlmEngine
 import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelCatalogController
@@ -75,6 +76,7 @@ internal fun ArarAiApp(
     chatSessionStore: ChatSessionStore,
     chatMediaRepository: ChatMediaRepository,
     chatMediaServices: ChatMediaServices,
+    chatTextToSpeechServiceFactory: () -> ChatTextToSpeechService,
     systemPrompt: String,
     appVersionLabel: String,
     liteRtLmCacheDir: String? = null,
@@ -83,10 +85,15 @@ internal fun ArarAiApp(
     val startupState = modelCatalogState.selectedStartupState
     val modelConfig = modelCatalogState.selectedConfig
     var destination by remember { mutableStateOf(AppDestination.Home) }
+    val localLlmRuntime = remember(liteRtLmCacheDir) {
+        AppLocalLlmRuntime {
+            ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir)
+        }
+    }
     val chatViewModel = remember {
         val availableState = startupState as? ModelStartupState.Available
         ChatViewModel(
-            engine = ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir),
+            engine = localLlmRuntime.engine,
             initialModel = availableState?.model,
             inferenceConfig = availableState?.inference ?: modelConfig.inference,
             systemPrompt = systemPrompt,
@@ -96,7 +103,7 @@ internal fun ArarAiApp(
     }
     val benchmarkViewModel = remember {
         BenchmarkViewModel(
-            engine = ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir),
+            engine = localLlmRuntime.engine,
             initialConfig = modelConfig,
             initialState = startupState,
         )
@@ -133,6 +140,7 @@ internal fun ArarAiApp(
         AppDestination.Chat -> ChatScreen(
             viewModel = chatViewModel,
             mediaServices = chatMediaServices,
+            textToSpeechServiceFactory = chatTextToSpeechServiceFactory,
             onBack = { returnHome() },
             onRetryModelDownload = { modelController.retry(modelCatalogState.selectedModelId) },
         )

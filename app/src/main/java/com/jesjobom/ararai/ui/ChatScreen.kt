@@ -28,6 +28,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +46,7 @@ import com.jesjobom.ararai.chat.MessageContent
 internal fun ChatScreen(
     viewModel: ChatViewModel,
     mediaServices: ChatMediaServices,
+    textToSpeechServiceFactory: () -> ChatTextToSpeechService,
     onBack: () -> Unit,
     onRetryModelDownload: () -> Unit = {},
 ) {
@@ -55,6 +57,10 @@ internal fun ChatScreen(
     var renameDialogOpen by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var renameSessionId by remember { mutableStateOf<String?>(null) }
+    var textToSpeechState by remember { mutableStateOf(ChatTextToSpeechState()) }
+    val textToSpeechController = remember(textToSpeechServiceFactory) {
+        ChatTextToSpeechController(textToSpeechServiceFactory()) { textToSpeechState = it }
+    }
     val messageListState = rememberLazyListState()
     val bottomRequester = remember { BringIntoViewRequester() }
     val isUserDragging by messageListState.interactionSource.collectIsDraggedAsState()
@@ -70,6 +76,10 @@ internal fun ChatScreen(
         "${message.id}:${message.text}:$reasoningText"
     }
 
+    DisposableEffect(textToSpeechController) {
+        onDispose { textToSpeechController.close() }
+    }
+
     LaunchedEffect(isUserDragging) {
         if (isUserDragging) {
             followLatestMessages = false
@@ -79,6 +89,7 @@ internal fun ChatScreen(
     }
 
     LaunchedEffect(state.selectedSessionId) {
+        textToSpeechController.stop()
         followLatestMessages = true
         if (state.messages.isNotEmpty()) {
             bottomRequester.bringIntoView()
@@ -160,6 +171,15 @@ internal fun ChatScreen(
                 onClick = { sessionListOpen = true },
             )
 
+            textToSpeechState.error?.let { error ->
+                Text(
+                    text = error,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+
             if (state.canRetryModelDownload) {
                 Button(
                     onClick = onRetryModelDownload,
@@ -191,10 +211,17 @@ internal fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(state.messages) { message ->
+                        val isStreaming = state.isGenerating && message.id == state.messages.lastOrNull()?.id
                         MessageRow(
                             message = message,
                             showReasoning = state.showReasoning,
                             mediaServices = mediaServices,
+                            isStreaming = isStreaming,
+                            isSpeaking = textToSpeechState.activeMessageId == message.id,
+                            onToggleSpeech = {
+                                textToSpeechController.clearError()
+                                textToSpeechController.toggle(message.id, message.text)
+                            },
                         )
                     }
                     item(key = "message-list-bottom") {
