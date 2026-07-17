@@ -17,6 +17,7 @@ data class PromptRequest(
     val content: MessageContent,
     val chatMessages: List<PromptChatMessage> = defaultChatMessages(content),
     val reasoningEnabled: Boolean = false,
+    val chatSessionId: String? = null,
 ) {
     constructor(prompt: String) : this(MessageContent.TextPrompt(prompt), userChatMessages(prompt))
 
@@ -84,6 +85,15 @@ fun List<PromptChatMessage>.toPlainChatPrompt(): String =
 sealed interface GenerationEvent {
     data class Token(val text: String) : GenerationEvent
     data class ReasoningToken(val text: String) : GenerationEvent
+    data class Metrics(val value: GenerationMetrics) : GenerationEvent
     data class Failed(val message: String) : GenerationEvent
     data object Completed : GenerationEvent
 }
+
+data class GenerationMetrics(
+    val timeToFirstTokenMillis: Long,
+    val prefillTokenCount: Int,
+    val prefillTokensPerSecond: Double,
+    val decodeTokenCount: Int,
+    val decodeTokensPerSecond: Double,
+)

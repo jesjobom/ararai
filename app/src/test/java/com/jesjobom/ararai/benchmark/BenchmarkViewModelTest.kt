@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.benchmark
 
 import com.jesjobom.ararai.engine.GenerationEvent
+import com.jesjobom.ararai.engine.GenerationMetrics
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptRequest
 import com.jesjobom.ararai.model.InferenceConfig
@@ -49,6 +50,15 @@ class BenchmarkViewModelTest {
             events = listOf(
                 GenerationEvent.Token("hello"),
                 GenerationEvent.Token(" world"),
+                GenerationEvent.Metrics(
+                    GenerationMetrics(
+                        timeToFirstTokenMillis = 40,
+                        prefillTokenCount = 12,
+                        prefillTokensPerSecond = 120.0,
+                        decodeTokenCount = 2,
+                        decodeTokensPerSecond = 20.0,
+                    ),
+                ),
                 GenerationEvent.Completed,
             ),
         )
@@ -75,13 +85,17 @@ class BenchmarkViewModelTest {
         assertNotNull(result)
         assertEquals("Benchmark complete", state.status)
         assertFalse(state.isRunning)
-        assertEquals(2, result!!.generatedTokens)
+        assertEquals(12, result!!.prefillTokens)
+        assertEquals(120.0, result.prefillTokensPerSecond!!, 0.001)
+        assertEquals(2, result.decodeTokens)
+        assertEquals(20.0, result.decodeTokensPerSecond!!, 0.001)
         assertEquals(11, result.generatedCharacters)
+        assertEquals(2, result.streamedChunks)
         assertEquals(100L, result.loadMillis)
-        assertEquals(50L, result.firstTokenMillis)
+        assertEquals(40L, result.firstTokenMillis)
         assertEquals(250L, result.generationMillis)
         assertEquals(350L, result.totalMillis)
-        assertEquals(8.0, result.tokensPerSecond, 0.001)
+        assertEquals(44.0, result.charactersPerSecond, 0.001)
         assertEquals(1, engine.loadCalls)
         assertEquals(1, engine.generateCalls)
         assertEquals(1, engine.unloadCalls)
@@ -107,6 +121,39 @@ class BenchmarkViewModelTest {
         assertEquals("Selected model must be available locally", state.status)
         assertEquals(0, engine.loadCalls)
         assertEquals(0, engine.generateCalls)
+    }
+
+    @Test
+    fun `does not label streamed chunks as tokens when runtime metrics are unavailable`() = runTest {
+        val engine = RecordingEngine(
+            events = listOf(
+                GenerationEvent.Token("one chunk"),
+                GenerationEvent.Completed,
+            ),
+        )
+        val viewModel = BenchmarkViewModel(
+            engine = engine,
+            initialConfig = config,
+            initialState = ModelStartupState.Available(model, config.inference),
+            clock = SequenceClock(
+                0L,
+                100_000_000L,
+                100_000_000L,
+                150_000_000L,
+                300_000_000L,
+            ),
+            scope = this,
+        )
+
+        viewModel.runBenchmark()
+        runCurrent()
+
+        val result = viewModel.uiState.value.result!!
+        assertEquals(null, result.prefillTokens)
+        assertEquals(null, result.decodeTokens)
+        assertEquals(1, result.streamedChunks)
+        assertEquals(9, result.generatedCharacters)
+        assertEquals(45.0, result.charactersPerSecond, 0.001)
     }
 
     @Test

@@ -22,7 +22,11 @@ data class BenchmarkResult(
     val firstTokenMillis: Long?,
     val generationMillis: Long,
     val totalMillis: Long,
-    val generatedTokens: Int,
+    val prefillTokens: Int?,
+    val prefillTokensPerSecond: Double?,
+    val decodeTokens: Int?,
+    val decodeTokensPerSecond: Double?,
     val generatedCharacters: Int,
-    val tokensPerSecond: Double,
+    val streamedChunks: Int,
+    val charactersPerSecond: Double,
 )

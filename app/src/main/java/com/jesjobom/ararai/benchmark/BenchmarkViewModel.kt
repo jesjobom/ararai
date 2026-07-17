@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.benchmark
 
 import com.jesjobom.ararai.engine.GenerationEvent
+import com.jesjobom.ararai.engine.GenerationMetrics
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptRequest
 import com.jesjobom.ararai.model.InferenceConfig
@@ -68,9 +69,10 @@ class BenchmarkViewModel(
                 engine.load(model, inference)
                 val loadNanos = clock.nowNanos() - loadStart
 
-                var generatedTokens = 0
+                var streamedChunks = 0
                 var generatedCharacters = 0
                 var firstTokenNanos: Long? = null
+                var runtimeMetrics: GenerationMetrics? = null
                 var failure: String? = null
                 var completed = false
                 val generationStart = clock.nowNanos()
@@ -84,10 +86,11 @@ class BenchmarkViewModel(
                             if (firstTokenNanos == null) {
                                 firstTokenNanos = now - generationStart
                             }
-                            generatedTokens += 1
+                            streamedChunks += 1
                             generatedCharacters += event.text.length
                         }
                         is GenerationEvent.ReasoningToken -> Unit
+                        is GenerationEvent.Metrics -> runtimeMetrics = event.value
                         is GenerationEvent.Failed -> failure = event.message
                         GenerationEvent.Completed -> completed = true
                     }
@@ -108,12 +111,17 @@ class BenchmarkViewModel(
 
                 val result = BenchmarkResult(
                     loadMillis = nanosToMillis(loadNanos),
-                    firstTokenMillis = firstTokenNanos?.let(::nanosToMillis),
+                    firstTokenMillis = runtimeMetrics?.timeToFirstTokenMillis
+                        ?: firstTokenNanos?.let(::nanosToMillis),
                     generationMillis = nanosToMillis(generationNanos),
                     totalMillis = nanosToMillis(loadNanos + generationNanos),
-                    generatedTokens = generatedTokens,
+                    prefillTokens = runtimeMetrics?.prefillTokenCount,
+                    prefillTokensPerSecond = runtimeMetrics?.prefillTokensPerSecond,
+                    decodeTokens = runtimeMetrics?.decodeTokenCount,
+                    decodeTokensPerSecond = runtimeMetrics?.decodeTokensPerSecond,
                     generatedCharacters = generatedCharacters,
-                    tokensPerSecond = tokensPerSecond(generatedTokens, generationNanos),
+                    streamedChunks = streamedChunks,
+                    charactersPerSecond = ratePerSecond(generatedCharacters, generationNanos),
                 )
                 _uiState.update {
                     it.copy(
@@ -201,9 +209,9 @@ class BenchmarkViewModel(
 
         fun nanosToMillis(nanos: Long): Long = nanos / 1_000_000L
 
-        fun tokensPerSecond(generatedTokens: Int, generationNanos: Long): Double {
-            if (generatedTokens == 0 || generationNanos <= 0L) return 0.0
-            return generatedTokens * 1_000_000_000.0 / generationNanos
+        fun ratePerSecond(count: Int, durationNanos: Long): Double {
+            if (count == 0 || durationNanos <= 0L) return 0.0
+            return count * 1_000_000_000.0 / durationNanos
         }
     }
 }

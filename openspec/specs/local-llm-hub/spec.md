@@ -522,7 +522,8 @@ configuration.
 ### Requirement: Mobile Inference Benchmark Screen
 
 The app SHALL expose a dedicated benchmark screen for repeatable local
-inference measurements.
+inference measurements and SHALL label only runtime-backed token measurements
+as token counts or token throughput.
 
 #### Scenario: Open benchmark from home
 
@@ -542,11 +543,22 @@ inference measurements.
 #### Scenario: Run benchmark for available model
 
 - **GIVEN** the selected configured model is available locally
+- **AND** its runtime exposes native prefill and decode statistics
 - **WHEN** the user starts the benchmark
 - **THEN** the app loads the selected model through the local inference engine
 - **AND** generates text with stable benchmark parameters
-- **AND** reports load time, first-token latency, generated token count, total
-  generation time, and tokens per second.
+- **AND** reports load time and time to first token separately
+- **AND** reports native prefill token count and throughput separately from
+  native decode token count and throughput
+- **AND** does not use streamed callback count as generated token count.
+
+#### Scenario: Run benchmark without native token metrics
+
+- **GIVEN** the selected runtime does not expose a trustworthy token count
+- **WHEN** the benchmark completes
+- **THEN** the app reports the available latency and elapsed-time measurements
+- **AND** any fallback throughput has an accurate non-token unit
+- **AND** the app does not label streamed callback chunks as tokens.
 
 #### Scenario: Block benchmark for unavailable model
 
@@ -1464,4 +1476,334 @@ label.
 - **WHEN** the session dialog lists the active session
 - **THEN** its card uses the selected-session color
 - **AND** no `Current` label consumes space in the card
+
+### Requirement: Workload-Aware LiteRT-LM Modality Profile
+
+The app SHALL initialize only the LiteRT-LM modality backends required by the
+active workload while preserving the selected model's configured capabilities.
+
+#### Scenario: Load Gemma for text-only generation
+
+- **GIVEN** a configured LiteRT-LM Gemma model supports text, image, and audio
+- **WHEN** the model is loaded for a text-only workload
+- **THEN** the language-model backend uses its configured acceleration policy
+- **AND** vision and audio processing backends are not initialized.
+
+#### Scenario: Reconfigure for a multimodal request
+
+- **GIVEN** the active LiteRT-LM engine profile does not include a supported
+  modality required by the next request
+- **WHEN** generation starts
+- **THEN** the app closes incompatible retained conversation state
+- **AND** recreates the LiteRT-LM engine with the required modality backend
+- **AND** processes the request without changing catalog capability metadata.
+
+#### Scenario: Reject a modality absent from model capabilities
+
+- **GIVEN** a request uses a modality the selected model does not support
+- **WHEN** generation is requested
+- **THEN** the app returns a controlled failure
+- **AND** does not recreate the LiteRT-LM engine for that unsupported modality.
+
+### Requirement: Safe LiteRT-LM Conversation Reuse
+
+The app SHALL reuse LiteRT-LM conversation state only for a verified compatible
+continuation and SHALL prevent conversation context from crossing chat-session
+or configuration boundaries.
+
+#### Scenario: Continue a compatible chat session
+
+- **GIVEN** a LiteRT-LM generation completed successfully for a persisted chat
+  session
+- **AND** the next request identifies the same session
+- **AND** its history exactly matches the transcript retained by the runtime
+- **AND** model, modality profile, sampler settings, and reasoning mode are
+  unchanged
+- **WHEN** the user submits the next message
+- **THEN** the app reuses the existing LiteRT-LM conversation
+- **AND** sends only the new user content instead of prefilling the complete
+  transcript again.
+
+#### Scenario: Start a fresh incompatible conversation
+
+- **GIVEN** there is retained LiteRT-LM conversation state
+- **WHEN** the next request belongs to another session or has incompatible
+  transcript, model, modality profile, sampler settings, or reasoning mode
+- **THEN** the app closes the retained conversation
+- **AND** creates a new conversation initialized from the request's eligible
+  system instruction and history.
+
+#### Scenario: Invalidate partial or failed conversation state
+
+- **GIVEN** a LiteRT-LM generation is cancelled or fails
+- **WHEN** cleanup runs
+- **THEN** the app closes and discards that conversation
+- **AND** a later request cannot reuse its partial native state.
+
+#### Scenario: Keep benchmark runs isolated
+
+- **WHEN** a LiteRT-LM benchmark run starts
+- **THEN** it uses a fresh conversation without retained chat-session context
+- **AND** its metrics describe only that benchmark run.
+
+### Requirement: App-Owned LiteRT-LM Runtime Cache
+
+The app SHALL provide LiteRT-LM with a reclaimable app-owned cache directory
+without making cache availability a prerequisite for inference.
+
+#### Scenario: Initialize LiteRT-LM cache
+
+- **WHEN** the app constructs the LiteRT-LM engine
+- **THEN** it passes a dedicated directory below the app cache root through the
+  LiteRT-LM engine configuration
+- **AND** no shared-storage permission is required.
+
+#### Scenario: Cache directory is unavailable
+
+- **GIVEN** the dedicated cache directory cannot be created or used
+- **WHEN** LiteRT-LM initialization starts
+- **THEN** the app records diagnostics and attempts uncached initialization
+- **AND** chat or benchmark does not fail solely because cache setup failed.
+
+### Requirement: Bounded Chat Image Import
+
+The app SHALL import external Chat images without buffering an unbounded source
+in memory and SHALL enforce documented source and decoded-image limits before
+persisting normalized media.
+
+#### Scenario: Import an image within limits
+
+- **GIVEN** the selected content is a decodable image within configured limits
+- **WHEN** the user attaches it to a Chat prompt
+- **THEN** the app processes it through bounded I/O
+- **AND** stores only the normalized app-owned image used by Chat.
+
+#### Scenario: Reject an oversized image
+
+- **GIVEN** the selected content exceeds the configured source or decoded-image limit
+- **WHEN** image import evaluates the content
+- **THEN** the app rejects the attachment with a controlled error
+- **AND** does not retain a partial app-owned image.
+
+#### Scenario: Handle malformed or interrupted image input
+
+- **GIVEN** the selected content is malformed, unavailable, or fails while being read
+- **WHEN** image import runs
+- **THEN** Chat remains usable and reports the import failure
+- **AND** any temporary or partial output file is removed.
+
+#### Scenario: Normalize EXIF-oriented image content
+
+- **GIVEN** the selected image declares a rotated or mirrored EXIF orientation
+- **WHEN** the app creates the normalized app-owned Chat image
+- **THEN** it applies the declared orientation to the image pixels before persistence
+- **AND** the Chat preview and local model receive the same visually upright image.
+
+### Requirement: Batched Streamed Response Persistence
+
+The app SHALL present streamed assistant output immediately while persisting
+that output at a bounded cadence rather than writing once per generated delta.
+
+#### Scenario: Render frequent generation deltas
+
+- **GIVEN** local inference emits multiple assistant text deltas in rapid succession
+- **WHEN** Chat processes those deltas
+- **THEN** the visible message updates as deltas arrive
+- **AND** durable storage updates are batched according to the documented cadence.
+
+#### Scenario: Flush a completed response
+
+- **GIVEN** assistant content is waiting to be persisted
+- **WHEN** generation completes successfully
+- **THEN** the complete visible assistant content is persisted before completion handling finishes.
+
+#### Scenario: Preserve an interrupted partial response
+
+- **GIVEN** assistant content has been streamed but not fully persisted
+- **WHEN** generation is cancelled, fails, or Chat is left
+- **THEN** the latest partial content is flushed through the controlled termination path
+- **AND** reopening the session does not silently lose already-visible output.
+
+### Requirement: Deterministic LiteRT-LM Conversation Disposal
+
+The LiteRT-LM runtime SHALL close every invalidated native conversation exactly
+once and SHALL not retain a reusable reference after cancellation or failure.
+
+#### Scenario: Cancel active LiteRT-LM generation
+
+- **GIVEN** a LiteRT-LM conversation is actively generating
+- **WHEN** generation is cancelled
+- **THEN** processing is cancelled and the conversation is closed
+- **AND** active and retained references to that conversation are cleared.
+
+#### Scenario: Generate after cancellation
+
+- **GIVEN** a previous LiteRT-LM conversation was cancelled
+- **WHEN** a later compatible Chat request starts
+- **THEN** the runtime creates a new conversation
+- **AND** does not reuse the cancelled native state.
+
+#### Scenario: Unload after cancellation
+
+- **GIVEN** cancellation has already disposed the active conversation
+- **WHEN** the engine unloads
+- **THEN** unload completes without double-closing the conversation
+- **AND** all LiteRT-LM engine resources are released.
+
+### Requirement: Owned Chat Media Lifecycle
+
+The app SHALL manage app-owned Chat media according to explicit draft and
+persisted-message ownership and SHALL remove files after they become unreferenced.
+
+#### Scenario: Remove a draft attachment
+
+- **GIVEN** an app-owned image or audio file is attached only to the current draft
+- **WHEN** the user removes or replaces that attachment
+- **THEN** the app removes the unreferenced draft file
+- **AND** no persisted message is changed.
+
+#### Scenario: Delete a session containing media
+
+- **GIVEN** a Chat session references app-owned media files
+- **WHEN** the session is deleted
+- **THEN** its messages are removed atomically according to the session-store contract
+- **AND** media with no remaining references is deleted from Chat media storage.
+
+#### Scenario: Preserve referenced media
+
+- **GIVEN** a media file remains referenced by a persisted message
+- **WHEN** cleanup or reconciliation runs
+- **THEN** the file is preserved.
+
+#### Scenario: Reconcile orphaned Chat media
+
+- **GIVEN** an app-owned Chat media file has no draft or persisted-message reference
+- **WHEN** bounded media reconciliation runs
+- **THEN** the orphan is removed
+- **AND** cleanup does not access files outside the canonical Chat media directory.
+
+### Requirement: Explicit Local Data Backup Policy
+
+The app SHALL define Android backup and device-transfer behavior explicitly and
+SHALL exclude private, large, derived, or reference-sensitive local data from
+platform-managed extraction.
+
+#### Scenario: Evaluate cloud backup content
+
+- **GIVEN** Android backup evaluates ArarAI app-owned data
+- **WHEN** backup rules are applied
+- **THEN** Chat databases, Chat media, downloaded models, temporary downloads, and runtime caches are excluded.
+
+#### Scenario: Evaluate device-to-device transfer
+
+- **GIVEN** Android device transfer evaluates ArarAI app-owned data
+- **WHEN** data-extraction rules are applied
+- **THEN** excluded private and reference-sensitive data is not transferred
+- **AND** the restored app cannot receive dangling Chat media references from platform backup.
+
+#### Scenario: Inspect documented privacy behavior
+
+- **WHEN** a maintainer or user reviews ArarAI data behavior
+- **THEN** the documentation states what remains only on-device
+- **AND** states whether any limited preference data is eligible for backup.
+
+### Requirement: Atomic Chat Message Append
+
+The Chat session store SHALL persist a new message and update its owning
+session timestamp as one atomic operation.
+
+#### Scenario: Append a message successfully
+
+- **GIVEN** the target Chat session exists
+- **WHEN** a message is appended
+- **THEN** the message and updated session timestamp commit together
+- **AND** session ordering reflects the appended message.
+
+#### Scenario: Append to a missing session
+
+- **GIVEN** the target Chat session does not exist
+- **WHEN** a message append is attempted
+- **THEN** the store reports a controlled persistence failure
+- **AND** no orphan message is committed.
+
+#### Scenario: Fail while updating the session
+
+- **GIVEN** message insertion begins inside a transaction
+- **WHEN** the owning session cannot be updated exactly once
+- **THEN** the transaction rolls back
+- **AND** neither partial message state nor a partial timestamp change remains.
+
+### Requirement: Separated Chat Presentation and Media Boundaries
+
+The app SHALL keep Chat presentation separate from media import, recording,
+playback, encoding, and filesystem implementations while preserving current
+observable behavior.
+
+#### Scenario: Render Chat without direct media I/O
+
+- **GIVEN** Chat state contains text or media messages
+- **WHEN** the Chat presentation renders that state
+- **THEN** rendering depends on presentation models and explicit media interfaces
+- **AND** Compose components do not directly own media filesystem operations.
+
+#### Scenario: Replace a media implementation in tests
+
+- **GIVEN** image import, audio recording, or playback behavior is under test
+- **WHEN** a test supplies a fake implementation
+- **THEN** Chat orchestration can be verified without real device media I/O.
+
+#### Scenario: Preserve behavior during refactoring
+
+- **GIVEN** the existing supported Chat flows
+- **WHEN** responsibilities are moved behind focused boundaries
+- **THEN** attachment, recording, playback, permission, cancellation, and persisted-content behavior remains compatible.
+
+### Requirement: Layered Android and Native Verification
+
+The project SHALL provide repeatable verification across JVM logic, Android
+integration, native runtime boundaries, and documented physical-device checks.
+
+#### Scenario: Validate a proposed source change
+
+- **GIVEN** a change is submitted to the repository
+- **WHEN** the automated quality gate runs
+- **THEN** JVM unit tests, Android lint, strict OpenSpec validation, and debug assembly execute
+- **AND** failures prevent the change from being considered verified.
+
+#### Scenario: Validate Android-specific behavior
+
+- **GIVEN** behavior depends on permissions, content providers, lifecycle, or Android data configuration
+- **WHEN** the instrumentation suite runs on a supported target
+- **THEN** focused automated checks exercise those boundaries.
+
+#### Scenario: Validate physical-device inference
+
+- **GIVEN** runtime behavior depends on GPU, native libraries, memory, or thermal characteristics
+- **WHEN** a release candidate is evaluated on the target physical device
+- **THEN** the versioned device matrix is executed
+- **AND** results identify the app version, device, model, runtime, and any skipped check without recording private prompts.
+
+### Requirement: Current and Verifiable Project Documentation
+
+The project SHALL maintain onboarding and architecture documentation that
+matches implemented ArarAI capabilities, current build configuration, and the
+canonical OpenSpec workflow.
+
+#### Scenario: Review current product direction
+
+- **WHEN** a maintainer reads the README and project context
+- **THEN** the documented runtimes, model catalog, persistence, multimodal Chat, reasoning, and diagnostics match implemented behavior
+- **AND** historical MVP exclusions are not presented as current constraints.
+
+#### Scenario: Follow repository instructions
+
+- **GIVEN** a maintainer follows a documented path or verification command
+- **WHEN** it is used in the current repository
+- **THEN** the path exists and the command is valid for its stated environment.
+
+#### Scenario: Archive a product change
+
+- **WHEN** an OpenSpec change materially alters documented capabilities, architecture, setup, or validation
+- **THEN** its completion checklist includes review of the README and project context
+- **AND** documentation claims remain bounded to implemented and verified behavior.
 

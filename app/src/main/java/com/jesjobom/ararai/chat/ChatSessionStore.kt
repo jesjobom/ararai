@@ -38,6 +38,8 @@ data class StoredChatMessage(
         get() = content.displayText
 }
 
+class ChatPersistenceException(message: String) : IllegalStateException(message)
+
 interface ChatSessionStore {
     fun ensureSession(): ChatSession
     fun listSessions(): List<ChatSession>
@@ -53,7 +55,19 @@ interface ChatSessionStore {
     fun updateMessage(messageId: String, text: String) {
         updateMessage(messageId, MessageContent.TextPrompt(text))
     }
+
+    fun referencedMediaUris(): Set<String> =
+        listSessions().asSequence()
+            .flatMap { getMessages(it.id).asSequence() }
+            .flatMap { it.content.mediaUris().asSequence() }
+            .toSet()
 }
+
+fun MessageContent.mediaUris(): Set<String> =
+    when (this) {
+        is MessageContent.TextPrompt -> imageAttachments.mapTo(linkedSetOf()) { it.uri }
+        is MessageContent.AudioPromptContent -> setOf(audio.uri)
+    }
 
 class InMemoryChatSessionStore : ChatSessionStore {
     private val sessions = linkedMapOf<String, ChatSession>()
@@ -100,6 +114,8 @@ class InMemoryChatSessionStore : ChatSessionStore {
     }
 
     override fun appendMessage(sessionId: String, role: ChatRole, content: MessageContent): StoredChatMessage {
+        val session = sessions[sessionId]
+            ?: throw ChatPersistenceException("Chat session does not exist: $sessionId")
         val now = nextMessageTimestamp(sessionId)
         val message = StoredChatMessage(
             id = newId(),
@@ -109,7 +125,7 @@ class InMemoryChatSessionStore : ChatSessionStore {
             createdAtMillis = now,
         )
         messages[message.id] = message
-        touch(sessionId)
+        sessions[sessionId] = session.copy(updatedAtMillis = now)
         return message
     }
 
@@ -266,23 +282,28 @@ class SqliteChatSessionStore(
 
     @Synchronized
     override fun appendMessage(sessionId: String, role: ChatRole, content: MessageContent): StoredChatMessage {
-        val now = nextMessageTimestamp(sessionId)
-        val message = StoredChatMessage(
-            id = newId(),
-            sessionId = sessionId,
-            role = role,
-            content = content,
-            createdAtMillis = now,
-        )
         val db = writableDatabase
-        db.insertOrThrow("chat_messages", null, message.toContentValues())
-        db.update(
-            "chat_sessions",
-            ContentValues().apply { put("updated_at_millis", now) },
-            "id = ?",
-            arrayOf(sessionId),
-        )
-        return message
+        return db.inTransaction {
+            val now = nextMessageTimestamp(this, sessionId)
+            val message = StoredChatMessage(
+                id = newId(),
+                sessionId = sessionId,
+                role = role,
+                content = content,
+                createdAtMillis = now,
+            )
+            insertOrThrow("chat_messages", null, message.toContentValues())
+            val updatedSessions = update(
+                "chat_sessions",
+                ContentValues().apply { put("updated_at_millis", now) },
+                "id = ?",
+                arrayOf(sessionId),
+            )
+            if (updatedSessions != 1) {
+                throw ChatPersistenceException("Chat session does not exist: $sessionId")
+            }
+            message
+        }
     }
 
     @Synchronized
@@ -321,8 +342,8 @@ class SqliteChatSessionStore(
             }
         }
 
-    private fun nextMessageTimestamp(sessionId: String): Long {
-        readableDatabase.rawQuery(
+    private fun nextMessageTimestamp(db: SQLiteDatabase, sessionId: String): Long {
+        db.rawQuery(
             "SELECT MAX(created_at_millis) FROM chat_messages WHERE session_id = ?",
             arrayOf(sessionId),
         ).use { cursor ->
@@ -338,11 +359,12 @@ class SqliteChatSessionStore(
     }
 }
 
-private inline fun SQLiteDatabase.inTransaction(block: SQLiteDatabase.() -> Unit) {
+private inline fun <T> SQLiteDatabase.inTransaction(block: SQLiteDatabase.() -> T): T {
     beginTransaction()
     try {
-        block()
+        val result = block()
         setTransactionSuccessful()
+        return result
     } finally {
         endTransaction()
     }

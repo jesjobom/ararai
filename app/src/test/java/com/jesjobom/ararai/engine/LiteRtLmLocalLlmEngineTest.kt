@@ -18,6 +18,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.nio.file.Files
 
 class LiteRtLmLocalLlmEngineTest {
     private val config = InferenceConfig(
@@ -48,6 +49,7 @@ class LiteRtLmLocalLlmEngineTest {
         assertEquals(config, bridge.loadedConfig)
         assertEquals(true, bridge.loadedUseGpu)
         assertEquals(ModelInputCapabilities(), bridge.loadedInputCapabilities)
+        assertEquals(LiteRtLmWorkloadProfile.TextOnly, bridge.loadedProfile)
 
         engine.generate(PromptRequest("oi")).test {
             assertEquals(GenerationEvent.Token("ola"), awaitItem())
@@ -162,6 +164,7 @@ class LiteRtLmLocalLlmEngineTest {
         )
 
         engine.load(multimodalModel, config)
+        assertEquals(LiteRtLmWorkloadProfile.TextOnly, bridge.loadedProfile)
         val request = PromptRequest(
             MessageContent.TextPrompt(
                 text = "describe",
@@ -176,6 +179,14 @@ class LiteRtLmLocalLlmEngineTest {
         }
 
         assertEquals(request, bridge.session.lastRequest)
+        assertEquals(LiteRtLmWorkloadProfile(image = true, audio = false), bridge.loadedProfile)
+        assertEquals(
+            listOf(
+                LiteRtLmWorkloadProfile.TextOnly,
+                LiteRtLmWorkloadProfile(image = true, audio = false),
+            ),
+            bridge.loadedProfiles,
+        )
     }
 
     @Test
@@ -183,6 +194,64 @@ class LiteRtLmLocalLlmEngineTest {
         assertEquals("/tmp/image.png", "file:///tmp/image.png".toLiteRtFilePath())
         assertEquals("/data/user/0/com.jesjobom.ararai/files/image.jpg", "file:/data/user/0/com.jesjobom.ararai/files/image.jpg".toLiteRtFilePath())
         assertEquals("/tmp/image.png", "/tmp/image.png".toLiteRtFilePath())
+    }
+
+    @Test
+    fun `reuses conversation only for matching session settings and transcript`() {
+        val key = LiteRtLmConversationKey(
+            sessionId = "session-1",
+            temperature = 0.7f,
+            topP = 0.9f,
+            reasoningEnabled = false,
+        )
+        val transcript = listOf(
+            PromptChatMessage(PromptChatRole.User, "question"),
+            PromptChatMessage(PromptChatRole.Assistant, "answer"),
+        )
+
+        assertTrue(canReuseLiteRtLmConversation(key, transcript, key, transcript))
+        assertEquals(
+            false,
+            canReuseLiteRtLmConversation(key, transcript, key.copy(sessionId = "session-2"), transcript),
+        )
+        assertEquals(
+            false,
+            canReuseLiteRtLmConversation(key, transcript, key.copy(reasoningEnabled = true), transcript),
+        )
+        assertEquals(
+            false,
+            canReuseLiteRtLmConversation(key, transcript, key, transcript.dropLast(1)),
+        )
+    }
+
+    @Test
+    fun `maps native LiteRT benchmark metrics without using callback count`() {
+        val metrics = liteRtLmGenerationMetrics(
+            timeToFirstTokenInSecond = 0.125,
+            prefillTokenCount = 20,
+            decodeTokenCount = 8,
+            prefillTokensPerSecond = 100.0,
+            decodeTokensPerSecond = 16.0,
+        )
+
+        assertEquals(125L, metrics.timeToFirstTokenMillis)
+        assertEquals(20, metrics.prefillTokenCount)
+        assertEquals(8, metrics.decodeTokenCount)
+        assertEquals(100.0, metrics.prefillTokensPerSecond, 0.001)
+        assertEquals(16.0, metrics.decodeTokensPerSecond, 0.001)
+    }
+
+    @Test
+    fun `prepares dedicated cache and falls back when cache root is unusable`() {
+        val root = Files.createTempDirectory("litert-cache-test").toFile()
+        val cachePath = prepareLiteRtLmCacheDir(root)
+        assertEquals(root.resolve("litert_lm").absolutePath, cachePath)
+        assertTrue(root.resolve("litert_lm").isDirectory)
+
+        val fileRoot = root.resolve("not-a-directory").apply { writeText("x") }
+        var failure: Throwable? = null
+        assertEquals(null, prepareLiteRtLmCacheDir(fileRoot) { failure = it })
+        assertTrue(failure != null)
     }
 
     @Test
@@ -244,6 +313,94 @@ class LiteRtLmLocalLlmEngineTest {
         assertTrue(bridge.session.closed)
     }
 
+    @Test
+    fun `cancelling an active retained resource cancels and closes it exactly once`() {
+        val resource = RecordingResource()
+        val owner = resourceOwner()
+        owner.activate(resource)
+
+        owner.cancelActive()
+        owner.invalidate(resource, cancelFirst = true)
+
+        assertEquals(1, resource.cancelCalls)
+        assertEquals(1, resource.closeCalls)
+        assertEquals(null, owner.retained())
+    }
+
+    @Test
+    fun `cancelling a retained resource clears reusable state`() {
+        val resource = RecordingResource()
+        val owner = resourceOwner()
+        owner.activate(resource)
+        owner.retain(resource, "session-1")
+
+        owner.cancelActive()
+
+        assertEquals(1, resource.cancelCalls)
+        assertEquals(1, resource.closeCalls)
+        assertEquals(null, owner.retained())
+        assertEquals(false, owner.retain(resource, "session-1"))
+    }
+
+    @Test
+    fun `generation after cancellation must activate a new resource`() {
+        val cancelled = RecordingResource()
+        val replacement = RecordingResource()
+        val owner = resourceOwner()
+        owner.activate(cancelled)
+        owner.retain(cancelled, "session-1")
+        owner.cancelActive()
+
+        assertEquals(false, owner.activate(cancelled))
+        assertTrue(owner.activate(replacement))
+        assertTrue(owner.retain(replacement, "session-1"))
+
+        assertTrue(owner.retained()?.resource === replacement)
+        assertEquals(0, replacement.closeCalls)
+    }
+
+    @Test
+    fun `unload after cancellation does not close a resource twice`() {
+        val resource = RecordingResource()
+        val owner = resourceOwner()
+        owner.activate(resource)
+        owner.retain(resource, "session-1")
+
+        owner.cancelActive()
+        owner.closeAll()
+
+        assertEquals(1, resource.cancelCalls)
+        assertEquals(1, resource.closeCalls)
+    }
+
+    @Test
+    fun `replacing incompatible retained state closes the old resource without cancelling it`() {
+        val old = RecordingResource()
+        val replacement = RecordingResource()
+        val owner = resourceOwner()
+        owner.activate(old)
+        owner.retain(old, "session-1")
+
+        owner.invalidate(old, cancelFirst = false)
+        owner.activate(replacement)
+        owner.retain(replacement, "session-2")
+
+        assertEquals(0, old.cancelCalls)
+        assertEquals(1, old.closeCalls)
+        assertTrue(owner.retained()?.resource === replacement)
+    }
+
+    private fun resourceOwner(): RetainedResourceOwner<RecordingResource, String> =
+        RetainedResourceOwner(
+            cancelResource = { it.cancelCalls += 1 },
+            closeResource = { it.closeCalls += 1 },
+        )
+
+    private class RecordingResource {
+        var cancelCalls: Int = 0
+        var closeCalls: Int = 0
+    }
+
     private class RecordingBridge(
         chunks: List<LiteRtLmChunk> = emptyList(),
         failure: Throwable? = null,
@@ -257,17 +414,23 @@ class LiteRtLmLocalLlmEngineTest {
             private set
         var loadedInputCapabilities: ModelInputCapabilities? = null
             private set
+        var loadedProfile: LiteRtLmWorkloadProfile? = null
+            private set
+        val loadedProfiles = mutableListOf<LiteRtLmWorkloadProfile>()
 
         override suspend fun load(
             modelPath: String,
             config: InferenceConfig,
             useGpu: Boolean,
             inputCapabilities: ModelInputCapabilities,
+            profile: LiteRtLmWorkloadProfile,
         ): LiteRtLmSession {
             loadedModelPath = modelPath
             loadedConfig = config
             loadedUseGpu = useGpu
             loadedInputCapabilities = inputCapabilities
+            loadedProfile = profile
+            loadedProfiles += profile
             return session
         }
     }

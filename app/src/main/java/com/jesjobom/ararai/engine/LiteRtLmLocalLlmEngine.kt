@@ -1,5 +1,6 @@
 package com.jesjobom.ararai.engine
 
+import android.util.Log
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -7,6 +8,8 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
@@ -23,6 +26,8 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.IdentityHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 class LiteRtLmLocalLlmEngine(
     private val bridge: LiteRtLmBridge = AndroidLiteRtLmBridge(),
@@ -34,6 +39,8 @@ class LiteRtLmLocalLlmEngine(
     private var loadedModelPath: String? = null
     private var loadedConfig: InferenceConfig? = null
     private var loadedInputCapabilities: ModelInputCapabilities? = null
+    private var loadedUseGpu: Boolean = false
+    private var loadedProfile: LiteRtLmWorkloadProfile? = null
 
     override suspend fun load(model: LocalModel, config: InferenceConfig) {
         check(model.runtime == ModelRuntime.LiteRtLm) {
@@ -60,6 +67,7 @@ class LiteRtLmLocalLlmEngine(
                 config = config,
                 useGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred,
                 inputCapabilities = model.inputCapabilities,
+                profile = LiteRtLmWorkloadProfile.TextOnly,
             )
         }
 
@@ -69,22 +77,24 @@ class LiteRtLmLocalLlmEngine(
             loadedModelPath = model.filePath
             loadedConfig = config
             loadedInputCapabilities = model.inputCapabilities
+            loadedUseGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred
+            loadedProfile = LiteRtLmWorkloadProfile.TextOnly
         }
     }
 
     override fun generate(request: PromptRequest): Flow<GenerationEvent> = callbackFlow {
-        val state = synchronized(lock) {
-            val session = loadedSession
+        val generationFinished = AtomicBoolean(false)
+        val initialState = synchronized(lock) {
             val config = loadedConfig
             val capabilities = loadedInputCapabilities
-            if (session == null || config == null || capabilities == null) {
+            if (loadedSession == null || config == null || capabilities == null) {
                 null
             } else {
-                LoadedState(session, config, capabilities)
+                LoadedState(config, capabilities)
             }
         }
 
-        if (state == null) {
+        if (initialState == null) {
             trySend(GenerationEvent.Failed("Model is not loaded"))
             close()
             return@callbackFlow
@@ -92,29 +102,33 @@ class LiteRtLmLocalLlmEngine(
 
         val job = launch(dispatcher) {
             try {
-                request.validateAgainst(state.capabilities)?.let { failure ->
+                request.validateAgainst(initialState.capabilities)?.let { failure ->
                     trySend(GenerationEvent.Failed(failure))
                     return@launch
                 }
-                state.session.generate(request, state.config).collect { chunk ->
+                val session = ensureProfile(request)
+                session.generate(request, initialState.config).collect { chunk ->
                     if (chunk.text.isNotEmpty()) {
                         trySend(GenerationEvent.Token(chunk.text))
                     }
                     if (chunk.reasoning.isNotEmpty()) {
                         trySend(GenerationEvent.ReasoningToken(chunk.reasoning))
                     }
+                    chunk.metrics?.let { trySend(GenerationEvent.Metrics(it)) }
                 }
+                generationFinished.set(true)
                 trySend(GenerationEvent.Completed)
             } catch (error: Throwable) {
                 trySend(GenerationEvent.Failed(error.message ?: "LiteRT-LM generation failed"))
             } finally {
+                generationFinished.set(true)
                 close()
             }
         }
 
         awaitClose {
-            if (job.isActive) {
-                state.session.cancel()
+            if (!generationFinished.get()) {
+                synchronized(lock) { loadedSession }?.cancel()
             }
             job.cancel()
         }
@@ -128,6 +142,8 @@ class LiteRtLmLocalLlmEngine(
             loadedModelPath = null
             loadedConfig = null
             loadedInputCapabilities = null
+            loadedUseGpu = false
+            loadedProfile = null
             current
         }
 
@@ -139,9 +155,50 @@ class LiteRtLmLocalLlmEngine(
     }
 
     private data class LoadedState(
-        val session: LiteRtLmSession,
         val config: InferenceConfig,
         val capabilities: ModelInputCapabilities,
+    )
+
+    private suspend fun ensureProfile(request: PromptRequest): LiteRtLmSession {
+        val desiredProfile = LiteRtLmWorkloadProfile.from(request)
+        val snapshot = synchronized(lock) {
+            ProfileState(
+                session = checkNotNull(loadedSession) { "Model is not loaded" },
+                currentProfile = checkNotNull(loadedProfile) { "Model is not loaded" },
+                modelPath = checkNotNull(loadedModelPath) { "Model is not loaded" },
+                config = checkNotNull(loadedConfig) { "Model is not loaded" },
+                capabilities = checkNotNull(loadedInputCapabilities) { "Model is not loaded" },
+                useGpu = loadedUseGpu,
+            )
+        }
+        if (snapshot.currentProfile == desiredProfile) return snapshot.session
+
+        synchronized(lock) {
+            loadedSession = null
+            loadedProfile = null
+        }
+        snapshot.session.close()
+        val replacement = bridge.load(
+            modelPath = snapshot.modelPath,
+            config = snapshot.config,
+            useGpu = snapshot.useGpu,
+            inputCapabilities = snapshot.capabilities,
+            profile = desiredProfile,
+        )
+        synchronized(lock) {
+            loadedSession = replacement
+            loadedProfile = desiredProfile
+        }
+        return replacement
+    }
+
+    private data class ProfileState(
+        val session: LiteRtLmSession,
+        val currentProfile: LiteRtLmWorkloadProfile,
+        val modelPath: String,
+        val config: InferenceConfig,
+        val capabilities: ModelInputCapabilities,
+        val useGpu: Boolean,
     )
 
     private fun PromptRequest.validateAgainst(capabilities: ModelInputCapabilities): String? =
@@ -159,7 +216,22 @@ interface LiteRtLmBridge {
         config: InferenceConfig,
         useGpu: Boolean,
         inputCapabilities: ModelInputCapabilities,
+        profile: LiteRtLmWorkloadProfile,
     ): LiteRtLmSession
+}
+
+data class LiteRtLmWorkloadProfile(
+    val image: Boolean,
+    val audio: Boolean,
+) {
+    companion object {
+        val TextOnly = LiteRtLmWorkloadProfile(image = false, audio = false)
+
+        fun from(request: PromptRequest) = LiteRtLmWorkloadProfile(
+            image = request.imageAttachments.isNotEmpty(),
+            audio = request.audioPrompt != null,
+        )
+    }
 }
 
 interface LiteRtLmSession {
@@ -171,8 +243,10 @@ interface LiteRtLmSession {
 data class LiteRtLmChunk(
     val text: String = "",
     val reasoning: String = "",
+    val metrics: GenerationMetrics? = null,
 )
 
+@OptIn(ExperimentalApi::class)
 class AndroidLiteRtLmBridge(
     private val cacheDir: String? = null,
 ) : LiteRtLmBridge {
@@ -181,14 +255,17 @@ class AndroidLiteRtLmBridge(
         config: InferenceConfig,
         useGpu: Boolean,
         inputCapabilities: ModelInputCapabilities,
+        profile: LiteRtLmWorkloadProfile,
     ): LiteRtLmSession {
+        ExperimentalFlags.enableBenchmark = true
+        ExperimentalFlags.enableSpeculativeDecoding = true
         val backend = if (useGpu) Backend.GPU() else Backend.CPU()
         val engineConfig = EngineConfig(
             modelPath = modelPath,
             backend = backend,
-            visionBackend = if (inputCapabilities.image) backend else null,
-            audioBackend = if (inputCapabilities.audio) Backend.CPU() else null,
-            maxNumTokens = config.contextTokens,
+            visionBackend = if (profile.image && inputCapabilities.image) backend else null,
+            audioBackend = if (profile.audio && inputCapabilities.audio) Backend.CPU() else null,
+            maxNumTokens = null,
             cacheDir = cacheDir,
         )
         val engine = Engine(engineConfig)
@@ -203,11 +280,14 @@ class AndroidLiteRtLmBridge(
     }
 }
 
+@OptIn(ExperimentalApi::class)
 private class AndroidLiteRtLmSession(
     private val engine: Engine,
 ) : LiteRtLmSession {
-    @Volatile
-    private var activeConversation: Conversation? = null
+    private val conversations = RetainedResourceOwner<Conversation, RetainedConversationState>(
+        cancelResource = Conversation::cancelProcess,
+        closeResource = Conversation::close,
+    )
 
     override fun generate(request: PromptRequest, config: InferenceConfig): Flow<LiteRtLmChunk> = callbackFlow {
         val samplerConfig = SamplerConfig(
@@ -216,15 +296,38 @@ private class AndroidLiteRtLmSession(
             temperature = config.temperature.toDouble(),
             seed = DEFAULT_SEED,
         )
-        val conversation = engine.createConversation(
-            ConversationConfig(
-                samplerConfig = samplerConfig,
-                extraContext = mapOf(ENABLE_THINKING_CONTEXT_KEY to request.reasoningEnabled),
-            ),
+        val key = LiteRtLmConversationKey(
+            sessionId = request.chatSessionId,
+            temperature = config.temperature,
+            topP = config.topP,
+            reasoningEnabled = request.reasoningEnabled,
         )
+        val historyBeforeCurrent = request.historyBeforeCurrent()
+        val retained = conversations.retained()
+        val canReuse = retained != null && canReuseLiteRtLmConversation(
+            retainedKey = retained.state.key,
+            retainedTranscript = retained.state.transcript,
+            requestKey = key,
+            requestHistory = historyBeforeCurrent,
+        )
+        val conversation = if (canReuse) {
+            retained.resource
+        } else {
+            retained?.resource?.let { conversations.invalidate(it, cancelFirst = false) }
+            engine.createConversation(
+                ConversationConfig(
+                    systemInstruction = request.systemInstruction(),
+                    initialMessages = historyBeforeCurrent.toLiteRtMessages(),
+                    samplerConfig = samplerConfig,
+                    extraContext = mapOf(ENABLE_THINKING_CONTEXT_KEY to request.reasoningEnabled),
+                ),
+            )
+        }
+        val reusable = key.sessionId != null
+        val completed = AtomicBoolean(false)
 
         try {
-            activeConversation = conversation
+            conversations.activate(conversation)
             var previousText = ""
             var previousReasoning = ""
             val callback = object : MessageCallback {
@@ -241,6 +344,34 @@ private class AndroidLiteRtLmSession(
                 }
 
                 override fun onDone() {
+                    runCatching { conversation.getBenchmarkInfo() }
+                        .onFailure { error ->
+                            Log.w("ArarAI.LiteRtLm", "Unable to read LiteRT-LM benchmark metrics", error)
+                        }
+                        .getOrNull()
+                        ?.let { benchmark ->
+                            trySend(
+                                LiteRtLmChunk(
+                                    metrics = liteRtLmGenerationMetrics(
+                                        timeToFirstTokenInSecond = benchmark.timeToFirstTokenInSecond,
+                                        prefillTokenCount = benchmark.lastPrefillTokenCount,
+                                        prefillTokensPerSecond = benchmark.lastPrefillTokensPerSecond,
+                                        decodeTokenCount = benchmark.lastDecodeTokenCount,
+                                        decodeTokensPerSecond = benchmark.lastDecodeTokensPerSecond,
+                                    ),
+                                ),
+                            )
+                        }
+                    if (reusable) {
+                        conversations.retain(
+                            resource = conversation,
+                            state = RetainedConversationState(
+                                key = key,
+                                transcript = request.transcriptAfter(previousText),
+                            ),
+                        )
+                    }
+                    completed.set(true)
                     close(null)
                 }
 
@@ -249,25 +380,26 @@ private class AndroidLiteRtLmSession(
                 }
             }
 
-            conversation.sendMessageAsync(request.toLiteRtContents(), callback)
+            conversation.sendMessageAsync(request.toCurrentLiteRtContents(), callback)
         } catch (error: Throwable) {
             close(error)
         }
 
         awaitClose {
-            activeConversation = null
-            conversation.cancelProcess()
-            conversation.close()
+            if (!completed.get()) {
+                conversations.invalidate(conversation, cancelFirst = true)
+            } else if (!reusable) {
+                conversations.invalidate(conversation, cancelFirst = false)
+            }
         }
     }
 
     override fun cancel() {
-        activeConversation?.cancelProcess()
+        conversations.cancelActive()
     }
 
     override fun close() {
-        activeConversation?.close()
-        activeConversation = null
+        conversations.closeAll()
         engine.close()
     }
 
@@ -287,7 +419,149 @@ private class AndroidLiteRtLmSession(
         const val DEFAULT_SEED = 0
         const val ENABLE_THINKING_CONTEXT_KEY = "enable_thinking"
     }
+
+    private data class RetainedConversationState(
+        val key: LiteRtLmConversationKey,
+        val transcript: List<PromptChatMessage>,
+    )
 }
+
+internal data class RetainedResource<R : Any, S>(
+    val resource: R,
+    val state: S,
+)
+
+internal class RetainedResourceOwner<R : Any, S>(
+    private val cancelResource: (R) -> Unit,
+    private val closeResource: (R) -> Unit,
+) {
+    private val lock = Any()
+    private val disposed = IdentityHashMap<R, Unit>()
+    private var active: R? = null
+    private var retained: RetainedResource<R, S>? = null
+
+    fun retained(): RetainedResource<R, S>? = synchronized(lock) { retained }
+
+    fun activate(resource: R): Boolean = synchronized(lock) {
+        if (disposed.containsKey(resource)) return@synchronized false
+        active = resource
+        true
+    }
+
+    fun retain(resource: R, state: S): Boolean = synchronized(lock) {
+        if (disposed.containsKey(resource)) return@synchronized false
+        active = resource
+        retained = RetainedResource(resource, state)
+        true
+    }
+
+    fun invalidate(resource: R, cancelFirst: Boolean) {
+        disposeClaimed(claimForDisposal(listOf(resource)), cancelFirst)
+    }
+
+    fun cancelActive() {
+        val owned = synchronized(lock) { listOfNotNull(active, retained?.resource) }
+        disposeClaimed(claimForDisposal(owned), cancelFirst = true)
+    }
+
+    fun closeAll() {
+        val owned = synchronized(lock) { listOfNotNull(active, retained?.resource) }
+        disposeClaimed(claimForDisposal(owned), cancelFirst = false)
+    }
+
+    private fun claimForDisposal(resources: List<R>): List<R> = synchronized(lock) {
+        resources.filter { resource ->
+            if (disposed.containsKey(resource)) {
+                false
+            } else {
+                disposed[resource] = Unit
+                if (active === resource) active = null
+                if (retained?.resource === resource) retained = null
+                true
+            }
+        }
+    }
+
+    private fun disposeClaimed(resources: List<R>, cancelFirst: Boolean) {
+        resources.forEach { resource ->
+            try {
+                if (cancelFirst) cancelResource(resource)
+            } finally {
+                closeResource(resource)
+            }
+        }
+    }
+}
+
+internal data class LiteRtLmConversationKey(
+    val sessionId: String?,
+    val temperature: Float,
+    val topP: Float,
+    val reasoningEnabled: Boolean,
+)
+
+internal fun canReuseLiteRtLmConversation(
+    retainedKey: LiteRtLmConversationKey,
+    retainedTranscript: List<PromptChatMessage>,
+    requestKey: LiteRtLmConversationKey,
+    requestHistory: List<PromptChatMessage>,
+): Boolean = requestKey.sessionId != null &&
+    retainedKey == requestKey &&
+    retainedTranscript == requestHistory
+
+internal fun liteRtLmGenerationMetrics(
+    timeToFirstTokenInSecond: Double,
+    prefillTokenCount: Int,
+    prefillTokensPerSecond: Double,
+    decodeTokenCount: Int,
+    decodeTokensPerSecond: Double,
+) = GenerationMetrics(
+    timeToFirstTokenMillis = (timeToFirstTokenInSecond * 1_000).toLong(),
+    prefillTokenCount = prefillTokenCount,
+    prefillTokensPerSecond = prefillTokensPerSecond,
+    decodeTokenCount = decodeTokenCount,
+    decodeTokensPerSecond = decodeTokensPerSecond,
+)
+
+private fun PromptRequest.systemInstruction(): Contents? =
+    chatMessages.firstOrNull { it.role == PromptChatRole.System }
+        ?.text
+        ?.takeIf { it.isNotBlank() }
+        ?.let { Contents.of(listOf(Content.Text(it))) }
+
+private fun PromptRequest.historyBeforeCurrent(): List<PromptChatMessage> {
+    val withoutSystem = chatMessages.filter { it.role != PromptChatRole.System }
+    return if (audioPrompt == null && withoutSystem.lastOrNull()?.role == PromptChatRole.User) {
+        withoutSystem.dropLast(1)
+    } else {
+        withoutSystem
+    }
+}
+
+private fun PromptRequest.transcriptAfter(assistantText: String): List<PromptChatMessage> =
+    chatMessages.filter { it.role != PromptChatRole.System } +
+        PromptChatMessage(PromptChatRole.Assistant, assistantText)
+
+private fun List<PromptChatMessage>.toLiteRtMessages(): List<Message> = map { message ->
+    when (message.role) {
+        PromptChatRole.System -> Message.system(message.text)
+        PromptChatRole.User -> Message.user(message.text)
+        PromptChatRole.Assistant -> Message.model(Contents.of(listOf(Content.Text(message.text))))
+    }
+}
+
+private fun PromptRequest.toCurrentLiteRtContents(): Contents = Contents.of(
+    buildList {
+        audioPrompt?.let { add(Content.AudioFile(it.uri.toLiteRtFilePath())) }
+            ?: imageAttachments.forEach { add(Content.ImageFile(it.uri.toLiteRtFilePath())) }
+        if (audioPrompt == null) {
+            chatMessages.lastOrNull { it.role == PromptChatRole.User }
+                ?.text
+                ?.takeIf { it.isNotBlank() }
+                ?.let { add(Content.Text(it)) }
+        }
+    },
+)
 
 internal fun PromptRequest.toLiteRtContents(): Contents =
     Contents.of(

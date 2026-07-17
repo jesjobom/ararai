@@ -15,8 +15,10 @@ import com.jesjobom.ararai.model.ModelStartupState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlin.io.path.createTempDirectory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -337,6 +339,76 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `removing a draft attachment deletes its app owned file`() {
+        val mediaRepository = FileChatMediaRepository(createTempDirectory("chat-media-").toFile())
+        val image = mediaRepository.createDraftFile("image-", ".jpg").apply { writeText("draft") }
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = emptyList()),
+            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true)),
+            inferenceConfig = inferenceConfig,
+            mediaRepository = mediaRepository,
+        )
+
+        viewModel.attachImage(ImageAttachment(image.absolutePath, "image/jpeg"))
+        viewModel.removeImage(image.absolutePath)
+
+        assertFalse(image.exists())
+    }
+
+    @Test
+    fun `deleting a session removes only media without remaining references`() {
+        val store = InMemoryChatSessionStore()
+        val first = store.ensureSession()
+        val mediaRepository = FileChatMediaRepository(createTempDirectory("chat-media-").toFile())
+        val exclusive = mediaRepository.createDraftFile("image-", ".jpg").apply { writeText("exclusive") }
+        val shared = mediaRepository.createDraftFile("image-", ".jpg").apply { writeText("shared") }
+        store.appendMessage(first.id, ChatRole.User, MessageContent.TextPrompt("first", listOf(
+            ImageAttachment(exclusive.absolutePath, "image/jpeg"),
+            ImageAttachment(shared.absolutePath, "image/jpeg"),
+        )))
+        val second = store.createSession("Second")
+        store.appendMessage(second.id, ChatRole.User, MessageContent.TextPrompt("second", listOf(
+            ImageAttachment(shared.absolutePath, "image/jpeg"),
+        )))
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = emptyList()),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            sessionStore = store,
+            mediaRepository = mediaRepository,
+        )
+
+        viewModel.deleteSession(first.id)
+
+        assertFalse(exclusive.exists())
+        assertTrue(shared.exists())
+    }
+
+    @Test
+    fun `clearing sessions removes all persisted media`() {
+        val store = InMemoryChatSessionStore()
+        val session = store.ensureSession()
+        val mediaRepository = FileChatMediaRepository(createTempDirectory("chat-media-").toFile())
+        val audio = mediaRepository.createDraftFile("recording-", ".wav").apply { writeText("audio") }
+        store.appendMessage(
+            session.id,
+            ChatRole.User,
+            MessageContent.AudioPromptContent(AudioPrompt(audio.absolutePath, "audio/wav")),
+        )
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = emptyList()),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            sessionStore = store,
+            mediaRepository = mediaRepository,
+        )
+
+        viewModel.clearAllSessions()
+
+        assertFalse(audio.exists())
+    }
+
+    @Test
     fun `sends system prompt and recent session history to engine`() = runTest {
         val store = InMemoryChatSessionStore()
         val session = store.ensureSession()
@@ -365,6 +437,7 @@ class ChatViewModelTest {
             ),
             engine.lastRequest!!.chatMessages,
         )
+        assertEquals(session.id, engine.lastRequest!!.chatSessionId)
         assertEquals("Current question", store.getMessages(session.id).filter { it.role == ChatRole.User }.last().text)
     }
 
@@ -546,6 +619,111 @@ class ChatViewModelTest {
         assertEquals("because ", content.reasoningText)
     }
 
+    @Test
+    fun `batches streamed assistant persistence without delaying UI updates`() = runTest {
+        val store = CountingChatSessionStore()
+        val viewModel = ChatViewModel(
+            engine = BatchedStreamingEngine(),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            sessionStore = store,
+            scope = this,
+            assistantPersistenceIntervalMillis = 250L,
+        )
+
+        viewModel.onPromptChanged("hello")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        assertEquals("three chunks", viewModel.uiState.value.messages.last().text)
+        assertEquals("", store.latestAssistantText())
+        assertEquals(0, store.updateCalls)
+
+        advanceTimeBy(250L)
+        runCurrent()
+
+        assertEquals("three chunks", store.latestAssistantText())
+        assertEquals(1, store.updateCalls)
+        viewModel.cancelGeneration()
+        runCurrent()
+    }
+
+    @Test
+    fun `flushes pending assistant content on completion`() = runTest {
+        val store = CountingChatSessionStore()
+        val viewModel = streamingViewModel(
+            engine = TerminalStreamingEngine(GenerationEvent.Completed),
+            store = store,
+        )
+
+        viewModel.onPromptChanged("hello")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        assertEquals("partial", store.latestAssistantText())
+        assertEquals(1, store.updateCalls)
+        assertFalse(viewModel.uiState.value.isGenerating)
+    }
+
+    @Test
+    fun `flushes pending assistant content on generation failure`() = runTest {
+        val store = CountingChatSessionStore()
+        val viewModel = streamingViewModel(
+            engine = TerminalStreamingEngine(GenerationEvent.Failed("failed")),
+            store = store,
+        )
+
+        viewModel.onPromptChanged("hello")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        assertEquals("partial", store.latestAssistantText())
+        assertEquals(1, store.updateCalls)
+        assertEquals("failed", viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun `flushes pending assistant content before cancellation`() = runTest {
+        val store = CountingChatSessionStore()
+        val viewModel = streamingViewModel(engine = SlowEngine(), store = store)
+
+        viewModel.onPromptChanged("hello")
+        viewModel.submitPrompt()
+        runCurrent()
+        viewModel.cancelGeneration()
+        runCurrent()
+
+        assertEquals("partial", store.latestAssistantText())
+        assertEquals(1, store.updateCalls)
+    }
+
+    @Test
+    fun `flushes pending assistant content when leaving chat`() = runTest {
+        val store = CountingChatSessionStore()
+        val viewModel = streamingViewModel(engine = SlowEngine(), store = store)
+
+        viewModel.onPromptChanged("hello")
+        viewModel.submitPrompt()
+        runCurrent()
+        viewModel.onLeavingChat()
+        runCurrent()
+
+        assertEquals("partial", store.latestAssistantText())
+        assertEquals(1, store.updateCalls)
+    }
+
+    private fun kotlinx.coroutines.test.TestScope.streamingViewModel(
+        engine: LocalLlmEngine,
+        store: CountingChatSessionStore,
+    ): ChatViewModel = ChatViewModel(
+        engine = engine,
+        initialModel = model,
+        inferenceConfig = inferenceConfig,
+        sessionStore = store,
+        scope = this,
+        assistantPersistenceIntervalMillis = 250L,
+    )
+
 
     @Test
     fun `unloads engine when model becomes unavailable`() = runTest {
@@ -604,6 +782,48 @@ class ChatViewModelTest {
 
         override suspend fun unload() {
             unloadCalls += 1
+        }
+    }
+
+    private class BatchedStreamingEngine : LocalLlmEngine {
+        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
+            emit(GenerationEvent.Token("three"))
+            emit(GenerationEvent.Token(" chunks"))
+            kotlinx.coroutines.delay(Long.MAX_VALUE)
+        }
+
+        override suspend fun unload() = Unit
+    }
+
+    private class TerminalStreamingEngine(
+        private val terminalEvent: GenerationEvent,
+    ) : LocalLlmEngine {
+        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(
+            GenerationEvent.Token("partial"),
+            terminalEvent,
+        )
+
+        override suspend fun unload() = Unit
+    }
+
+    private class CountingChatSessionStore(
+        private val delegate: ChatSessionStore = InMemoryChatSessionStore(),
+    ) : ChatSessionStore by delegate {
+        var updateCalls: Int = 0
+            private set
+
+        override fun updateMessage(messageId: String, content: MessageContent) {
+            updateCalls += 1
+            delegate.updateMessage(messageId, content)
+        }
+
+        fun latestAssistantText(): String {
+            val session = delegate.listSessions().first()
+            return delegate.getMessages(session.id).last { it.role == ChatRole.Assistant }.text
         }
     }
 

@@ -2,128 +2,133 @@
 
 ## Purpose
 
-ArarAI is an Android hub for local open LLMs. It should obtain a configured
-supported model, send prompts, and receive streamed responses while all
-inference runs on the device.
+ArarAI is an Android hub for configured open LLMs. It manages local model
+artifacts and runs Chat inference on-device without requiring an application
+backend, remote database, or hosted inference API. The project favors small,
+validated increments and explicit runtime boundaries because mobile native
+inference remains device-, driver-, model-, and workload-dependent.
 
-The project is intentionally exploratory: it should grow through small validated
-increments, test device constraints early, and preserve the ability to replace
-runtime implementations later.
+## Current product
 
-## Product Decisions
+- The application starts at a Compose home hub with Chat, Models, and
+  Diagnostics destinations.
+- A checked-in static catalog defines every manageable model, artifact URL and
+  hash, runtime, acceleration policy, input/reasoning capabilities, and default
+  inference settings.
+- Users can download, retry, cancel, update, delete, and select configured
+  models. The selected model persists locally.
+- The Chat supports streamed generation, cancellation, persistent and
+  renameable sessions, bounded context, Markdown output, settings, and
+  capability-gated reasoning.
+- Structured prompts can contain text, normalized images, or recorded audio
+  when the selected model declares the corresponding input capability.
+- Diagnostics expose model/runtime metadata and local benchmark measurements.
+- Conversations, preferences, models, runtime caches, and Chat media are local.
+  Android backup and device transfer are disabled for the application.
 
-- The product name is `ArarAI`.
-- The Android namespace and application ID start as `com.jesjobom.ararai`.
-- The MVP targets Android SDK 36 and does not need to support old Android
-  versions.
-- The MVP uses no external application backend, remote database, or hosted API.
-- The first model source is one fixed GGUF model declared in checked-in app
-  configuration. On startup, the app checks the configured app-owned model path
-  and automatically downloads the configured model if it is absent or invalid.
-  There is no model picker in the MVP.
-- Android release signing is out of scope initially; debug builds are enough.
-- Fase 0 model feasibility testing is skipped because representative local
-  models have already been tested in other Android applications.
+Model downloads contact only the artifact URLs declared in the catalog. A valid
+local model is sufficient for the core Chat inference flow.
 
-## Initial Stack
+## Supported implementation baseline
 
-- Kotlin 2.3.21
-- Jetpack Compose
-- Jetpack Compose BOM 2026.06.00
-- Compose Compiler Gradle plugin matching Kotlin 2.3.21
-- Gradle wrapper
-- Android Gradle Plugin 9.2.x initially, with AGP 8.13.2 as a fallback only if
-  the first Compose plus NDK scaffold hits real compatibility friction
-- Gradle 9.4.1
-- JDK 17 for the build runtime
-- Android SDK 36
-- Android Build Tools 36.0.0
-- Android NDK
-- Android NDK 28.2.13676358
-- Android SDK CMake 3.22.1
-- CMake and Ninja
-- llama.cpp through JNI/NDK
-- GGUF model files
-- Room or plain SQLite only when local persistence becomes necessary
-- DataStore for small preferences
-- WorkManager for the configured model download flow
-- Android TextToSpeech and SpeechRecognizer for early voice experiments
+- Namespace/application ID: `com.jesjobom.ararai`
+- Android min SDK 28; compile and target SDK 36; arm64-v8a
+- Kotlin 2.3.21; Jetpack Compose BOM 2026.06.00
+- JDK 17; Android Gradle Plugin 9.2.x; Gradle 9.4.1
+- Build Tools 36.0.0; NDK 28.2.13676358; CMake 3.22.1
+- llama.cpp through JNI/NDK for GGUF artifacts
+- LiteRT-LM 0.14.0 for configured LiteRT-LM bundles
+- Plain SQLite for Chat sessions/messages and local preferences for model
+  selection
+- Debug builds/signing only
 
-## Architecture Direction
+Exact dependency versions and Android settings come from the checked-in Gradle
+configuration. Exact model support comes from
+`app/src/main/res/raw/fixed_model.properties`.
 
-The app should isolate model execution behind an engine boundary so the first
-implementation can use llama.cpp while preserving room for future runtimes.
+## Architecture
 
-Candidate boundary:
+Local inference is isolated behind `LocalLlmEngine`. Runtime selection is driven
+by catalog metadata, with `ConfiguredLocalLlmEngine` dispatching to llama.cpp or
+LiteRT-LM implementations. UI and ViewModels consume runtime-neutral generation
+events and structured message content rather than JNI or LiteRT-specific types.
 
-```kotlin
-interface LocalLlmEngine {
-    suspend fun load(model: LocalModel, config: InferenceConfig)
-    fun generate(request: PromptRequest): Flow<GenerationEvent>
-    suspend fun unload()
-}
+The principal boundaries are:
+
+- `model/`: catalog parsing, selection, resolution, integrity, and download;
+- `engine/`: runtime-neutral contracts plus llama.cpp and LiteRT-LM adapters;
+- `chat/`: session state, context construction, SQLite persistence, streaming
+  durability, and media ownership;
+- `ui/`: navigation and Compose presentation, with injectable adapters around
+  image import, audio recording/playback, decoding, and draft cleanup;
+- `benchmark/`: diagnostic state and inference measurement.
+
+The native runtime may remain loaded across internal navigation when compatible,
+but cancellation, replacement, and unload must retain clear ownership and
+idempotent cleanup. Media files are app-owned and removed only when safe with
+respect to remaining message references.
+
+## Historical baseline
+
+The project began as a single-screen, text-only llama.cpp/GGUF MVP with one
+automatically downloaded configured model and no history, model picker, voice,
+or image input. Those statements describe the first implementation slice only;
+they are not current product constraints. Archived OpenSpec changes preserve
+that history.
+
+## Development and validation
+
+Use TDD by default where an automated test is practical: establish the failing
+behavior, implement the smallest complete change, then refactor without changing
+the contract. Domain logic, ViewModels, persistence, catalog/download behavior,
+media boundaries, and runtime ownership belong in automated tests.
+
+`scripts/quality-gate.sh` is the common local/CI gate. It runs unit/Robolectric
+tests, lint, debug app and instrumentation builds, and `openspec validate --all
+--strict`. Android instrumentation execution requires a connected arm64 device:
+
+```sh
+./gradlew connectedDebugAndroidTest
 ```
 
-The UI, model catalog, prompt/session state, media handling, and inference
-runtime should remain separate enough that runtime experiments do not rewrite
-the whole app.
+Physical validation remains mandatory for real-model inference, actual GPU
+backend selection/fallback, JNI/vendor behavior, lifecycle under load, memory,
+thermal behavior, permissions, media/storage cleanup, and backup/transfer.
+Follow `docs/device-validation.md`; never infer these results from a successful
+CI build.
 
-## First Implementation Slice
+The OpenClaw container builds and validates source. After a debug build,
+`scripts/copy-debug-apk.sh` copies the APK to
+`/home/node/.openclaw/jarvis/artifacts/ararai/app-debug.apk` for installation in
+the environment with ADB access.
 
-The first vertical slice is a single-screen debug chat flow:
+## Specification workflow and precedence
 
-1. Launch the app.
-2. Resolve the configured GGUF model from the standard app-owned location.
-3. Automatically download the configured model if it is missing or invalid.
-4. Load the configured model through the `LocalLlmEngine` boundary.
-5. Submit one text prompt.
-6. Stream generated text back into the chat view.
-7. Unload the model when leaving the screen.
+1. `openspec/specs/local-llm-hub/spec.md` is the canonical consolidated product
+   contract.
+2. An approved active change under `openspec/changes/<name>/` defines its pending
+   delta until it is archived and merged into the consolidated spec.
+3. Source code, resources, manifests, Gradle files, and tests define exact
+   implemented configuration and provide implementation evidence.
+4. This project context and the README summarize those sources for maintainers;
+   they do not supersede them.
+5. Archived changes are historical records and must not be linked as active
+   plans.
 
-This slice excludes conversation history, model choice, model catalog sync,
-voice, image input/output, release signing, and polished settings. It should
-still include automated tests around configured-model resolution, download
-orchestration, prompt/session state, engine-boundary events, and failure
-handling before native runtime work is wired in.
+Before completing or archiving a change, review whether it materially changes
+capabilities, architecture, setup, validation, privacy, or supported workflows.
+If it does, update the README and this context in the same change. Documentation
+must distinguish implemented automated evidence from checks that require a
+physical device.
 
-## Development Process
+## Known constraints and open work
 
-ArarAI should be developed with TDD by default. For each behavior where an
-automated test is practical, create or update a failing test first, verify the
-failure, implement the smallest change that makes it pass, and then refactor
-without changing behavior.
-
-Automated tests should be preferred for domain logic, state management,
-ViewModels, model catalog behavior, persistence, download orchestration, and
-runtime boundary contracts. Manual device checks are still required for local
-LLM performance, JNI/NDK integration, Android permissions, thermal behavior, and
-end-to-end UX, but they do not replace automated tests for testable code.
-
-If a slice cannot reasonably start with an automated failing test, document the
-reason in the change notes or task checklist and add the closest practical
-guardrail before considering the slice done.
-
-## Test Environment
-
-The OpenClaw container is expected to be used for source edits and APK builds.
-It is not expected to run an Android emulator reliably.
-
-The expected early test split is:
-
-1. Build APK inside the OpenClaw container.
-2. Copy the generated debug APK to
-   `/home/node/.openclaw/jarvis/artifacts/ararai/app-debug.apk`, outside the
-   Git-tracked project files.
-3. Install and run it on the physical Android device using ADB outside the
-   container.
-4. Inspect failures through device logs and iterate.
-
-This means feedback loops will be slower than a fully local Android Studio
-setup. The project should compensate with small slices and clear manual test
-checklists.
-
-## Open Questions
-
-- Whether to use Room from the beginning or defer persistence until history or a
-  local catalog exists.
-- Whether remote device logs can be pulled back into OpenClaw automatically.
+- The model catalog is static; arbitrary user-provided model entries are not
+  supported.
+- Release signing and a production release pipeline are not configured.
+- The generic GitHub runner builds the instrumentation APK but does not execute
+  device tests.
+- Runtime compatibility and acceleration vary by device and require the
+  versioned physical-device matrix.
+- Export/import of conversations and a user-facing storage/privacy dashboard
+  are potential future capabilities, not implemented features.

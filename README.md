@@ -1,66 +1,119 @@
 # ArarAI
 
-ArarAI is an Android application concept for running open local LLMs on-device.
-The first milestone is a focused text-chat MVP that resolves configured open
-models, downloads a small default model automatically when no configured model
-is available, runs inference locally, and streams text responses without
-depending on a remote API or external database.
+ArarAI is an Android application for running configured open LLMs locally on an
+arm64 device. Models, inference, conversations, and Chat media stay app-owned;
+the core Chat flow does not depend on a remote inference API, application
+backend, or external database.
 
-## Current Direction
+## Current capabilities
 
-- Product name: ArarAI
-- Platform: Android
-- Android package/application ID: `com.jesjobom.ararai`
-- Target SDK: Android SDK 36
-- Runtime direction: llama.cpp with GGUF models through JNI/NDK
-- Build toolchain: Kotlin 2.3.21, Compose BOM 2026.06.00, JDK 17, AGP
-  9.2.x, Gradle 9.4.1, Build Tools 36.0.0, NDK 28.2.13676358
-- First device target: Galaxy 26 physical device
-- Backend: none for the MVP
-- External database: none for the MVP
-- Model access: a static checked-in GGUF model catalog; startup downloads the
-  configured small default model only when no configured model is available
-  locally
-- Android signing: debug builds only for now
-- Development process: TDD by default; write a failing test before implementing
-  each behavior when an automated test is practical
+- Checked-in model catalog with download, integrity validation, selection,
+  update, deletion, and persisted active-model choice.
+- Runtime selection through a shared `LocalLlmEngine` boundary:
+  - llama.cpp/JNI for GGUF models;
+  - LiteRT-LM for configured `.litertlm` bundles.
+- Streamed local Chat with persistent and renameable sessions, cancellation,
+  bounded context construction, Markdown rendering, and optional reasoning
+  controls when declared by the selected model.
+- Capability-gated image and audio prompts. Imported images are normalized and
+  recordings are stored as app-owned Chat media.
+- Diagnostics for model/runtime identity and local inference performance.
+- Home, Chat, Models, and Diagnostics destinations implemented with Jetpack
+  Compose.
 
-## Planning
+The checked-in catalog is authoritative for models the UI can manage. A feature
+being present in the UI does not prove that every model or device supports it;
+input and reasoning controls follow model capability metadata, and real GPU,
+memory, thermal, and multimodal behavior require physical-device validation.
 
-Project decisions and requirements are tracked under `openspec/`.
-The project definition lives in:
+## Platform and toolchain
 
-- `openspec/project.md`
-- `openspec/specs/local-llm-hub/spec.md`
-- `openspec/changes/implement-phase-1-app-shell/`
+- Application ID: `com.jesjobom.ararai`
+- Android: min SDK 28, compile/target SDK 36, arm64-v8a
+- Kotlin 2.3.21 and Compose BOM 2026.06.00
+- JDK 17, AGP 9.2.x, Gradle wrapper 9.4.1
+- Build Tools 36.0.0, NDK 28.2.13676358, CMake 3.22.1
+- Local runtimes: llama.cpp through JNI/NDK and LiteRT-LM 0.14.0
+- Debug signing/builds only; release signing is not configured
 
-## Build
+Model definitions and their runtime, artifact, capability, integrity, and
+inference metadata live in `app/src/main/res/raw/fixed_model.properties`.
 
-Run local unit tests:
+## Build and verification
+
+The supported local and CI entry point is:
+
+```sh
+scripts/quality-gate.sh
+```
+
+It runs JVM/Robolectric tests, Android lint, the debug app build, the debug
+instrumentation APK build, and strict validation of every OpenSpec change. The
+same command is used by `.github/workflows/android-quality-gate.yml`.
+
+Individual commands remain useful while iterating:
 
 ```sh
 ./gradlew testDebugUnitTest
+./gradlew lintDebug
+./gradlew assembleDebug
+./gradlew assembleDebugAndroidTest
+openspec validate --all --strict
 ```
 
-Build the debug APK:
+With an authorized arm64 Android device connected, execute the instrumentation
+suite:
 
 ```sh
-./gradlew assembleDebug
+./gradlew connectedDebugAndroidTest
 ```
 
-Copy the debug APK to the OpenClaw handoff location:
+The generic CI runner compiles but does not execute this suite. Follow
+`docs/device-validation.md` for real-model, GPU/backend, lifecycle, permission,
+storage, memory, and thermal checks. `docs/quality-gates.md` defines what each
+automated layer does and does not prove.
+
+## APK handoff
+
+After `./gradlew assembleDebug`, copy the APK to the shared, non-versioned
+handoff location:
 
 ```sh
 scripts/copy-debug-apk.sh
 ```
 
-## Manual Device Check
+The resulting file is
+`/home/node/.openclaw/jarvis/artifacts/ararai/app-debug.apk`. Install and test it
+from the environment that has ADB access.
 
-After copying the APK to the handoff location, install it from an environment
-with ADB access and verify:
+## Local data and privacy
 
-- the app launches as `ArarAI`
-- the debug chat screen renders without crashing
-- configured models are visible
-- prompt submission is disabled until a configured model is available
-- device logs do not show startup crashes or resource failures
+ArarAI stores conversations in local SQLite, Chat media and downloaded models
+in app-owned files, model-selection preferences locally, and runtime caches on
+the current device. Android cloud backup and device-to-device transfer are
+disabled for the whole application. Reinstalling the app or moving to another
+device therefore does not restore conversations, media, models, or settings.
+
+Model downloads still require network access to their configured artifact URLs.
+Once a valid model is present, core inference and Chat do not call a hosted
+inference service.
+
+## Planning and sources of truth
+
+Project planning and requirements live under `openspec/`:
+
+- `openspec/specs/local-llm-hub/spec.md` is the canonical consolidated product
+  specification.
+- `openspec/changes/<change-name>/` contains proposed or in-progress deltas.
+- `openspec/changes/archive/` contains historical decisions, not active work.
+- `openspec/project.md` explains the current product and engineering context.
+
+When sources disagree, use the consolidated spec for product requirements, an
+active approved change for its not-yet-archived delta, and checked-in build
+configuration/source for exact implementation details. The README is onboarding
+documentation and must not override those sources.
+
+Before completing or archiving a change that affects capabilities,
+architecture, setup, validation, privacy, or supported workflows, review this
+README and `openspec/project.md`. Claims must describe implemented and verified
+behavior; device-dependent behavior must remain identified as such.

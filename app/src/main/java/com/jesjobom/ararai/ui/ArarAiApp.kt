@@ -54,6 +54,7 @@ import com.jesjobom.ararai.benchmark.BenchmarkResult
 import com.jesjobom.ararai.benchmark.BenchmarkUiState
 import com.jesjobom.ararai.benchmark.BenchmarkViewModel
 import com.jesjobom.ararai.chat.ChatSessionStore
+import com.jesjobom.ararai.chat.ChatMediaRepository
 import com.jesjobom.ararai.chat.ChatViewModel
 import com.jesjobom.ararai.engine.ConfiguredLocalLlmEngine
 import com.jesjobom.ararai.model.ManagedModelItem
@@ -69,11 +70,14 @@ private enum class AppDestination {
 }
 
 @Composable
-fun ArarAiApp(
+internal fun ArarAiApp(
     modelController: ModelCatalogController,
     chatSessionStore: ChatSessionStore,
+    chatMediaRepository: ChatMediaRepository,
+    chatMediaServices: ChatMediaServices,
     systemPrompt: String,
     appVersionLabel: String,
+    liteRtLmCacheDir: String? = null,
 ) {
     val modelCatalogState by modelController.state.collectAsState()
     val startupState = modelCatalogState.selectedStartupState
@@ -82,16 +86,17 @@ fun ArarAiApp(
     val chatViewModel = remember {
         val availableState = startupState as? ModelStartupState.Available
         ChatViewModel(
-            engine = ConfiguredLocalLlmEngine(),
+            engine = ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir),
             initialModel = availableState?.model,
             inferenceConfig = availableState?.inference ?: modelConfig.inference,
             systemPrompt = systemPrompt,
             sessionStore = chatSessionStore,
+            mediaRepository = chatMediaRepository,
         )
     }
     val benchmarkViewModel = remember {
         BenchmarkViewModel(
-            engine = ConfiguredLocalLlmEngine(),
+            engine = ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir),
             initialConfig = modelConfig,
             initialState = startupState,
         )
@@ -127,6 +132,7 @@ fun ArarAiApp(
         )
         AppDestination.Chat -> ChatScreen(
             viewModel = chatViewModel,
+            mediaServices = chatMediaServices,
             onBack = { returnHome() },
             onRetryModelDownload = { modelController.retry(modelCatalogState.selectedModelId) },
         )
@@ -454,11 +460,21 @@ private fun BenchmarkResultCard(result: BenchmarkResult) {
             LabeledValue("First token", result.firstTokenMillis?.let { "$it ms" } ?: "n/a")
             LabeledValue("Generation", "${result.generationMillis} ms")
             LabeledValue("Total", "${result.totalMillis} ms")
-            LabeledValue("Output tokens", result.generatedTokens.toString())
-            LabeledValue("Output chars", result.generatedCharacters.toString())
+            LabeledValue("Prefill tokens", result.prefillTokens?.toString() ?: "n/a")
             LabeledValue(
-                label = "Throughput",
-                value = "${String.format(Locale.US, "%.2f", result.tokensPerSecond)} tokens/s",
+                "Prefill throughput",
+                result.prefillTokensPerSecond?.let { "${String.format(Locale.US, "%.2f", it)} tokens/s" } ?: "n/a",
+            )
+            LabeledValue("Decode tokens", result.decodeTokens?.toString() ?: "n/a")
+            LabeledValue(
+                "Decode throughput",
+                result.decodeTokensPerSecond?.let { "${String.format(Locale.US, "%.2f", it)} tokens/s" } ?: "n/a",
+            )
+            LabeledValue("Output chars", result.generatedCharacters.toString())
+            LabeledValue("Stream chunks", result.streamedChunks.toString())
+            LabeledValue(
+                label = "Character throughput",
+                value = "${String.format(Locale.US, "%.2f", result.charactersPerSecond)} chars/s",
             )
         }
     }

@@ -8,8 +8,12 @@ import kotlinx.coroutines.flow.flowOf
 
 class ConfiguredLocalLlmEngine(
     private val llamaCppEngine: LocalLlmEngine = LlamaCppLocalLlmEngine(),
-    private val liteRtLmEngine: LocalLlmEngine = LiteRtLmLocalLlmEngine(),
+    liteRtLmEngine: LocalLlmEngine? = null,
+    liteRtLmCacheDir: String? = null,
 ) : LocalLlmEngine {
+    private val liteRtLmEngine: LocalLlmEngine = liteRtLmEngine ?: LiteRtLmLocalLlmEngine(
+        bridge = AndroidLiteRtLmBridge(cacheDir = liteRtLmCacheDir),
+    )
     private var activeEngine: LocalLlmEngine? = null
 
     override suspend fun load(model: LocalModel, config: InferenceConfig) {

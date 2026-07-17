@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -78,6 +79,76 @@ class ChatSessionStoreTest {
         assertTrue(store.getMessages(first.id).isEmpty())
         assertTrue(store.getMessages(second.id).isEmpty())
     }
+
+    @Test
+    fun `successful append commits message timestamp and reorders session together`() {
+        val store = store()
+        val first = store.createSession("First")
+        val second = store.createSession("Second")
+        store.writableDatabase.execSQL(
+            "UPDATE chat_sessions SET updated_at_millis = CASE id WHEN ? THEN 100 ELSE 200 END",
+            arrayOf(first.id),
+        )
+
+        val message = store.appendMessage(first.id, ChatRole.User, "new message")
+
+        assertEquals(message.id, store.getMessages(first.id).single().id)
+        assertEquals(message.createdAtMillis, store.listSessions().first { it.id == first.id }.updatedAtMillis)
+        assertEquals(first.id, store.listSessions().first().id)
+        assertEquals(second.id, store.listSessions().last().id)
+    }
+
+    @Test
+    fun `sqlite append to missing session fails without orphan message`() {
+        val store = store()
+
+        assertThrows(ChatPersistenceException::class.java) {
+            store.appendMessage("missing-session", ChatRole.User, "orphan")
+        }
+
+        assertTrue(store.getMessages("missing-session").isEmpty())
+        assertEquals(0, messageCount(store))
+    }
+
+    @Test
+    fun `in memory append to missing session follows atomic store contract`() {
+        val store = InMemoryChatSessionStore()
+
+        assertThrows(ChatPersistenceException::class.java) {
+            store.appendMessage("missing-session", ChatRole.User, "orphan")
+        }
+
+        assertTrue(store.getMessages("missing-session").isEmpty())
+    }
+
+    @Test
+    fun `session update failure rolls back inserted message and timestamp`() {
+        val store = store()
+        val session = store.ensureSession()
+        val originalTimestamp = session.updatedAtMillis
+        store.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER fail_chat_session_update
+            BEFORE UPDATE OF updated_at_millis ON chat_sessions
+            BEGIN
+                SELECT RAISE(ABORT, 'injected session update failure');
+            END
+            """.trimIndent(),
+        )
+
+        assertThrows(android.database.sqlite.SQLiteException::class.java) {
+            store.appendMessage(session.id, ChatRole.User, "must roll back")
+        }
+
+        assertTrue(store.getMessages(session.id).isEmpty())
+        assertEquals(originalTimestamp, store.listSessions().single().updatedAtMillis)
+    }
+
+    private fun messageCount(store: SqliteChatSessionStore): Int =
+        store.readableDatabase.rawQuery("SELECT COUNT(*) FROM chat_messages", emptyArray()).use { cursor ->
+            cursor.moveToFirst()
+            cursor.getInt(0)
+        }
 
     private fun createLegacyDatabase() {
         val databaseFile = context.getDatabasePath(DATABASE_NAME)
