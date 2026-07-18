@@ -179,6 +179,7 @@ class ChatViewModelTest {
             assertFalse(failed.isGenerating)
             assertEquals("generation failed", failed.error)
             assertEquals("oi", failed.messages.first().text)
+            assertEquals("oi", failed.prompt)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -277,6 +278,7 @@ class ChatViewModelTest {
         assertFalse(viewModel.uiState.value.isGenerating)
         assertFalse(viewModel.uiState.value.isLoadingModel)
         assertEquals("partial", viewModel.uiState.value.messages.last().text)
+        assertEquals("hello", viewModel.uiState.value.prompt)
     }
 
     @Test

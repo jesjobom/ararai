@@ -31,12 +31,18 @@ data class ModelCatalogState(
         get() = selectedItem.config
 }
 
+interface ModelDownloadCommandGateway {
+    fun start(modelId: String, replaceExisting: Boolean = false)
+    fun cancel(modelId: String)
+}
+
 class ModelCatalogController(
     private val catalog: ModelCatalog,
     private val appFilesRoot: File,
     private val downloader: ModelDownloader = ModelFileDownloader(appFilesRoot),
     private val resolver: ModelResolver = ModelResolver(appFilesRoot),
     private val selectionStore: ModelSelectionStore = InMemoryModelSelectionStore(),
+    private val downloadGateway: ModelDownloadCommandGateway? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
     private val downloadJobs = mutableMapOf<String, Job>()
@@ -66,18 +72,23 @@ class ModelCatalogController(
     fun download(modelId: String) {
         val item = state.value.item(modelId)
         if (item.state is ModelStartupState.Downloading) return
-        startDownload(item.config)
+        downloadGateway?.start(modelId) ?: startDownload(item.config)
     }
 
     fun cancelDownload(modelId: String) {
+        downloadGateway?.cancel(modelId)
         downloadJobs.remove(modelId)?.cancel()
     }
 
     fun redownload(modelId: String) {
         val item = state.value.item(modelId)
         if (item.state is ModelStartupState.Downloading) return
-        deleteModelFiles(item.config)
-        startDownload(item.config)
+        if (downloadGateway != null) {
+            downloadGateway.start(modelId, replaceExisting = true)
+        } else {
+            deleteModelFiles(item.config)
+            startDownload(item.config)
+        }
     }
 
     fun delete(modelId: String) {
@@ -93,7 +104,7 @@ class ModelCatalogController(
 
         val defaultModel = current.models.first { it.config.id == catalog.defaultModelId }
         if (defaultModel.state is ModelStartupState.Missing || defaultModel.state is ModelStartupState.Invalid) {
-            startDownload(defaultModel.config)
+            download(defaultModel.config.id)
         }
     }
 
@@ -140,6 +151,17 @@ class ModelCatalogController(
             }
         }
         downloadJobs[config.id] = job
+    }
+
+    fun executeBackgroundDownload(modelId: String, replaceExisting: Boolean = false) {
+        val item = state.value.item(modelId)
+        if (item.state is ModelStartupState.Downloading) return
+        if (replaceExisting) deleteModelFiles(item.config)
+        startDownload(item.config)
+    }
+
+    fun executeBackgroundCancel(modelId: String) {
+        downloadJobs.remove(modelId)?.cancel()
     }
 
     private fun updateModelState(modelId: String, modelState: ModelStartupState) {

@@ -10,15 +10,17 @@ inference remains device-, driver-, model-, and workload-dependent.
 
 ## Current product
 
-- The application starts at a Compose home hub with Chat, Models, and
-  Diagnostics destinations.
+- The application starts at a Compose home hub with Chat, Models, Diagnostics,
+  and Settings destinations. Appearance can follow the system or use an
+  explicitly selected light or dark theme.
 - A checked-in static catalog defines every manageable model, artifact URL and
   hash, runtime, acceleration policy, input/reasoning capabilities, and default
   inference settings.
 - Users can download, retry, cancel, update, delete, and select configured
-  models. The selected model persists locally.
+  models. Downloads are resumable foreground data transfers with notification
+  progress, and the selected model persists locally.
 - The Chat supports streamed generation, cancellation, persistent and
-  renameable sessions, bounded context, Markdown output, settings, and
+  renameable sessions, bounded context, selectable Markdown and local LaTeX math output, settings, and
   capability-gated reasoning.
 - Structured prompts can contain text, normalized images, or recorded audio
   when the selected model declares the corresponding input capability.
@@ -56,6 +58,8 @@ events and structured message content rather than JNI or LiteRT-specific types.
 The principal boundaries are:
 
 - `model/`: catalog parsing, selection, resolution, integrity, and download;
+- application-scoped model download coordination is hosted by an Android
+  foreground data-sync service so activity recreation does not own transfers;
 - `engine/`: runtime-neutral contracts plus llama.cpp and LiteRT-LM adapters;
 - `chat/`: session state, context construction, SQLite persistence, streaming
   durability, and media ownership;

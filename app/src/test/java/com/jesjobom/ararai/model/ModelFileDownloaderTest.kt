@@ -6,9 +6,13 @@ import java.io.IOException
 import java.io.InputStream
 import java.nio.file.Files
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -69,7 +73,7 @@ class ModelFileDownloaderTest {
     }
 
     @Test
-    fun `byte source failure removes stale temp file and keeps existing final file`() = runTest {
+    fun `byte source failure preserves partial file and keeps existing final file`() = runTest {
         val root = Files.createTempDirectory("ararai-download").toFile()
         val finalFile = File(root, helloConfig().relativePath)
         finalFile.parentFile!!.mkdirs()
@@ -90,7 +94,7 @@ class ModelFileDownloaderTest {
                 error.message,
             )
             assertEquals("old-valid", finalFile.readText())
-            assertFalse(tempFile.exists())
+            assertEquals("stale", tempFile.readText())
         }
     }
 
@@ -120,7 +124,7 @@ class ModelFileDownloaderTest {
     }
 
     @Test
-    fun `cancellation removes temp file and is not wrapped as download failure`() = runTest {
+    fun `cancellation preserves temp file and is not wrapped as download failure`() = runTest {
         val root = Files.createTempDirectory("ararai-download").toFile()
         val downloader = ModelFileDownloader(
             appFilesRoot = root,
@@ -133,8 +137,54 @@ class ModelFileDownloaderTest {
         } catch (_: CancellationException) {
             val finalFile = File(root, helloConfig().relativePath)
             assertFalse(finalFile.exists())
-            assertFalse(File(finalFile.parentFile, "${finalFile.name}.part").exists())
+            assertTrue(File(finalFile.parentFile, "${finalFile.name}.part").exists())
         }
+    }
+
+    @Test
+    fun `job cancellation interrupts an active stream copy`() = runBlocking {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val config = helloConfig().copy(expectedBytes = 8L * 1024L * 1024L)
+        val downloader = ModelFileDownloader(root, SlowModelByteSource(config.expectedBytes!!))
+        val finalFile = File(root, config.relativePath)
+        val tempFile = File(finalFile.parentFile, "${finalFile.name}.part")
+
+        val job = launch { downloader.download(config) }
+        while (!tempFile.exists() || tempFile.length() == 0L) delay(5)
+        job.cancel()
+        job.join()
+
+        assertFalse(finalFile.exists())
+        assertTrue(tempFile.exists())
+        assertTrue(tempFile.length() < config.expectedBytes)
+    }
+
+    @Test
+    fun `resumes from confirmed partial offset`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val finalFile = File(root, helloConfig().relativePath)
+        finalFile.parentFile!!.mkdirs()
+        File(finalFile.parentFile, "${finalFile.name}.part").writeText("he")
+        val source = RangeModelByteSource(acceptRange = true)
+
+        ModelFileDownloader(root, source).download(helloConfig())
+
+        assertEquals(2L, source.requestedOffset)
+        assertEquals("hello", finalFile.readText())
+    }
+
+    @Test
+    fun `restarts safely when source ignores partial offset`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val finalFile = File(root, helloConfig().relativePath)
+        finalFile.parentFile!!.mkdirs()
+        File(finalFile.parentFile, "${finalFile.name}.part").writeText("he")
+        val source = RangeModelByteSource(acceptRange = false)
+
+        ModelFileDownloader(root, source).download(helloConfig())
+
+        assertEquals(2L, source.requestedOffset)
+        assertEquals("hello", finalFile.readText())
     }
 
     private fun helloConfig(): ModelConfig =
@@ -186,5 +236,46 @@ private class UrlSwitchingModelByteSource(
         openedUrls += config.url
         return bytesByUrl[config.url]?.let(::ByteArrayInputStream)
             ?: throw IOException("unavailable")
+    }
+}
+
+private class RangeModelByteSource(
+    private val acceptRange: Boolean,
+) : ModelByteSource {
+    var requestedOffset: Long = -1L
+
+    override fun open(config: ModelConfig): InputStream = ByteArrayInputStream("hello".toByteArray())
+
+    override fun open(config: ModelConfig, requestedOffset: Long): ModelByteResponse {
+        this.requestedOffset = requestedOffset
+        val bytes = "hello".toByteArray()
+        return if (acceptRange) {
+            ModelByteResponse(ByteArrayInputStream(bytes.copyOfRange(requestedOffset.toInt(), bytes.size)), requestedOffset)
+        } else {
+            ModelByteResponse(ByteArrayInputStream(bytes), acceptedOffset = 0L)
+        }
+    }
+}
+
+private class SlowModelByteSource(
+    private val byteCount: Long,
+) : ModelByteSource {
+    override fun open(config: ModelConfig): InputStream = object : InputStream() {
+        private var remaining = byteCount
+
+        override fun read(): Int {
+            if (remaining <= 0L) return -1
+            remaining -= 1
+            return 0
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (remaining <= 0L) return -1
+            Thread.sleep(1)
+            val count = minOf(length.toLong(), remaining).toInt()
+            java.util.Arrays.fill(buffer, offset, offset + count, 0.toByte())
+            remaining -= count
+            return count
+        }
     }
 }

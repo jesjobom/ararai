@@ -17,6 +17,25 @@ import org.junit.Test
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ModelCatalogControllerTest {
     @Test
+    fun `delegates downloads and cancellation to background gateway`() = runTest {
+        val root = Files.createTempDirectory("ararai-catalog").toFile()
+        val gateway = RecordingDownloadGateway()
+        val controller = ModelCatalogController(
+            catalog = ModelCatalog(defaultModelId = "default", models = listOf(defaultConfig())),
+            appFilesRoot = root,
+            downloader = SuspendedDownloader(),
+            downloadGateway = gateway,
+            scope = this,
+        )
+
+        assertEquals(listOf("default" to false), gateway.started)
+
+        controller.cancelDownload("default")
+
+        assertEquals(listOf("default"), gateway.cancelled)
+    }
+
+    @Test
     fun `auto downloads the default missing model and leaves other models untouched`() = runTest {
         val root = Files.createTempDirectory("ararai-catalog").toFile()
         val controller = ModelCatalogController(
@@ -218,4 +237,17 @@ private class SuspendedDownloader : ModelDownloader {
                 wasCancelled = true
             }
         }
+}
+
+private class RecordingDownloadGateway : ModelDownloadCommandGateway {
+    val started = mutableListOf<Pair<String, Boolean>>()
+    val cancelled = mutableListOf<String>()
+
+    override fun start(modelId: String, replaceExisting: Boolean) {
+        started += modelId to replaceExisting
+    }
+
+    override fun cancel(modelId: String) {
+        cancelled += modelId
+    }
 }

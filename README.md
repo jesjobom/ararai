@@ -13,13 +13,17 @@ backend, or external database.
   - llama.cpp/JNI for GGUF models;
   - LiteRT-LM for configured `.litertlm` bundles.
 - Streamed local Chat with persistent and renameable sessions, cancellation,
-  bounded context construction, Markdown rendering, and optional reasoning
+  bounded context construction, selectable Markdown and local LaTeX math rendering, and optional reasoning
   controls when declared by the selected model.
 - Capability-gated image and audio prompts. Imported images are normalized and
   recordings are stored as app-owned Chat media.
 - Diagnostics for model/runtime identity and local inference performance.
-- Home, Chat, Models, and Diagnostics destinations implemented with Jetpack
-  Compose.
+- Resumable model downloads continue under an Android foreground service with
+  progress and cancellation in a persistent notification.
+- Home, Chat, Models, Diagnostics, and Settings destinations implemented with
+  Jetpack Compose.
+- Persistent System, Light, and Dark appearance selection with Material dynamic
+  colors on supported devices.
 
 The checked-in catalog is authoritative for models the UI can manage. A feature
 being present in the UI does not prove that every model or device supports it;

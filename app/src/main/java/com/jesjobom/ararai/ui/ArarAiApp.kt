@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -34,6 +35,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -61,6 +63,7 @@ import com.jesjobom.ararai.engine.ConfiguredLocalLlmEngine
 import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelCatalogController
 import com.jesjobom.ararai.model.ModelStartupState
+import com.jesjobom.ararai.settings.ThemeMode
 import java.util.Locale
 
 private enum class AppDestination {
@@ -68,6 +71,7 @@ private enum class AppDestination {
     Chat,
     Diagnostics,
     ModelStatus,
+    Settings,
 }
 
 @Composable
@@ -79,6 +83,9 @@ internal fun ArarAiApp(
     chatTextToSpeechServiceFactory: () -> ChatTextToSpeechService,
     systemPrompt: String,
     appVersionLabel: String,
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    openModelManagementRequest: Int = 0,
     liteRtLmCacheDir: String? = null,
 ) {
     val modelCatalogState by modelController.state.collectAsState()
@@ -112,13 +119,24 @@ internal fun ArarAiApp(
         when (destination) {
             AppDestination.Chat -> chatViewModel.onLeavingChat()
             AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
-            AppDestination.Home, AppDestination.ModelStatus -> Unit
+            AppDestination.Home, AppDestination.ModelStatus, AppDestination.Settings -> Unit
         }
         destination = AppDestination.Home
     }
 
     BackHandler(enabled = destination != AppDestination.Home) {
         returnHome()
+    }
+
+    LaunchedEffect(openModelManagementRequest) {
+        if (openModelManagementRequest > 0) {
+            when (destination) {
+                AppDestination.Chat -> chatViewModel.onLeavingChat()
+                AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
+                AppDestination.Home, AppDestination.ModelStatus, AppDestination.Settings -> Unit
+            }
+            destination = AppDestination.ModelStatus
+        }
     }
 
     LaunchedEffect(startupState) {
@@ -136,6 +154,7 @@ internal fun ArarAiApp(
             onOpenChat = { destination = AppDestination.Chat },
             onOpenDiagnostics = { destination = AppDestination.Diagnostics },
             onOpenModelStatus = { destination = AppDestination.ModelStatus },
+            onOpenSettings = { destination = AppDestination.Settings },
         )
         AppDestination.Chat -> ChatScreen(
             viewModel = chatViewModel,
@@ -158,6 +177,11 @@ internal fun ArarAiApp(
             onDelete = modelController::delete,
             onRedownload = modelController::redownload,
             onRetry = modelController::retry,
+        )
+        AppDestination.Settings -> SettingsScreen(
+            themeMode = themeMode,
+            onThemeModeChange = onThemeModeChange,
+            onBack = { returnHome() },
         )
     }
 }
@@ -220,6 +244,7 @@ private fun HomeScreen(
     onOpenChat: () -> Unit,
     onOpenDiagnostics: () -> Unit,
     onOpenModelStatus: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     ArarAiScaffold(
         title = "ArarAI",
@@ -309,9 +334,98 @@ private fun HomeScreen(
                 onAction = onOpenDiagnostics,
                 secondary = true,
             )
+
+            StatusCard(
+                title = "Settings",
+                value = "Appearance and preferences",
+                detail = "Choose how ArarAI looks and manage future application options.",
+                icon = Icons.Filled.Settings,
+                actionLabel = "Open settings",
+                onAction = onOpenSettings,
+                secondary = true,
+            )
         }
     }
 }
+
+@Composable
+private fun SettingsScreen(
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    onBack: () -> Unit,
+) {
+    ArarAiScaffold(title = "Settings", onBack = onBack) { modifier ->
+        Column(
+            modifier = modifier
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Appearance",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(text = "Theme", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "Choose a theme or follow your device setting.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ThemeMode.entries.forEach { mode ->
+                Card(
+                    onClick = { onThemeModeChange(mode) },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (themeMode == mode) {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        },
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        RadioButton(
+                            selected = themeMode == mode,
+                            onClick = { onThemeModeChange(mode) },
+                        )
+                        Column {
+                            Text(
+                                text = mode.displayName,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                text = mode.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val ThemeMode.displayName: String
+    get() = when (this) {
+        ThemeMode.System -> "System"
+        ThemeMode.Light -> "Light"
+        ThemeMode.Dark -> "Dark"
+    }
+
+private val ThemeMode.description: String
+    get() = when (this) {
+        ThemeMode.System -> "Use your device appearance"
+        ThemeMode.Light -> "Always use the light appearance"
+        ThemeMode.Dark -> "Always use the dark appearance"
+    }
 
 @Composable
 private fun StatusCard(

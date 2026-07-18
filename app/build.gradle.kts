@@ -12,6 +12,11 @@ fun buildTimestampVersion(): String =
         ?: ZonedDateTime.now(ZoneId.of("America/Toronto"))
             .format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"))
 
+val configuredDebugKeystore = providers.environmentVariable("ANDROID_DEBUG_KEYSTORE")
+    .orNull
+    ?.takeIf(String::isNotBlank)
+    ?.let(::file)
+
 android {
     namespace = "com.jesjobom.ararai"
     compileSdk = 36
@@ -33,6 +38,11 @@ android {
     buildTypes {
         debug {
             isDebuggable = true
+            configuredDebugKeystore?.let { persistentKeystore ->
+                signingConfig = signingConfigs.getByName("debug").apply {
+                    storeFile = persistentKeystore
+                }
+            }
         }
         release {
             isMinifyEnabled = false
@@ -76,6 +86,7 @@ dependencies {
     androidTestImplementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.12.0")
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
@@ -84,6 +95,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.14.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("ru.noties:jlatexmath-android:0.2.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

@@ -59,4 +59,68 @@ class MarkdownTextTest {
         assertEquals(source, parseInlineMarkdown(source).text)
         assertEquals(listOf(MarkdownBlock.Paragraph(source)), parseMarkdownBlocks(source))
     }
+
+    @Test
+    fun `parses display math delimiters as blocks`() {
+        val blocks = parseMarkdownBlocks(
+            """
+            Before
+
+            ${'$'}${'$'}
+            C = D \times \frac{360^\circ}{\Delta \theta}
+            ${'$'}${'$'}
+
+            \[E = mc^2\]
+            """.trimIndent(),
+        )
+
+        assertEquals(MarkdownBlock.Paragraph("Before"), blocks[0])
+        assertEquals(
+            MarkdownBlock.Math(
+                latex = "C = D \\times \\frac{360^\\circ}{\\Delta \\theta}",
+                source = "${'$'}${'$'}\nC = D \\times \\frac{360^\\circ}{\\Delta \\theta}\n${'$'}${'$'}",
+            ),
+            blocks[1],
+        )
+        assertEquals(MarkdownBlock.Math("E = mc^2", "\\[E = mc^2\\]"), blocks[2])
+    }
+
+    @Test
+    fun `parses inline math while preserving text`() {
+        val segments = parseInlineMath("Angle ${'$'}\\theta${'$'} and \\(x^2\\).")
+
+        assertEquals(
+            listOf(
+                MathInlineSegment.Text("Angle "),
+                MathInlineSegment.Math("\\theta", "${'$'}\\theta${'$'}"),
+                MathInlineSegment.Text(" and "),
+                MathInlineSegment.Math("x^2", "\\(x^2\\)"),
+                MathInlineSegment.Text("."),
+            ),
+            segments,
+        )
+    }
+
+    @Test
+    fun `does not consume currency escaped or incomplete math`() {
+        val source = "Costs ${'$'}20 and ${'$'}30; escaped \\${'$'}x; streaming ${'$'}\\frac{1}{2"
+
+        assertEquals(listOf(MathInlineSegment.Text(source)), parseInlineMath(source))
+        assertEquals(
+            listOf(MarkdownBlock.Paragraph("${'$'}${'$'}\\frac{1}{2")),
+            parseMarkdownBlocks("${'$'}${'$'}\\frac{1}{2"),
+        )
+    }
+
+    @Test
+    fun `recognizes numeric formulas but not plain dollar amounts`() {
+        assertEquals(
+            listOf(MathInlineSegment.Math("2 + 2", "${'$'}2 + 2${'$'}")),
+            parseInlineMath("${'$'}2 + 2${'$'}"),
+        )
+        assertEquals(
+            listOf(MathInlineSegment.Text("${'$'}20${'$'}")),
+            parseInlineMath("${'$'}20${'$'}"),
+        )
+    }
 }

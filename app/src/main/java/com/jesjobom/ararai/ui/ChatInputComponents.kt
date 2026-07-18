@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -209,85 +208,75 @@ internal fun ChatInputBar(
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
-            }
-
-            if (imageAttachments.isNotEmpty() || audioPrompt != null) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    imageAttachments.forEach { image ->
-                        AttachmentRow(
-                            label = image.displayName ?: "Image",
-                            imageUri = image.uri,
-                            onRemove = { onRemoveImage(image.uri) },
-                            mediaServices = mediaServices,
-                        )
-                    }
-                    audioPrompt?.let { audio ->
-                        AttachmentRow(
-                            label = audio.displayName ?: "Audio prompt",
-                            onRemove = onClearAudioPrompt,
-                            mediaServices = mediaServices,
-                        )
-                    }
-                }
-            }
-
-            if (canAttachImage || canUseAudioPrompt) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (canAttachImage && audioPrompt == null) {
-                        OutlinedButton(
-                            onClick = { imagePicker.launch(arrayOf("image/*")) },
-                            enabled = !isGenerating && !isImportingImage,
-                        ) {
-                            Icon(imageVector = Icons.Filled.AttachFile, contentDescription = null)
-                            Text(
-                                text = "Image",
-                                modifier = Modifier.padding(start = 6.dp),
+            } else {
+                if (imageAttachments.isNotEmpty() || audioPrompt != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        imageAttachments.forEach { image ->
+                            AttachmentRow(
+                                label = image.displayName ?: "Image",
+                                imageUri = image.uri,
+                                onRemove = { onRemoveImage(image.uri) },
+                                mediaServices = mediaServices,
                             )
                         }
-                    }
-                    if (canUseAudioPrompt && imageAttachments.isEmpty() && prompt.isBlank()) {
-                        OutlinedButton(
-                            onClick = ::openAudioRecorder,
-                            enabled = !isGenerating,
-                        ) {
-                            Icon(imageVector = Icons.Filled.GraphicEq, contentDescription = null)
-                            Text(
-                                text = "Audio",
-                                modifier = Modifier.padding(start = 6.dp),
+                        audioPrompt?.let { audio ->
+                            AttachmentRow(
+                                label = audio.displayName ?: "Audio prompt",
+                                onRemove = onClearAudioPrompt,
+                                mediaServices = mediaServices,
                             )
                         }
                     }
                 }
-            }
 
-            OutlinedTextField(
-                value = prompt,
-                onValueChange = onPromptChanged,
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 1,
-                maxLines = 5,
-                label = { Text("Message") },
-                enabled = !isGenerating && audioPrompt == null,
-                trailingIcon = {
-                    FilledIconButton(
-                        onClick = onSubmit,
-                        enabled = canSubmit,
-                        modifier = Modifier.size(40.dp),
-                    ) {
-                        if (isGenerating) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        } else {
+                if (canAttachImage || canUseAudioPrompt) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (canAttachImage && audioPrompt == null) {
+                            OutlinedButton(
+                                onClick = { imagePicker.launch(arrayOf("image/*")) },
+                                enabled = !isImportingImage,
+                            ) {
+                                Icon(imageVector = Icons.Filled.AttachFile, contentDescription = null)
+                                Text(
+                                    text = "Image",
+                                    modifier = Modifier.padding(start = 6.dp),
+                                )
+                            }
+                        }
+                        if (canUseAudioPrompt && imageAttachments.isEmpty() && prompt.isBlank()) {
+                            OutlinedButton(onClick = ::openAudioRecorder) {
+                                Icon(imageVector = Icons.Filled.GraphicEq, contentDescription = null)
+                                Text(
+                                    text = "Audio",
+                                    modifier = Modifier.padding(start = 6.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = onPromptChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 1,
+                    maxLines = 5,
+                    label = { Text("Message") },
+                    enabled = audioPrompt == null,
+                    trailingIcon = {
+                        FilledIconButton(
+                            onClick = onSubmit,
+                            enabled = canSubmit,
+                            modifier = Modifier.size(40.dp),
+                        ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Send,
                                 contentDescription = "Send",
                             )
                         }
-                    }
-                },
-            )
+                    },
+                )
+            }
         }
 
         if (audioRecorderOpen) {

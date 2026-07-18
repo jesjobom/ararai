@@ -10,11 +10,21 @@ import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 interface ModelByteSource {
     fun open(config: ModelConfig): InputStream
+
+    fun open(config: ModelConfig, requestedOffset: Long): ModelByteResponse =
+        ModelByteResponse(open(config), acceptedOffset = 0L)
 }
+
+data class ModelByteResponse(
+    val input: InputStream,
+    val acceptedOffset: Long,
+)
 
 data class ModelDownloadProgress(
     val bytesDownloaded: Long,
@@ -22,12 +32,17 @@ data class ModelDownloadProgress(
 )
 
 class UrlModelByteSource : ModelByteSource {
-    override fun open(config: ModelConfig): InputStream {
+    override fun open(config: ModelConfig): InputStream = open(config, requestedOffset = 0L).input
+
+    override fun open(config: ModelConfig, requestedOffset: Long): ModelByteResponse {
         val connection = URL(config.url).openConnection() as HttpURLConnection
         connection.connectTimeout = 15_000
         connection.readTimeout = 30_000
         connection.instanceFollowRedirects = true
         connection.requestMethod = "GET"
+        if (requestedOffset > 0L) {
+            connection.setRequestProperty("Range", "bytes=$requestedOffset-")
+        }
         if (connection.responseCode !in 200..299) {
             val host = connection.url.host
             val hint = if (connection.responseCode == HttpURLConnection.HTTP_FORBIDDEN && host.contains("xethub.hf.co")) {
@@ -37,7 +52,17 @@ class UrlModelByteSource : ModelByteSource {
             }
             throw ModelDownloadException("HTTP ${connection.responseCode}$hint while downloading ${config.id}")
         }
-        return connection.inputStream
+        val acceptedOffset = if (connection.responseCode == HttpURLConnection.HTTP_PARTIAL) {
+            connection.getHeaderField("Content-Range")
+                ?.substringAfter("bytes ")
+                ?.substringBefore('-')
+                ?.toLongOrNull()
+                ?.takeIf { it == requestedOffset }
+                ?: 0L
+        } else {
+            0L
+        }
+        return ModelByteResponse(connection.inputStream, acceptedOffset)
     }
 }
 
@@ -71,18 +96,18 @@ class ModelFileDownloader(
             val tempFile = File(parent, "${finalFile.name}.part")
 
             parent.mkdirs()
-            if (tempFile.exists() && !tempFile.delete()) {
-                throw ModelDownloadException("Could not delete stale temporary model file")
-            }
-
             for (url in downloadUrls) {
                 val attemptConfig = config.copy(url = url)
                 try {
-                    byteSource.open(attemptConfig).use { input ->
-                        tempFile.outputStream().use { output ->
+                    val requestedOffset = tempFile.takeIf(File::isFile)?.length() ?: 0L
+                    val response = byteSource.open(attemptConfig, requestedOffset)
+                    response.input.use { input ->
+                        val append = requestedOffset > 0L && response.acceptedOffset == requestedOffset
+                        java.io.FileOutputStream(tempFile, append).use { output ->
                             input.copyToWithProgress(
                                 output = output,
                                 totalBytes = config.expectedBytes,
+                                initialBytes = if (append) requestedOffset else 0L,
                                 onProgress = onProgress,
                             )
                         }
@@ -113,13 +138,10 @@ class ModelFileDownloader(
                         }
                     }
                 } catch (error: ModelDownloadException) {
-                    tempFile.delete()
                     failures += error.message ?: error::class.java.simpleName
                 } catch (error: CancellationException) {
-                    tempFile.delete()
                     throw error
                 } catch (error: Exception) {
-                    tempFile.delete()
                     failures += "Configured model download failed: ${error.message}"
                 }
             }
@@ -128,15 +150,17 @@ class ModelFileDownloader(
         }
 }
 
-private fun InputStream.copyToWithProgress(
+private suspend fun InputStream.copyToWithProgress(
     output: java.io.OutputStream,
     totalBytes: Long?,
+    initialBytes: Long = 0L,
     onProgress: (ModelDownloadProgress) -> Unit,
 ) {
     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-    var bytesCopied = 0L
+    var bytesCopied = initialBytes
 
     while (true) {
+        currentCoroutineContext().ensureActive()
         val read = read(buffer)
         if (read == -1) break
         output.write(buffer, 0, read)

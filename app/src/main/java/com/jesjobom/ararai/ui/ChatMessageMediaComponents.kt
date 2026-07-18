@@ -34,6 +34,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.jesjobom.ararai.R
@@ -171,6 +175,17 @@ internal fun MessageRow(
     }
     val alignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
     val label = if (isUser) "You" else "ArarAI"
+    val selectionColors = if (isUser) {
+        TextSelectionColors(
+            handleColor = MaterialTheme.colorScheme.onPrimary,
+            backgroundColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.32f),
+        )
+    } else {
+        TextSelectionColors(
+            handleColor = MaterialTheme.colorScheme.primary,
+            backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.32f),
+        )
+    }
 
     Box(
         modifier = Modifier.fillMaxWidth(),
@@ -193,7 +208,15 @@ internal fun MessageRow(
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                MessageContentView(message.content, showReasoning = showReasoning, mediaServices = mediaServices)
+                CompositionLocalProvider(LocalTextSelectionColors provides selectionColors) {
+                    SelectionContainer {
+                        MessageContentView(
+                            message.content,
+                            showReasoning = showReasoning,
+                            mediaServices = mediaServices,
+                        )
+                    }
+                }
                 if (message.isEligibleForTextToSpeech(isStreaming)) {
                     IconButton(
                         onClick = onToggleSpeech,
@@ -222,38 +245,37 @@ internal fun MessageContentView(
 ) {
     when (content) {
         is MessageContent.TextPrompt -> {
-            if (showReasoning && content.reasoningText.isNotBlank()) {
-                Surface(
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                    shape = MaterialTheme.shapes.medium,
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (showReasoning && content.reasoningText.isNotBlank()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                        shape = MaterialTheme.shapes.medium,
                     ) {
-                        Text(
-                            text = "Reasoning",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        MarkdownText(text = content.reasoningText)
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = "Reasoning",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            MarkdownText(text = content.reasoningText)
+                        }
                     }
                 }
-            }
-            content.imageAttachments.forEach { image ->
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                )
-                {
-                    ImageThumbnail(uri = image.uri, sizeDp = 156, mediaServices = mediaServices)
-                    Text(
-                        text = image.displayName ?: "Image",
-                        style = MaterialTheme.typography.labelMedium,
-                    )
+                content.imageAttachments.forEach { image ->
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        ImageThumbnail(uri = image.uri, sizeDp = 156, mediaServices = mediaServices)
+                        Text(
+                            text = image.displayName ?: "Image",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
                 }
+                MarkdownText(text = content.text.ifBlank { "..." })
             }
-            MarkdownText(text = content.text.ifBlank { "..." })
         }
         is MessageContent.AudioPromptContent -> {
             AudioPlaybackRow(audio = content.audio, mediaServices = mediaServices)

@@ -11,6 +11,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.isSystemInDarkTheme
+import com.jesjobom.ararai.settings.ThemeMode
+
+internal fun ThemeMode.resolveDarkTheme(systemDarkTheme: Boolean): Boolean = when (this) {
+    ThemeMode.System -> systemDarkTheme
+    ThemeMode.Light -> false
+    ThemeMode.Dark -> true
+}
 
 private val ArarAiLightColorScheme: ColorScheme = lightColorScheme(
     primary = Color(0xFF006A60),
@@ -60,10 +67,11 @@ private val ArarAiDarkColorScheme: ColorScheme = darkColorScheme(
 
 @Composable
 fun ArarAiTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: ThemeMode = ThemeMode.System,
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
+    val darkTheme = themeMode.resolveDarkTheme(isSystemInDarkTheme())
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current

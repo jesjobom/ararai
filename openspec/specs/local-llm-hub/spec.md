@@ -1886,3 +1886,247 @@ content.
 - **THEN** a fresh native TTS instance can initialize
 - **AND** playback uses the device's configured default language and voice.
 
+### Requirement: Mathematical Chat notation
+
+The Chat SHALL render supported LaTeX-delimited mathematical notation in model
+responses locally and in a form that is visually distinct from literal TeX
+source.
+
+#### Scenario: Inline mathematical notation
+
+- **WHEN** assistant Markdown contains a complete expression delimited by
+  `$...$` or `\(...\)`
+- **THEN** the Chat renders the expression inline with the surrounding content
+- **AND** retains the surrounding Markdown text and styling
+
+#### Scenario: Display mathematical notation
+
+- **WHEN** assistant Markdown contains a complete expression delimited by
+  `$$...$$` or `\[...\]`
+- **THEN** the Chat renders the expression as a separate display formula
+- **AND** the formula remains readable within the message width
+
+#### Scenario: Incomplete or invalid mathematical notation
+
+- **WHEN** a response contains an unclosed delimiter or an expression that the
+  renderer cannot parse
+- **THEN** the Chat preserves the original source as readable text
+- **AND** generation and message rendering continue without failure
+
+#### Scenario: Non-mathematical dollar sign
+
+- **WHEN** response text uses a dollar sign as currency or escapes a delimiter
+- **THEN** the Chat preserves it as ordinary text
+
+#### Scenario: Local formula rendering
+
+- **WHEN** mathematical notation is rendered
+- **THEN** rendering does not require network access or a hosted service
+
+### Requirement: Selectable Chat message text
+
+The Chat SHALL expose message text through Android's native text-selection
+interaction.
+
+#### Scenario: Select part of a historical message
+
+- **WHEN** the user long-presses selectable text in a user or assistant message
+- **THEN** Android displays native text-selection handles and contextual actions
+- **AND** the user can adjust the selection to part of the message
+
+#### Scenario: Copy selected message text
+
+- **WHEN** the user invokes the platform Copy action for selected message text
+- **THEN** Android places the selected plain text on the clipboard
+
+#### Scenario: Select formatted and reasoning text
+
+- **WHEN** a message presents Markdown blocks or visible reasoning text
+- **THEN** its textual content participates in native selection
+- **AND** reasoning, attachments, and final text retain their vertical order without overlap
+
+#### Scenario: Select text on a colored message background
+
+- **WHEN** the user selects text inside a colored message bubble
+- **THEN** the selection handles and highlight contrast with that bubble
+
+#### Scenario: Render mathematics inside reasoning
+
+- **WHEN** visible reasoning contains a rendered mathematical formula
+- **THEN** the formula uses the reasoning container's content color
+- **AND** remains legible against the reasoning background
+
+#### Scenario: Use a message action
+
+- **WHEN** a message also presents an action such as text-to-speech playback
+- **THEN** the action remains independently operable outside the selection boundary
+
+### Requirement: Application Settings Destination
+
+The app SHALL provide a dedicated Settings destination for application-level
+preferences and SHALL organize those preferences into named sections so more
+settings can be added without changing the top-level navigation model.
+
+#### Scenario: Open application settings
+
+- **GIVEN** the user is on Home
+- **WHEN** the user opens Settings
+- **THEN** the app displays the Settings destination
+- **AND** application appearance options are grouped under Appearance.
+
+#### Scenario: Return from application settings
+
+- **GIVEN** the user is viewing Settings
+- **WHEN** the user navigates back
+- **THEN** the app returns to Home.
+
+### Requirement: Application Theme Preference
+
+The app SHALL let the user choose System, Light, or Dark appearance behavior,
+apply the choice to the entire application immediately, and persist the choice
+locally across application restarts. System SHALL resolve to the current Android
+system appearance. Missing or unrecognized stored values SHALL resolve to
+System.
+
+#### Scenario: Select an explicit theme
+
+- **WHEN** the user selects Light or Dark in Settings
+- **THEN** the whole application immediately uses the corresponding appearance
+- **AND** the selection is restored on a later application launch.
+
+#### Scenario: Follow system appearance
+
+- **WHEN** the user selects System in Settings
+- **THEN** the application uses the Android system light or dark appearance
+- **AND** follows later system appearance changes.
+
+#### Scenario: Retain dynamic color behavior
+
+- **GIVEN** Material dynamic colors are available on the device
+- **WHEN** a theme preference resolves to light or dark
+- **THEN** the application uses the corresponding dynamic color scheme.
+
+### Requirement: Compact Chat controls during generation
+
+Chat SHALL replace its message composer and auxiliary draft controls with a
+compact cancellation action while a response is being generated. If generation
+is cancelled or fails, Chat SHALL restore the composer with the submitted draft
+content. Successful completion SHALL continue to clear the submitted draft.
+
+#### Scenario: Read a response while it streams
+
+- **WHEN** the model is generating a response
+- **THEN** the message field, send action, attachments, and attachment actions
+  are not displayed
+- **AND** a cancel-generation action remains available.
+
+#### Scenario: Cancel generation
+
+- **GIVEN** the model is generating a response
+- **WHEN** the user cancels generation
+- **THEN** the message composer is displayed again
+- **AND** it contains the submitted draft content.
+
+#### Scenario: Generation fails
+
+- **GIVEN** the model is generating a response
+- **WHEN** loading or generation fails
+- **THEN** the message composer is displayed again
+- **AND** it contains the submitted draft content
+- **AND** the failure remains visible.
+
+### Requirement: Portrait-only application orientation
+
+The app SHALL present its current phone experience in portrait orientation and
+SHALL NOT switch the launcher activity to landscape when the device rotates.
+
+#### Scenario: Rotate the device while using ArarAI
+
+- **GIVEN** ArarAI is visible in portrait orientation
+- **WHEN** the user rotates the device to a landscape position
+- **THEN** the application remains in portrait orientation.
+
+### Requirement: Background model download
+
+The app SHALL run active model downloads as user-visible foreground data
+transfers so they can continue after the application UI moves to the background.
+The current transfer state SHALL remain observable when the activity is
+recreated.
+
+#### Scenario: Continue a download in background
+
+- **WHEN** a model download is active and the user leaves ArarAI
+- **THEN** the transfer continues under a foreground service
+- **AND** a system notification reports the model and download progress.
+
+#### Scenario: Cancel from notification
+
+- **GIVEN** a model download notification is visible
+- **WHEN** the user selects Cancel
+- **THEN** the transfer stops
+- **AND** the model returns to its applicable non-downloading state.
+
+#### Scenario: Cancel from model management
+
+- **GIVEN** a model download is active
+- **WHEN** the user selects Cancel in the model-management screen
+- **THEN** the stream copy stops without waiting for the remote response to
+  finish
+- **AND** the foreground notification is removed after cancellation completes.
+
+#### Scenario: Open download from notification
+
+- **GIVEN** a model download notification is visible
+- **WHEN** the user taps the notification
+- **THEN** ArarAI opens or returns to the model-management screen.
+
+#### Scenario: Open the notification repeatedly
+
+- **GIVEN** ArarAI already has an application task in the background
+- **WHEN** the user taps the download notification one or more times
+- **THEN** the existing task opens the model-management screen
+- **AND** no duplicate application activity is added to the Back stack.
+
+#### Scenario: Report sustained progress
+
+- **WHEN** an active model download reports new byte progress
+- **THEN** the notification periodically reflects the latest known percentage
+- **AND** updates are paced to avoid overwhelming Android's notification system.
+
+### Requirement: Resumable partial model transfer
+
+The app SHALL preserve partial model bytes after cancellation or transient
+failure and SHALL request the remaining HTTP range on a later attempt. It SHALL
+append only when the server confirms the requested range and SHALL otherwise
+restart the temporary file from zero. Integrity validation and atomic promotion
+SHALL remain required before a model becomes available.
+
+#### Scenario: Server accepts resume
+
+- **GIVEN** a valid partial model file exists
+- **WHEN** the server accepts a request beginning at the partial byte count
+- **THEN** the app appends the remaining bytes
+- **AND** validates and atomically promotes the completed model.
+
+#### Scenario: Server ignores resume
+
+- **GIVEN** a partial model file exists
+- **WHEN** the server returns the complete artifact instead of the requested
+  range
+- **THEN** the app truncates the partial file before writing
+- **AND** does not duplicate bytes.
+
+### Requirement: Background download notification permission
+
+On Android versions with runtime notification permission, the app SHALL request
+permission in the context of an active model download. Permission denial SHALL
+NOT be represented as a guarantee that Android can run the transfer invisibly
+or indefinitely.
+
+#### Scenario: Notification permission is not granted
+
+- **WHEN** a model download becomes active on a version requiring runtime
+  notification permission
+- **THEN** the app requests that permission
+- **AND** denial does not crash or immediately fail the model transfer.
+
