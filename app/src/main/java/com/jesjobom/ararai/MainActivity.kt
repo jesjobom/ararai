@@ -25,6 +25,7 @@ import com.jesjobom.ararai.settings.SharedPreferencesThemePreferenceStore
 import com.jesjobom.ararai.ui.ArarAiApp
 import com.jesjobom.ararai.ui.ArarAiTheme
 import com.jesjobom.ararai.ui.AndroidChatTextToSpeechService
+import com.jesjobom.ararai.ui.MlKitChatLanguageIdentifier
 import com.jesjobom.ararai.ui.androidChatMediaServices
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -72,6 +73,7 @@ class MainActivity : ComponentActivity() {
                         chatMediaRepository = chatMediaRepository,
                         chatMediaServices = chatMediaServices,
                         chatTextToSpeechServiceFactory = { AndroidChatTextToSpeechService(this) },
+                        chatLanguageIdentifierFactory = { MlKitChatLanguageIdentifier() },
                         systemPrompt = modelCatalog.chat.systemPrompt,
                         appVersionLabel = "v${BuildConfig.VERSION_NAME}",
                         themeMode = themeMode,

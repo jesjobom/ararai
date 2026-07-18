@@ -21,7 +21,8 @@ inference remains device-, driver-, model-, and workload-dependent.
   progress, and the selected model persists locally.
 - The Chat supports streamed generation, cancellation, persistent and
   renameable sessions, bounded context, selectable Markdown and local LaTeX math output, settings, and
-  capability-gated reasoning.
+  capability-gated reasoning, plus language-aware native speech playback for
+  completed assistant responses.
 - Structured prompts can contain text, normalized images, or recorded audio
   when the selected model declares the corresponding input capability.
 - Diagnostics expose model/runtime metadata and local benchmark measurements.
@@ -40,6 +41,7 @@ local model is sufficient for the core Chat inference flow.
 - Build Tools 36.0.0; NDK 28.2.13676358; CMake 3.22.1
 - llama.cpp through JNI/NDK for GGUF artifacts
 - LiteRT-LM 0.14.0 for configured LiteRT-LM bundles
+- Bundled ML Kit Language ID 17.0.6 for offline response-language detection
 - Plain SQLite for Chat sessions/messages and local preferences for model
   selection
 - Debug builds/signing only
@@ -64,7 +66,8 @@ The principal boundaries are:
 - `chat/`: session state, context construction, SQLite persistence, streaming
   durability, and media ownership;
 - `ui/`: navigation and Compose presentation, with injectable adapters around
-  image import, audio recording/playback, decoding, and draft cleanup;
+  image import, audio recording/playback, response language identification,
+  native text-to-speech, decoding, and draft cleanup;
 - `benchmark/`: diagnostic state and inference measurement.
 
 The native runtime may remain loaded across internal navigation when compatible,

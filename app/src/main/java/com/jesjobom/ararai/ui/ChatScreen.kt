@@ -47,6 +47,7 @@ internal fun ChatScreen(
     viewModel: ChatViewModel,
     mediaServices: ChatMediaServices,
     textToSpeechServiceFactory: () -> ChatTextToSpeechService,
+    languageIdentifierFactory: () -> ChatLanguageIdentifier,
     onBack: () -> Unit,
     onRetryModelDownload: () -> Unit = {},
 ) {
@@ -58,8 +59,11 @@ internal fun ChatScreen(
     var renameText by remember { mutableStateOf("") }
     var renameSessionId by remember { mutableStateOf<String?>(null) }
     var textToSpeechState by remember { mutableStateOf(ChatTextToSpeechState()) }
-    val textToSpeechController = remember(textToSpeechServiceFactory) {
-        ChatTextToSpeechController(textToSpeechServiceFactory()) { textToSpeechState = it }
+    val textToSpeechController = remember(textToSpeechServiceFactory, languageIdentifierFactory) {
+        ChatTextToSpeechController(
+            service = textToSpeechServiceFactory(),
+            languageIdentifier = languageIdentifierFactory(),
+        ) { textToSpeechState = it }
     }
     val messageListState = rememberLazyListState()
     val bottomRequester = remember { BringIntoViewRequester() }
@@ -99,6 +103,15 @@ internal fun ChatScreen(
     LaunchedEffect(state.selectedSessionId, state.messages.size, latestMessageKey) {
         if (state.messages.isNotEmpty() && followLatestMessages) {
             bottomRequester.bringIntoView()
+        }
+    }
+
+    LaunchedEffect(state.selectedSessionId, state.messages, state.isGenerating) {
+        state.messages.forEach { message ->
+            val isStreaming = state.isGenerating && message.id == state.messages.lastOrNull()?.id
+            if (message.isEligibleForTextToSpeech(isStreaming)) {
+                textToSpeechController.prepare(message.id, message.text)
+            }
         }
     }
 
@@ -218,6 +231,7 @@ internal fun ChatScreen(
                             mediaServices = mediaServices,
                             isStreaming = isStreaming,
                             isSpeaking = textToSpeechState.activeMessageId == message.id,
+                            isSpeechPrepared = textToSpeechController.isPrepared(message.id),
                             onToggleSpeech = {
                                 textToSpeechController.clearError()
                                 textToSpeechController.toggle(message.id, message.text)

@@ -160,6 +160,7 @@ internal fun MessageRow(
     mediaServices: ChatMediaServices,
     isStreaming: Boolean = false,
     isSpeaking: Boolean = false,
+    isSpeechPrepared: Boolean = false,
     onToggleSpeech: () -> Unit = {},
 ) {
     val isUser = message.role == ChatRole.User
@@ -220,6 +221,7 @@ internal fun MessageRow(
                 if (message.isEligibleForTextToSpeech(isStreaming)) {
                     IconButton(
                         onClick = onToggleSpeech,
+                        enabled = isSpeaking || isSpeechPrepared,
                         modifier = Modifier
                             .align(Alignment.End)
                             .size(36.dp),

@@ -6,6 +6,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.speech.tts.TextToSpeech
+import com.google.mlkit.nl.languageid.LanguageIdentification
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -13,11 +14,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.jesjobom.ararai.chat.FileChatMediaRepository
 import com.jesjobom.ararai.engine.JniLlamaNativeBridge
 import com.jesjobom.ararai.ui.chatImageImporter
+import com.jesjobom.ararai.ui.compatibleVoices
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -89,6 +92,54 @@ class AndroidBoundaryTest {
             assertTrue("TextToSpeech initialization timed out", initialized.await(10, TimeUnit.SECONDS))
             assumeTrue("No native TextToSpeech engine is available", initializationStatus == TextToSpeech.SUCCESS)
             assertTrue("No default TextToSpeech voice is available", engine.voice != null)
+        } finally {
+            engine.stop()
+            engine.shutdown()
+        }
+    }
+
+    @Test
+    fun bundledLanguageIdentificationRecognizesEnglish() {
+        val completed = CountDownLatch(1)
+        var languageTag: String? = null
+        var failure: Exception? = null
+        val identifier = LanguageIdentification.getClient()
+
+        try {
+            identifier.identifyLanguage("This response is written clearly in English.")
+                .addOnSuccessListener {
+                    languageTag = it
+                    completed.countDown()
+                }
+                .addOnFailureListener {
+                    failure = it
+                    completed.countDown()
+                }
+
+            assertTrue("Language identification timed out", completed.await(10, TimeUnit.SECONDS))
+            assertNull("Language identification failed: $failure", failure)
+            assertEquals("en", languageTag)
+        } finally {
+            identifier.close()
+        }
+    }
+
+    @Test
+    fun installedEnglishTtsVoiceCanBeResolvedWhenAvailable() {
+        val initialized = CountDownLatch(1)
+        var initializationStatus = TextToSpeech.ERROR
+        val engine = TextToSpeech(context) { status ->
+            initializationStatus = status
+            initialized.countDown()
+        }
+
+        try {
+            assertTrue("TextToSpeech initialization timed out", initialized.await(10, TimeUnit.SECONDS))
+            assumeTrue("No native TextToSpeech engine is available", initializationStatus == TextToSpeech.SUCCESS)
+            val candidates = compatibleVoices(engine.voices, "en", engine.voice)
+            assumeTrue("No installed English TTS voice is available", candidates.isNotEmpty())
+            assertEquals(TextToSpeech.SUCCESS, engine.setVoice(candidates.first()))
+            assertEquals("en", engine.voice.locale.language)
         } finally {
             engine.stop()
             engine.shutdown()

@@ -6,9 +6,12 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
+import android.util.Log
 import com.jesjobom.ararai.chat.ChatMessage
 import com.jesjobom.ararai.chat.ChatRole
 import com.jesjobom.ararai.chat.MessageContent
+import java.util.Locale
 import java.util.UUID
 
 internal fun interface ChatTextToSpeechListener {
@@ -21,7 +24,7 @@ internal sealed interface ChatTextToSpeechResult {
 }
 
 internal interface ChatTextToSpeechService : AutoCloseable {
-    fun speak(text: String, listener: ChatTextToSpeechListener)
+    fun speak(text: String, languageTag: String?, listener: ChatTextToSpeechListener)
     fun stop()
     override fun close()
 }
@@ -29,30 +32,53 @@ internal interface ChatTextToSpeechService : AutoCloseable {
 internal data class ChatTextToSpeechState(
     val activeMessageId: String? = null,
     val error: String? = null,
+    val preparedLanguageTags: Map<String, String?> = emptyMap(),
 )
 
 internal class ChatTextToSpeechController(
     private val service: ChatTextToSpeechService,
+    private val languageIdentifier: ChatLanguageIdentifier,
     private val onStateChanged: (ChatTextToSpeechState) -> Unit,
 ) : AutoCloseable {
     private var requestId = 0L
+    private val preparationTexts = mutableMapOf<String, String>()
     var state = ChatTextToSpeechState()
         private set
+
+    fun prepare(messageId: String, responseText: String) {
+        if (preparationTexts[messageId] == responseText) return
+
+        preparationTexts[messageId] = responseText
+        updateState(state.copy(preparedLanguageTags = state.preparedLanguageTags - messageId))
+        languageIdentifier.identify(responseText) { languageTag ->
+            if (preparationTexts[messageId] != responseText) return@identify
+            updateState(
+                state.copy(
+                    preparedLanguageTags = state.preparedLanguageTags + (messageId to languageTag),
+                ),
+            )
+        }
+    }
+
+    fun isPrepared(messageId: String): Boolean = state.preparedLanguageTags.containsKey(messageId)
 
     fun toggle(messageId: String, responseText: String) {
         if (state.activeMessageId == messageId) {
             stop()
             return
         }
+        if (!isPrepared(messageId)) return
 
         service.stop()
         val currentRequest = ++requestId
-        updateState(ChatTextToSpeechState(activeMessageId = messageId))
-        service.speak(responseText) { result ->
+        updateState(state.copy(activeMessageId = messageId, error = null))
+        service.speak(responseText, state.preparedLanguageTags[messageId]) { result ->
             if (currentRequest != requestId) return@speak
             when (result) {
-                ChatTextToSpeechResult.Completed -> updateState(ChatTextToSpeechState())
-                is ChatTextToSpeechResult.Failed -> updateState(ChatTextToSpeechState(error = result.message))
+                ChatTextToSpeechResult.Completed -> updateState(state.copy(activeMessageId = null, error = null))
+                is ChatTextToSpeechResult.Failed -> updateState(
+                    state.copy(activeMessageId = null, error = result.message),
+                )
             }
         }
     }
@@ -60,7 +86,7 @@ internal class ChatTextToSpeechController(
     fun stop() {
         requestId++
         service.stop()
-        updateState(ChatTextToSpeechState())
+        updateState(state.copy(activeMessageId = null, error = null))
     }
 
     fun clearError() {
@@ -69,6 +95,8 @@ internal class ChatTextToSpeechController(
 
     override fun close() {
         requestId++
+        preparationTexts.clear()
+        languageIdentifier.close()
         service.close()
         updateState(ChatTextToSpeechState())
     }
@@ -94,14 +122,15 @@ internal class AndroidChatTextToSpeechService(
     private var closed = false
     private var pending: PendingSpeech? = null
     private var activeUtteranceId: String? = null
+    private var defaultVoice: Voice? = null
 
-    override fun speak(text: String, listener: ChatTextToSpeechListener) {
+    override fun speak(text: String, languageTag: String?, listener: ChatTextToSpeechListener) {
         if (closed) {
             notify(listener, ChatTextToSpeechResult.Failed("Text-to-speech is no longer available"))
             return
         }
         stop()
-        pending = PendingSpeech(text, listener)
+        pending = PendingSpeech(text, languageTag, listener)
         if (initialized) {
             speakPending()
         } else if (engine == null) {
@@ -124,6 +153,7 @@ internal class AndroidChatTextToSpeechService(
         engine?.shutdown()
         engine = null
         initialized = false
+        defaultVoice = null
     }
 
     private fun onInitialized(status: Int) {
@@ -141,6 +171,7 @@ internal class AndroidChatTextToSpeechService(
             engine = null
             return
         }
+        defaultVoice = currentEngine.voice
         initialized = true
         currentEngine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) = Unit
@@ -164,6 +195,10 @@ internal class AndroidChatTextToSpeechService(
     private fun speakPending() {
         val speech = pending ?: return
         pending = null
+        if (!configureVoice(speech.languageTag)) {
+            notify(speech.listener, ChatTextToSpeechResult.Failed("The default text-to-speech voice is unavailable"))
+            return
+        }
         val utteranceId = UUID.randomUUID().toString()
         activeUtteranceId = utteranceId
         val result = engine?.speak(speech.text, TextToSpeech.QUEUE_FLUSH, Bundle(), utteranceId)
@@ -173,6 +208,41 @@ internal class AndroidChatTextToSpeechService(
             return
         }
         pending = speech.copy(utteranceId = utteranceId)
+    }
+
+    private fun configureVoice(languageTag: String?): Boolean {
+        val currentEngine = engine ?: return false
+        if (languageTag != null) {
+            val locale = Locale.forLanguageTag(languageTag)
+            if (locale.language.isNotBlank()) {
+                compatibleVoices(
+                    voices = currentEngine.voices,
+                    languageTag = languageTag,
+                    currentVoice = currentEngine.voice,
+                ).forEach { voice ->
+                    if (
+                        currentEngine.setVoice(voice) == TextToSpeech.SUCCESS &&
+                        currentEngine.voice?.locale?.language.equals(locale.language, ignoreCase = true)
+                    ) {
+                        Log.d(LOG_TAG, "Selected TTS voice ${voice.name} (${voice.locale.toLanguageTag()}) for $languageTag")
+                        return true
+                    }
+                }
+
+                if (
+                    currentEngine.setLanguage(locale) >= TextToSpeech.LANG_AVAILABLE &&
+                    currentEngine.voice?.locale?.language.equals(locale.language, ignoreCase = true)
+                ) {
+                    Log.d(LOG_TAG, "TTS engine selected ${currentEngine.voice?.name} for $languageTag")
+                    return true
+                }
+                Log.w(LOG_TAG, "No installed TTS voice could be activated for $languageTag; using default")
+            }
+        } else {
+            Log.d(LOG_TAG, "No detected language; using default TTS voice")
+        }
+        val voice = defaultVoice ?: return false
+        return currentEngine.setVoice(voice) == TextToSpeech.SUCCESS
     }
 
     private fun finish(utteranceId: String?, result: ChatTextToSpeechResult) {
@@ -200,7 +270,35 @@ internal class AndroidChatTextToSpeechService(
 
     private data class PendingSpeech(
         val text: String,
+        val languageTag: String?,
         val listener: ChatTextToSpeechListener,
         val utteranceId: String? = null,
     )
+
+    private companion object {
+        const val LOG_TAG = "ArarAI.TTS"
+    }
+}
+
+internal fun compatibleVoices(
+    voices: Set<Voice>?,
+    languageTag: String,
+    currentVoice: Voice?,
+): List<Voice> {
+    val requestedLanguage = Locale.forLanguageTag(languageTag).language
+    if (requestedLanguage.isBlank()) return emptyList()
+
+    return voices.orEmpty()
+        .asSequence()
+        .filter { it.locale.language.equals(requestedLanguage, ignoreCase = true) }
+        .filterNot { it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
+        .sortedWith(
+            compareBy<Voice> { it.isNetworkConnectionRequired }
+                .thenByDescending { it == currentVoice }
+                .thenByDescending { it.quality }
+                .thenBy { it.latency }
+                .thenBy { it.locale.toLanguageTag() }
+                .thenBy { it.name },
+        )
+        .toList()
 }

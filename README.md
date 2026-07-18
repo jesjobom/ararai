@@ -15,6 +15,8 @@ backend, or external database.
 - Streamed local Chat with persistent and renameable sessions, cancellation,
   bounded context construction, selectable Markdown and local LaTeX math rendering, and optional reasoning
   controls when declared by the selected model.
+- Offline response-language detection and language-aware native Android
+  text-to-speech playback for completed assistant responses.
 - Capability-gated image and audio prompts. Imported images are normalized and
   recordings are stored as app-owned Chat media.
 - Diagnostics for model/runtime identity and local inference performance.
@@ -38,6 +40,7 @@ memory, thermal, and multimodal behavior require physical-device validation.
 - JDK 17, AGP 9.2.x, Gradle wrapper 9.4.1
 - Build Tools 36.0.0, NDK 28.2.13676358, CMake 3.22.1
 - Local runtimes: llama.cpp through JNI/NDK and LiteRT-LM 0.14.0
+- Bundled ML Kit Language ID 17.0.6
 - Debug signing/builds only; release signing is not configured
 
 Model definitions and their runtime, artifact, capability, integrity, and

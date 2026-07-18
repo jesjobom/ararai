@@ -81,6 +81,7 @@ internal fun ArarAiApp(
     chatMediaRepository: ChatMediaRepository,
     chatMediaServices: ChatMediaServices,
     chatTextToSpeechServiceFactory: () -> ChatTextToSpeechService,
+    chatLanguageIdentifierFactory: () -> ChatLanguageIdentifier,
     systemPrompt: String,
     appVersionLabel: String,
     themeMode: ThemeMode,
@@ -160,6 +161,7 @@ internal fun ArarAiApp(
             viewModel = chatViewModel,
             mediaServices = chatMediaServices,
             textToSpeechServiceFactory = chatTextToSpeechServiceFactory,
+            languageIdentifierFactory = chatLanguageIdentifierFactory,
             onBack = { returnHome() },
             onRetryModelDownload = { modelController.retry(modelCatalogState.selectedModelId) },
         )
