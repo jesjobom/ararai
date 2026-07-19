@@ -5,11 +5,17 @@ import java.security.MessageDigest
 
 sealed interface ModelFileValidation {
     data object Valid : ModelFileValidation
-    data class Invalid(val reason: String) : ModelFileValidation
+
+    data class Invalid(
+        val reason: String,
+    ) : ModelFileValidation
 }
 
 object ModelFileIntegrity {
-    fun validate(file: File, config: ModelConfig): ModelFileValidation {
+    fun validate(
+        file: File,
+        config: ModelConfig,
+    ): ModelFileValidation {
         if (!file.exists()) {
             return ModelFileValidation.Invalid("Configured model file does not exist")
         }

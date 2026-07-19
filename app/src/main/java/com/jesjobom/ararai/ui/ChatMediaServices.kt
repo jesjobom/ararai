@@ -17,11 +17,10 @@ internal data class ChatMediaServices(
     val draftCleaner: ChatDraftCleaner,
 )
 
-internal fun Context.androidChatMediaServices(
-    mediaRepository: ChatMediaRepository,
-): ChatMediaServices = ChatMediaServices(
+internal fun Context.androidChatMediaServices(mediaRepository: ChatMediaRepository): ChatMediaServices = ChatMediaServices(
     imageImporter = chatImageImporter(mediaRepository),
-    audioRecorderFactory = ChatAudioRecorderFactory {
+    audioRecorderFactory =
+    ChatAudioRecorderFactory {
         ChatAudioRecorder(
             mediaRepository.createDraftFile("recording-${System.currentTimeMillis()}-", ".wav"),
         )
@@ -37,7 +36,9 @@ internal fun interface ChatDraftCleaner {
 
 internal interface ChatAudioRecording {
     val file: File
+
     fun start()
+
     fun stopSafely(): Boolean
 }
 
@@ -47,20 +48,28 @@ internal fun interface ChatAudioRecorderFactory {
 
 internal interface ChatAudioPlayer {
     val isPlaying: Boolean
+
     fun start()
+
     fun pause()
+
     fun release()
 }
 
 internal fun interface ChatAudioPlayerFactory {
-    fun create(audio: AudioPrompt, onCompletion: () -> Unit): ChatAudioPlayer
+    fun create(
+        audio: AudioPrompt,
+        onCompletion: () -> Unit,
+    ): ChatAudioPlayer
 }
 
 private class AndroidChatAudioPlayerFactory(
     private val context: Context,
 ) : ChatAudioPlayerFactory {
-    override fun create(audio: AudioPrompt, onCompletion: () -> Unit): ChatAudioPlayer =
-        AndroidChatAudioPlayer(context, audio, onCompletion)
+    override fun create(
+        audio: AudioPrompt,
+        onCompletion: () -> Unit,
+    ): ChatAudioPlayer = AndroidChatAudioPlayer(context, audio, onCompletion)
 }
 
 private class AndroidChatAudioPlayer(
@@ -92,24 +101,33 @@ private class AndroidChatAudioPlayer(
         get() = player.isPlaying
 
     override fun start() = player.start()
+
     override fun pause() = player.pause()
+
     override fun release() = player.release()
 }
 
 internal fun interface ChatImageDecoder {
-    fun decodeThumbnail(path: String, maxDimension: Int): Bitmap?
+    fun decodeThumbnail(
+        path: String,
+        maxDimension: Int,
+    ): Bitmap?
 }
 
 private object AndroidChatImageDecoder : ChatImageDecoder {
-    override fun decodeThumbnail(path: String, maxDimension: Int): Bitmap? {
+    override fun decodeThumbnail(
+        path: String,
+        maxDimension: Int,
+    ): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        val sampleSize = calculateImageSampleSize(
-            width = bounds.outWidth,
-            height = bounds.outHeight,
-            maxSize = maxDimension,
-        )
+        val sampleSize =
+            calculateImageSampleSize(
+                width = bounds.outWidth,
+                height = bounds.outHeight,
+                maxSize = maxDimension,
+            )
         return BitmapFactory.decodeFile(
             path,
             BitmapFactory.Options().apply { inSampleSize = sampleSize },

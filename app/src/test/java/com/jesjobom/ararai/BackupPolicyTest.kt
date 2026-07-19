@@ -3,13 +3,13 @@ package com.jesjobom.ararai
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import androidx.test.core.app.ApplicationProvider
-import java.io.File
-import javax.xml.parsers.DocumentBuilderFactory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.File
+import javax.xml.parsers.DocumentBuilderFactory
 
 @RunWith(RobolectricTestRunner::class)
 class BackupPolicyTest {
@@ -36,13 +36,15 @@ class BackupPolicyTest {
         val result = mutableListOf<MutableSet<String>>()
         val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(sourceXml(fileName))
         val root = document.documentElement
-        val containers = when (root.tagName) {
-            "full-backup-content" -> listOf(root)
-            "data-extraction-rules" -> listOf("cloud-backup", "device-transfer").map { tag ->
-                root.getElementsByTagName(tag).item(0) as org.w3c.dom.Element
+        val containers =
+            when (root.tagName) {
+                "full-backup-content" -> listOf(root)
+                "data-extraction-rules" ->
+                    listOf("cloud-backup", "device-transfer").map { tag ->
+                        root.getElementsByTagName(tag).item(0) as org.w3c.dom.Element
+                    }
+                else -> error("Unexpected backup policy root: ${root.tagName}")
             }
-            else -> error("Unexpected backup policy root: ${root.tagName}")
-        }
         containers.forEach { container ->
             val current = linkedSetOf<String>()
             val excludes = container.getElementsByTagName("exclude")
@@ -57,26 +59,28 @@ class BackupPolicyTest {
     }
 
     private fun sourceXml(fileName: String): File {
-        val candidates = listOf(
-            File("app/src/main/res/xml", fileName),
-            File("src/main/res/xml", fileName),
-        )
+        val candidates =
+            listOf(
+                File("app/src/main/res/xml", fileName),
+                File("src/main/res/xml", fileName),
+            )
         return candidates.firstOrNull(File::isFile).also {
             assertTrue("Unable to locate source XML $fileName from ${File(".").absolutePath}", it != null)
         }!!
     }
 
     private companion object {
-        val EXCLUDED_DOMAINS = setOf(
-            "root",
-            "file",
-            "database",
-            "sharedpref",
-            "external",
-            "device_root",
-            "device_file",
-            "device_database",
-            "device_sharedpref",
-        )
+        val EXCLUDED_DOMAINS =
+            setOf(
+                "root",
+                "file",
+                "database",
+                "sharedpref",
+                "external",
+                "device_root",
+                "device_file",
+                "device_database",
+                "device_sharedpref",
+            )
     }
 }

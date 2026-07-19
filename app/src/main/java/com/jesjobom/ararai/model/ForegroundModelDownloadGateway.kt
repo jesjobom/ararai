@@ -6,7 +6,10 @@ import com.jesjobom.ararai.ModelDownloadService
 class ForegroundModelDownloadGateway(
     private val context: Context,
 ) : ModelDownloadCommandGateway {
-    override fun start(modelId: String, replaceExisting: Boolean) {
+    override fun start(
+        modelId: String,
+        replaceExisting: Boolean,
+    ) {
         context.startForegroundService(ModelDownloadService.downloadIntent(context, modelId, replaceExisting))
     }
 

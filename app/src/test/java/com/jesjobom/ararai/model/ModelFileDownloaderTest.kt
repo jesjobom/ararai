@@ -1,10 +1,5 @@
 package com.jesjobom.ararai.model
 
-import java.io.ByteArrayInputStream
-import java.io.File
-import java.io.IOException
-import java.io.InputStream
-import java.nio.file.Files
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -15,16 +10,22 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.IOException
+import java.io.InputStream
+import java.nio.file.Files
 
 class ModelFileDownloaderTest {
     @Test
     fun `downloads to temp file validates and promotes to final path`() = runTest {
         val root = Files.createTempDirectory("ararai-download").toFile()
         val progress = mutableListOf<ModelDownloadProgress>()
-        val downloader = ModelFileDownloader(
-            appFilesRoot = root,
-            byteSource = StaticModelByteSource("hello".toByteArray()),
-        )
+        val downloader =
+            ModelFileDownloader(
+                appFilesRoot = root,
+                byteSource = StaticModelByteSource("hello".toByteArray()),
+            )
 
         val result = downloader.download(helloConfig(), progress::add)
 
@@ -38,10 +39,11 @@ class ModelFileDownloaderTest {
     @Test
     fun `validation failure does not promote temp file`() = runTest {
         val root = Files.createTempDirectory("ararai-download").toFile()
-        val downloader = ModelFileDownloader(
-            appFilesRoot = root,
-            byteSource = StaticModelByteSource("wrong".toByteArray()),
-        )
+        val downloader =
+            ModelFileDownloader(
+                appFilesRoot = root,
+                byteSource = StaticModelByteSource("wrong".toByteArray()),
+            )
 
         try {
             downloader.download(helloConfig())
@@ -59,10 +61,11 @@ class ModelFileDownloaderTest {
         val finalFile = File(root, helloConfig().relativePath)
         finalFile.parentFile!!.mkdirs()
         finalFile.writeText("old-valid")
-        val downloader = ModelFileDownloader(
-            appFilesRoot = root,
-            byteSource = StaticModelByteSource("wrong".toByteArray()),
-        )
+        val downloader =
+            ModelFileDownloader(
+                appFilesRoot = root,
+                byteSource = StaticModelByteSource("wrong".toByteArray()),
+            )
 
         try {
             downloader.download(helloConfig())
@@ -80,10 +83,11 @@ class ModelFileDownloaderTest {
         finalFile.writeText("old-valid")
         val tempFile = File(finalFile.parentFile, "${finalFile.name}.part")
         tempFile.writeText("stale")
-        val downloader = ModelFileDownloader(
-            appFilesRoot = root,
-            byteSource = FailingModelByteSource,
-        )
+        val downloader =
+            ModelFileDownloader(
+                appFilesRoot = root,
+                byteSource = FailingModelByteSource,
+            )
 
         try {
             downloader.download(helloConfig())
@@ -101,17 +105,20 @@ class ModelFileDownloaderTest {
     @Test
     fun `tries fallback urls after primary url fails`() = runTest {
         val root = Files.createTempDirectory("ararai-download").toFile()
-        val byteSource = UrlSwitchingModelByteSource(
-            bytesByUrl = mapOf("https://example.com/fallback.gguf" to "hello".toByteArray()),
-        )
-        val downloader = ModelFileDownloader(
-            appFilesRoot = root,
-            byteSource = byteSource,
-        )
-        val config = helloConfig().copy(
-            url = "https://example.com/primary.gguf",
-            fallbackUrls = listOf("https://example.com/fallback.gguf"),
-        )
+        val byteSource =
+            UrlSwitchingModelByteSource(
+                bytesByUrl = mapOf("https://example.com/fallback.gguf" to "hello".toByteArray()),
+            )
+        val downloader =
+            ModelFileDownloader(
+                appFilesRoot = root,
+                byteSource = byteSource,
+            )
+        val config =
+            helloConfig().copy(
+                url = "https://example.com/primary.gguf",
+                fallbackUrls = listOf("https://example.com/fallback.gguf"),
+            )
 
         downloader.download(config)
 
@@ -126,10 +133,11 @@ class ModelFileDownloaderTest {
     @Test
     fun `cancellation preserves temp file and is not wrapped as download failure`() = runTest {
         val root = Files.createTempDirectory("ararai-download").toFile()
-        val downloader = ModelFileDownloader(
-            appFilesRoot = root,
-            byteSource = CancelingModelByteSource,
-        )
+        val downloader =
+            ModelFileDownloader(
+                appFilesRoot = root,
+                byteSource = CancelingModelByteSource,
+            )
 
         try {
             downloader.download(helloConfig())
@@ -187,17 +195,70 @@ class ModelFileDownloaderTest {
         assertEquals("hello", finalFile.readText())
     }
 
-    private fun helloConfig(): ModelConfig =
-        ModelConfig(
-            id = "hello",
-            name = "Hello Model",
-            url = "https://example.com/hello.gguf",
-            fileName = "hello.gguf",
-            relativePath = "models/hello.gguf",
-            sha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-            expectedBytes = 5,
-            inference = InferenceConfig(contextTokens = 128, temperature = 0.7f, topP = 0.9f),
+    @Test
+    fun `restarts from zero when switching from a partial primary to fallback`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val source = PartialPrimaryThenFallbackModelByteSource()
+        val config =
+            helloConfig().copy(
+                url = "https://example.com/primary.gguf",
+                fallbackUrls = listOf("https://example.com/fallback.gguf"),
+            )
+
+        ModelFileDownloader(root, source).download(config)
+
+        assertEquals(
+            listOf(
+                "https://example.com/primary.gguf" to 0L,
+                "https://example.com/fallback.gguf" to 0L,
+            ),
+            source.requests,
         )
+        assertEquals("hello", File(root, config.relativePath).readText())
+    }
+
+    @Test
+    fun `retries resumed content once from zero after integrity failure`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val finalFile = File(root, helloConfig().relativePath)
+        finalFile.parentFile!!.mkdirs()
+        File(finalFile.parentFile, "${finalFile.name}.part").writeText("he")
+        val source = InvalidResumeThenCleanModelByteSource(cleanRetryBytes = "hello")
+
+        ModelFileDownloader(root, source).download(helloConfig())
+
+        assertEquals(listOf(2L, 0L), source.requestedOffsets)
+        assertEquals("hello", finalFile.readText())
+    }
+
+    @Test
+    fun `bounds clean retry after resumed content remains invalid`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val finalFile = File(root, helloConfig().relativePath)
+        finalFile.parentFile!!.mkdirs()
+        File(finalFile.parentFile, "${finalFile.name}.part").writeText("he")
+        val source = InvalidResumeThenCleanModelByteSource(cleanRetryBytes = "wrong")
+
+        try {
+            ModelFileDownloader(root, source).download(helloConfig())
+            fail("Expected bounded validation failure")
+        } catch (_: ModelDownloadException) {
+            assertEquals(listOf(2L, 0L), source.requestedOffsets)
+            assertFalse(finalFile.exists())
+            assertFalse(File(finalFile.parentFile, "${finalFile.name}.part").exists())
+        }
+    }
+
+    private fun helloConfig(): ModelConfig = ModelConfig(
+        id = "hello",
+        name = "Hello Model",
+        url = "https://example.com/hello.gguf",
+        fileName = "hello.gguf",
+        relativePath = "models/hello.gguf",
+        sha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        expectedBytes = 5,
+        inference = InferenceConfig(contextTokens = 128, temperature = 0.7f, topP = 0.9f),
+    )
 }
 
 private class StaticModelByteSource(
@@ -207,24 +268,21 @@ private class StaticModelByteSource(
 }
 
 private data object FailingModelByteSource : ModelByteSource {
-    override fun open(config: ModelConfig): ByteArrayInputStream {
-        throw IOException("network down")
-    }
+    override fun open(config: ModelConfig): ByteArrayInputStream = throw IOException("network down")
 }
 
 private data object CancelingModelByteSource : ModelByteSource {
-    override fun open(config: ModelConfig): InputStream =
-        object : InputStream() {
-            private var emitted = false
+    override fun open(config: ModelConfig): InputStream = object : InputStream() {
+        private var emitted = false
 
-            override fun read(): Int {
-                if (!emitted) {
-                    emitted = true
-                    return 'h'.code
-                }
-                throw CancellationException("cancelled")
+        override fun read(): Int {
+            if (!emitted) {
+                emitted = true
+                return 'h'.code
             }
+            throw CancellationException("cancelled")
         }
+    }
 }
 
 private class UrlSwitchingModelByteSource(
@@ -246,7 +304,10 @@ private class RangeModelByteSource(
 
     override fun open(config: ModelConfig): InputStream = ByteArrayInputStream("hello".toByteArray())
 
-    override fun open(config: ModelConfig, requestedOffset: Long): ModelByteResponse {
+    override fun open(
+        config: ModelConfig,
+        requestedOffset: Long,
+    ): ModelByteResponse {
         this.requestedOffset = requestedOffset
         val bytes = "hello".toByteArray()
         return if (acceptRange) {
@@ -254,6 +315,55 @@ private class RangeModelByteSource(
         } else {
             ModelByteResponse(ByteArrayInputStream(bytes), acceptedOffset = 0L)
         }
+    }
+}
+
+private class PartialPrimaryThenFallbackModelByteSource : ModelByteSource {
+    val requests = mutableListOf<Pair<String, Long>>()
+
+    override fun open(config: ModelConfig): InputStream = error("Offset-aware open expected")
+
+    override fun open(
+        config: ModelConfig,
+        requestedOffset: Long,
+    ): ModelByteResponse {
+        requests += config.url to requestedOffset
+        return if (config.url.endsWith("primary.gguf")) {
+            ModelByteResponse(PartialThenFailingInputStream("xx".toByteArray()), acceptedOffset = 0L)
+        } else {
+            ModelByteResponse(ByteArrayInputStream("hello".toByteArray()), acceptedOffset = 0L)
+        }
+    }
+}
+
+private class InvalidResumeThenCleanModelByteSource(
+    private val cleanRetryBytes: String,
+) : ModelByteSource {
+    val requestedOffsets = mutableListOf<Long>()
+
+    override fun open(config: ModelConfig): InputStream = error("Offset-aware open expected")
+
+    override fun open(
+        config: ModelConfig,
+        requestedOffset: Long,
+    ): ModelByteResponse {
+        requestedOffsets += requestedOffset
+        return if (requestedOffset > 0L) {
+            ModelByteResponse(ByteArrayInputStream("xxx".toByteArray()), acceptedOffset = requestedOffset)
+        } else {
+            ModelByteResponse(ByteArrayInputStream(cleanRetryBytes.toByteArray()), acceptedOffset = 0L)
+        }
+    }
+}
+
+private class PartialThenFailingInputStream(
+    private val bytes: ByteArray,
+) : InputStream() {
+    private var index = 0
+
+    override fun read(): Int {
+        if (index < bytes.size) return bytes[index++].toInt() and 0xff
+        throw IOException("primary interrupted")
     }
 }
 
@@ -269,7 +379,11 @@ private class SlowModelByteSource(
             return 0
         }
 
-        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        override fun read(
+            buffer: ByteArray,
+            offset: Int,
+            length: Int,
+        ): Int {
             if (remaining <= 0L) return -1
             Thread.sleep(1)
             val count = minOf(length.toLong(), remaining).toInt()

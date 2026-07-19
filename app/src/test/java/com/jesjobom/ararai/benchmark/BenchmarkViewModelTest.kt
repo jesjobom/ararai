@@ -22,60 +22,67 @@ import org.junit.Test
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class BenchmarkViewModelTest {
-    private val model = LocalModel(
-        id = "test-model",
-        name = "Test Model",
-        filePath = "/tmp/test.gguf",
-    )
+    private val model =
+        LocalModel(
+            id = "test-model",
+            name = "Test Model",
+            filePath = "/tmp/test.gguf",
+        )
 
-    private val config = ModelConfig(
-        id = "test-model",
-        name = "Test Model",
-        url = "https://example.com/test.gguf",
-        fileName = "test.gguf",
-        relativePath = "models/test.gguf",
-        sha256 = "abc",
-        expectedBytes = 123L,
-        inference = InferenceConfig(
-            contextTokens = 4096,
-            maxTokens = 512,
-            temperature = 0.7f,
-            topP = 0.9f,
-        ),
-    )
+    private val config =
+        ModelConfig(
+            id = "test-model",
+            name = "Test Model",
+            url = "https://example.com/test.gguf",
+            fileName = "test.gguf",
+            relativePath = "models/test.gguf",
+            sha256 = "abc",
+            expectedBytes = 123L,
+            inference =
+            InferenceConfig(
+                contextTokens = 4096,
+                maxTokens = 512,
+                temperature = 0.7f,
+                topP = 0.9f,
+            ),
+        )
 
     @Test
     fun `runs benchmark and records stable metrics`() = runTest {
-        val engine = RecordingEngine(
-            events = listOf(
-                GenerationEvent.Token("hello"),
-                GenerationEvent.Token(" world"),
-                GenerationEvent.Metrics(
-                    GenerationMetrics(
-                        timeToFirstTokenMillis = 40,
-                        prefillTokenCount = 12,
-                        prefillTokensPerSecond = 120.0,
-                        decodeTokenCount = 2,
-                        decodeTokensPerSecond = 20.0,
+        val engine =
+            RecordingEngine(
+                events =
+                listOf(
+                    GenerationEvent.Token("hello"),
+                    GenerationEvent.Token(" world"),
+                    GenerationEvent.Metrics(
+                        GenerationMetrics(
+                            timeToFirstTokenMillis = 40,
+                            prefillTokenCount = 12,
+                            prefillTokensPerSecond = 120.0,
+                            decodeTokenCount = 2,
+                            decodeTokensPerSecond = 20.0,
+                        ),
                     ),
+                    GenerationEvent.Completed,
                 ),
-                GenerationEvent.Completed,
-            ),
-        )
-        val viewModel = BenchmarkViewModel(
-            engine = engine,
-            initialConfig = config,
-            initialState = ModelStartupState.Available(model, config.inference),
-            clock = SequenceClock(
-                0L,
-                100_000_000L,
-                100_000_000L,
-                150_000_000L,
-                200_000_000L,
-                350_000_000L,
-            ),
-            scope = this,
-        )
+            )
+        val viewModel =
+            BenchmarkViewModel(
+                engine = engine,
+                initialConfig = config,
+                initialState = ModelStartupState.Available(model, config.inference),
+                clock =
+                SequenceClock(
+                    0L,
+                    100_000_000L,
+                    100_000_000L,
+                    150_000_000L,
+                    200_000_000L,
+                    350_000_000L,
+                ),
+                scope = this,
+            )
 
         viewModel.runBenchmark()
         runCurrent()
@@ -101,17 +108,20 @@ class BenchmarkViewModelTest {
         assertEquals(1, engine.unloadCalls)
         assertEquals(2048, engine.loadedConfig?.contextTokens)
         assertEquals(128, engine.loadedConfig?.maxTokens)
+        assertEquals(0.2f, engine.loadedConfig?.temperature)
+        assertEquals(0.9f, engine.loadedConfig?.topP)
     }
 
     @Test
     fun `does not run benchmark until selected model is available`() = runTest {
         val engine = RecordingEngine()
-        val viewModel = BenchmarkViewModel(
-            engine = engine,
-            initialConfig = config,
-            initialState = ModelStartupState.Missing,
-            scope = this,
-        )
+        val viewModel =
+            BenchmarkViewModel(
+                engine = engine,
+                initialConfig = config,
+                initialState = ModelStartupState.Missing,
+                scope = this,
+            )
 
         viewModel.runBenchmark()
         runCurrent()
@@ -125,25 +135,29 @@ class BenchmarkViewModelTest {
 
     @Test
     fun `does not label streamed chunks as tokens when runtime metrics are unavailable`() = runTest {
-        val engine = RecordingEngine(
-            events = listOf(
-                GenerationEvent.Token("one chunk"),
-                GenerationEvent.Completed,
-            ),
-        )
-        val viewModel = BenchmarkViewModel(
-            engine = engine,
-            initialConfig = config,
-            initialState = ModelStartupState.Available(model, config.inference),
-            clock = SequenceClock(
-                0L,
-                100_000_000L,
-                100_000_000L,
-                150_000_000L,
-                300_000_000L,
-            ),
-            scope = this,
-        )
+        val engine =
+            RecordingEngine(
+                events =
+                listOf(
+                    GenerationEvent.Token("one chunk"),
+                    GenerationEvent.Completed,
+                ),
+            )
+        val viewModel =
+            BenchmarkViewModel(
+                engine = engine,
+                initialConfig = config,
+                initialState = ModelStartupState.Available(model, config.inference),
+                clock =
+                SequenceClock(
+                    0L,
+                    100_000_000L,
+                    100_000_000L,
+                    150_000_000L,
+                    300_000_000L,
+                ),
+                scope = this,
+            )
 
         viewModel.runBenchmark()
         runCurrent()
@@ -158,12 +172,13 @@ class BenchmarkViewModelTest {
 
     @Test
     fun `uses selected model runtime label`() = runTest {
-        val viewModel = BenchmarkViewModel(
-            engine = RecordingEngine(),
-            initialConfig = config,
-            initialState = ModelStartupState.Available(model, config.inference),
-            scope = this,
-        )
+        val viewModel =
+            BenchmarkViewModel(
+                engine = RecordingEngine(),
+                initialConfig = config,
+                initialState = ModelStartupState.Available(model, config.inference),
+                scope = this,
+            )
 
         assertEquals("llama.cpp GPU preferred", viewModel.uiState.value.backendLabel)
     }
@@ -171,27 +186,30 @@ class BenchmarkViewModelTest {
     @Test
     fun `uses selected model acceleration in runtime label`() = runTest {
         val cpuModel = model.copy(acceleration = ModelAccelerationPolicy.CpuOnly)
-        val viewModel = BenchmarkViewModel(
-            engine = RecordingEngine(),
-            initialConfig = config.copy(acceleration = ModelAccelerationPolicy.GpuPreferred),
-            initialState = ModelStartupState.Available(cpuModel, config.inference),
-            scope = this,
-        )
+        val viewModel =
+            BenchmarkViewModel(
+                engine = RecordingEngine(),
+                initialConfig = config.copy(acceleration = ModelAccelerationPolicy.GpuPreferred),
+                initialState = ModelStartupState.Available(cpuModel, config.inference),
+                scope = this,
+            )
 
         assertEquals("llama.cpp CPU only", viewModel.uiState.value.backendLabel)
     }
 
     @Test
     fun `surfaces generation failure`() = runTest {
-        val engine = RecordingEngine(
-            events = listOf(GenerationEvent.Failed("decode failed")),
-        )
-        val viewModel = BenchmarkViewModel(
-            engine = engine,
-            initialConfig = config,
-            initialState = ModelStartupState.Available(model, config.inference),
-            scope = this,
-        )
+        val engine =
+            RecordingEngine(
+                events = listOf(GenerationEvent.Failed("decode failed")),
+            )
+        val viewModel =
+            BenchmarkViewModel(
+                engine = engine,
+                initialConfig = config,
+                initialState = ModelStartupState.Available(model, config.inference),
+                scope = this,
+            )
 
         viewModel.runBenchmark()
         runCurrent()
@@ -206,12 +224,13 @@ class BenchmarkViewModelTest {
     @Test
     fun `cancel benchmark stops active run and unloads engine`() = runTest {
         val engine = SlowEngine()
-        val viewModel = BenchmarkViewModel(
-            engine = engine,
-            initialConfig = config,
-            initialState = ModelStartupState.Available(model, config.inference),
-            scope = this,
-        )
+        val viewModel =
+            BenchmarkViewModel(
+                engine = engine,
+                initialConfig = config,
+                initialState = ModelStartupState.Available(model, config.inference),
+                scope = this,
+            )
 
         viewModel.runBenchmark()
         runCurrent()
@@ -223,7 +242,6 @@ class BenchmarkViewModelTest {
         assertFalse(viewModel.uiState.value.isRunning)
         assertEquals(1, engine.unloadCalls)
     }
-
 
     private class RecordingEngine(
         private val events: List<GenerationEvent> = emptyList(),
@@ -237,7 +255,10 @@ class BenchmarkViewModelTest {
         var loadedConfig: InferenceConfig? = null
             private set
 
-        override suspend fun load(model: LocalModel, config: InferenceConfig) {
+        override suspend fun load(
+            model: LocalModel,
+            config: InferenceConfig,
+        ) {
             loadCalls += 1
             loadedConfig = config
         }
@@ -267,7 +288,10 @@ class BenchmarkViewModelTest {
         var unloadCalls = 0
             private set
 
-        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+        override suspend fun load(
+            model: LocalModel,
+            config: InferenceConfig,
+        ) = Unit
 
         override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
             emit(GenerationEvent.Token("partial"))

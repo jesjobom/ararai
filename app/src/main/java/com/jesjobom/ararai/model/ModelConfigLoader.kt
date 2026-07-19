@@ -8,12 +8,20 @@ class ModelConfigLoader(
     @param:RawRes private val resourceId: Int,
 ) {
     fun load(): ModelConfig {
-        val raw = context.resources.openRawResource(resourceId).bufferedReader().use { it.readText() }
+        val raw =
+            context.resources
+                .openRawResource(resourceId)
+                .bufferedReader()
+                .use { it.readText() }
         return ModelConfigParser.parse(raw)
     }
 
     fun loadCatalog(): ModelCatalog {
-        val raw = context.resources.openRawResource(resourceId).bufferedReader().use { it.readText() }
+        val raw =
+            context.resources
+                .openRawResource(resourceId)
+                .bufferedReader()
+                .use { it.readText() }
         return ModelConfigParser.parseCatalog(raw)
     }
 }

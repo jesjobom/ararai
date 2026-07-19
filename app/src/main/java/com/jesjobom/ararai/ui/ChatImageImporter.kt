@@ -13,8 +13,15 @@ import com.jesjobom.ararai.chat.ChatMediaRepository
 import java.io.File
 import java.io.InputStream
 
-internal data class ImportedChatImage(val file: File, val displayName: String?)
-internal data class ChatImageBounds(val width: Int, val height: Int)
+internal data class ImportedChatImage(
+    val file: File,
+    val displayName: String?,
+)
+
+internal data class ChatImageBounds(
+    val width: Int,
+    val height: Int,
+)
 
 internal fun interface ChatImageImportService {
     fun import(uri: Uri): ImportedChatImage
@@ -51,9 +58,10 @@ internal class ChatImageImporter(
                 }
             }
 
-            val bounds = readBounds(temporaryFile)
-                ?.takeIf { it.width > 0 && it.height > 0 }
-                ?: error("Unable to decode selected image")
+            val bounds =
+                readBounds(temporaryFile)
+                    ?.takeIf { it.width > 0 && it.height > 0 }
+                    ?: error("Unable to decode selected image")
             require(bounds.width <= maxDecodedDimension && bounds.height <= maxDecodedDimension) {
                 DECODED_IMAGE_TOO_LARGE_ERROR
             }
@@ -90,7 +98,10 @@ internal fun Context.chatImageImporter(mediaRepository: ChatMediaRepository): Ch
     declaredSourceSize = { uri -> uri.size(this) },
 )
 
-private fun InputStream.copyToBounded(output: java.io.OutputStream, maxBytes: Long) {
+private fun InputStream.copyToBounded(
+    output: java.io.OutputStream,
+    maxBytes: Long,
+) {
     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
     var copied = 0L
     while (true) {
@@ -117,40 +128,52 @@ private fun Bitmap.scaleImageToFit(maxSize: Int): Bitmap {
 internal fun Bitmap.applyExifOrientation(orientation: Int): Bitmap {
     val matrix = Matrix()
     when (orientation) {
-        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setValues(
-            floatArrayOf(-1f, 0f, width.toFloat(), 0f, 1f, 0f, 0f, 0f, 1f),
-        )
-        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setValues(
-            floatArrayOf(-1f, 0f, width.toFloat(), 0f, -1f, height.toFloat(), 0f, 0f, 1f),
-        )
-        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setValues(
-            floatArrayOf(1f, 0f, 0f, 0f, -1f, height.toFloat(), 0f, 0f, 1f),
-        )
-        ExifInterface.ORIENTATION_TRANSPOSE -> matrix.setValues(
-            floatArrayOf(0f, 1f, 0f, 1f, 0f, 0f, 0f, 0f, 1f),
-        )
-        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setValues(
-            floatArrayOf(0f, -1f, height.toFloat(), 1f, 0f, 0f, 0f, 0f, 1f),
-        )
-        ExifInterface.ORIENTATION_TRANSVERSE -> matrix.setValues(
-            floatArrayOf(0f, -1f, height.toFloat(), -1f, 0f, width.toFloat(), 0f, 0f, 1f),
-        )
-        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setValues(
-            floatArrayOf(0f, 1f, 0f, -1f, 0f, width.toFloat(), 0f, 0f, 1f),
-        )
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL ->
+            matrix.setValues(
+                floatArrayOf(-1f, 0f, width.toFloat(), 0f, 1f, 0f, 0f, 0f, 1f),
+            )
+        ExifInterface.ORIENTATION_ROTATE_180 ->
+            matrix.setValues(
+                floatArrayOf(-1f, 0f, width.toFloat(), 0f, -1f, height.toFloat(), 0f, 0f, 1f),
+            )
+        ExifInterface.ORIENTATION_FLIP_VERTICAL ->
+            matrix.setValues(
+                floatArrayOf(1f, 0f, 0f, 0f, -1f, height.toFloat(), 0f, 0f, 1f),
+            )
+        ExifInterface.ORIENTATION_TRANSPOSE ->
+            matrix.setValues(
+                floatArrayOf(0f, 1f, 0f, 1f, 0f, 0f, 0f, 0f, 1f),
+            )
+        ExifInterface.ORIENTATION_ROTATE_90 ->
+            matrix.setValues(
+                floatArrayOf(0f, -1f, height.toFloat(), 1f, 0f, 0f, 0f, 0f, 1f),
+            )
+        ExifInterface.ORIENTATION_TRANSVERSE ->
+            matrix.setValues(
+                floatArrayOf(0f, -1f, height.toFloat(), -1f, 0f, width.toFloat(), 0f, 0f, 1f),
+            )
+        ExifInterface.ORIENTATION_ROTATE_270 ->
+            matrix.setValues(
+                floatArrayOf(0f, 1f, 0f, -1f, 0f, width.toFloat(), 0f, 0f, 1f),
+            )
         else -> return this
     }
     val swapsAxes = orientation >= ExifInterface.ORIENTATION_TRANSPOSE
-    return Bitmap.createBitmap(
-        if (swapsAxes) height else width,
-        if (swapsAxes) width else height,
-        config ?: Bitmap.Config.ARGB_8888,
-    ).also { transformed ->
-        Canvas(transformed).drawBitmap(this, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
-    }
+    return Bitmap
+        .createBitmap(
+            if (swapsAxes) height else width,
+            if (swapsAxes) width else height,
+            config ?: Bitmap.Config.ARGB_8888,
+        ).also { transformed ->
+            Canvas(transformed).drawBitmap(this, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
+        }
 }
 
-internal fun calculateImageSampleSize(width: Int, height: Int, maxSize: Int): Int {
+internal fun calculateImageSampleSize(
+    width: Int,
+    height: Int,
+    maxSize: Int,
+): Int {
     var sampleSize = 1
     var sampledWidth = width
     var sampledHeight = height
@@ -168,21 +191,18 @@ private fun readChatImageBounds(file: File): ChatImageBounds? {
     return ChatImageBounds(options.outWidth, options.outHeight)
 }
 
-private fun readChatImageOrientation(file: File): Int =
-    ExifInterface(file.absolutePath).getAttributeInt(
-        ExifInterface.TAG_ORIENTATION,
-        ExifInterface.ORIENTATION_NORMAL,
-    )
+private fun readChatImageOrientation(file: File): Int = ExifInterface(file.absolutePath).getAttributeInt(
+    ExifInterface.TAG_ORIENTATION,
+    ExifInterface.ORIENTATION_NORMAL,
+)
 
-private fun Uri.displayName(context: Context): String? =
-    context.contentResolver.query(this, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-        if (cursor.moveToFirst()) cursor.getString(0) else null
-    } ?: lastPathSegment
+private fun Uri.displayName(context: Context): String? = context.contentResolver.query(this, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+    if (cursor.moveToFirst()) cursor.getString(0) else null
+} ?: lastPathSegment
 
-private fun Uri.size(context: Context): Long? =
-    context.contentResolver.query(this, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-        if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
-    }
+private fun Uri.size(context: Context): Long? = context.contentResolver.query(this, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+    if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
+}
 
 internal const val MAX_CHAT_IMAGE_SOURCE_BYTES = 20L * 1024L * 1024L
 internal const val MAX_CHAT_IMAGE_DECODED_DIMENSION = 8_192

@@ -1,10 +1,6 @@
 package com.jesjobom.ararai.model
 
 import app.cash.turbine.test
-import java.io.ByteArrayInputStream
-import java.nio.file.Files
-import kotlin.io.path.createDirectories
-import kotlin.io.path.writeBytes
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.test.runCurrent
@@ -13,6 +9,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayInputStream
+import java.nio.file.Files
+import kotlin.io.path.createDirectories
+import kotlin.io.path.writeBytes
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ModelCatalogControllerTest {
@@ -20,13 +20,14 @@ class ModelCatalogControllerTest {
     fun `delegates downloads and cancellation to background gateway`() = runTest {
         val root = Files.createTempDirectory("ararai-catalog").toFile()
         val gateway = RecordingDownloadGateway()
-        val controller = ModelCatalogController(
-            catalog = ModelCatalog(defaultModelId = "default", models = listOf(defaultConfig())),
-            appFilesRoot = root,
-            downloader = SuspendedDownloader(),
-            downloadGateway = gateway,
-            scope = this,
-        )
+        val controller =
+            ModelCatalogController(
+                catalog = ModelCatalog(defaultModelId = "default", models = listOf(defaultConfig())),
+                appFilesRoot = root,
+                downloader = SuspendedDownloader(),
+                downloadGateway = gateway,
+                scope = this,
+            )
 
         assertEquals(listOf("default" to false), gateway.started)
 
@@ -38,15 +39,17 @@ class ModelCatalogControllerTest {
     @Test
     fun `auto downloads the default missing model and leaves other models untouched`() = runTest {
         val root = Files.createTempDirectory("ararai-catalog").toFile()
-        val controller = ModelCatalogController(
-            catalog = catalog(),
-            appFilesRoot = root,
-            downloader = ModelFileDownloader(
+        val controller =
+            ModelCatalogController(
+                catalog = catalog(),
                 appFilesRoot = root,
-                byteSource = CatalogByteSource(mapOf("default" to "hello".toByteArray())),
-            ),
-            scope = this,
-        )
+                downloader =
+                ModelFileDownloader(
+                    appFilesRoot = root,
+                    byteSource = CatalogByteSource(mapOf("default" to "hello".toByteArray())),
+                ),
+                scope = this,
+            )
 
         controller.state.test {
             val initial = awaitItem()
@@ -71,12 +74,13 @@ class ModelCatalogControllerTest {
         optionalPath.writeBytes("optional".toByteArray())
         val byteSource = CatalogByteSource(mapOf("default" to "hello".toByteArray()))
 
-        val controller = ModelCatalogController(
-            catalog = catalog(),
-            appFilesRoot = root,
-            downloader = ModelFileDownloader(appFilesRoot = root, byteSource = byteSource),
-            scope = this,
-        )
+        val controller =
+            ModelCatalogController(
+                catalog = catalog(),
+                appFilesRoot = root,
+                downloader = ModelFileDownloader(appFilesRoot = root, byteSource = byteSource),
+                scope = this,
+            )
 
         assertEquals("optional", controller.state.value.selectedModelId)
         assertTrue(controller.state.value.selectedStartupState is ModelStartupState.Available)
@@ -91,13 +95,14 @@ class ModelCatalogControllerTest {
         optionalPath.writeBytes("optional".toByteArray())
         val selectionStore = InMemoryModelSelectionStore("optional")
 
-        val controller = ModelCatalogController(
-            catalog = catalog(),
-            appFilesRoot = root,
-            downloader = ModelFileDownloader(appFilesRoot = root, byteSource = CatalogByteSource(emptyMap())),
-            selectionStore = selectionStore,
-            scope = this,
-        )
+        val controller =
+            ModelCatalogController(
+                catalog = catalog(),
+                appFilesRoot = root,
+                downloader = ModelFileDownloader(appFilesRoot = root, byteSource = CatalogByteSource(emptyMap())),
+                selectionStore = selectionStore,
+                scope = this,
+            )
 
         assertEquals("optional", controller.state.value.selectedModelId)
 
@@ -110,15 +115,17 @@ class ModelCatalogControllerTest {
     @Test
     fun `delete removes an available model file and marks it missing`() = runTest {
         val root = Files.createTempDirectory("ararai-catalog").toFile()
-        val controller = ModelCatalogController(
-            catalog = ModelCatalog(defaultModelId = "default", models = listOf(defaultConfig())),
-            appFilesRoot = root,
-            downloader = ModelFileDownloader(
+        val controller =
+            ModelCatalogController(
+                catalog = ModelCatalog(defaultModelId = "default", models = listOf(defaultConfig())),
                 appFilesRoot = root,
-                byteSource = CatalogByteSource(mapOf("default" to "hello".toByteArray())),
-            ),
-            scope = this,
-        )
+                downloader =
+                ModelFileDownloader(
+                    appFilesRoot = root,
+                    byteSource = CatalogByteSource(mapOf("default" to "hello".toByteArray())),
+                ),
+                scope = this,
+            )
 
         controller.state.test {
             skipItems(3)
@@ -137,12 +144,13 @@ class ModelCatalogControllerTest {
     fun `redownload replaces an available model`() = runTest {
         val root = Files.createTempDirectory("ararai-catalog").toFile()
         val byteSource = CatalogByteSource(mapOf("default" to "hello".toByteArray()))
-        val controller = ModelCatalogController(
-            catalog = ModelCatalog(defaultModelId = "default", models = listOf(defaultConfig())),
-            appFilesRoot = root,
-            downloader = ModelFileDownloader(appFilesRoot = root, byteSource = byteSource),
-            scope = this,
-        )
+        val controller =
+            ModelCatalogController(
+                catalog = ModelCatalog(defaultModelId = "default", models = listOf(defaultConfig())),
+                appFilesRoot = root,
+                downloader = ModelFileDownloader(appFilesRoot = root, byteSource = byteSource),
+                scope = this,
+            )
 
         controller.state.test {
             skipItems(3)
@@ -162,12 +170,13 @@ class ModelCatalogControllerTest {
     fun `cancel download stops active job and returns model to missing state`() = runTest {
         val root = Files.createTempDirectory("ararai-catalog").toFile()
         val downloader = SuspendedDownloader()
-        val controller = ModelCatalogController(
-            catalog = ModelCatalog(defaultModelId = "default", models = listOf(defaultConfig())),
-            appFilesRoot = root,
-            downloader = downloader,
-            scope = this,
-        )
+        val controller =
+            ModelCatalogController(
+                catalog = ModelCatalog(defaultModelId = "default", models = listOf(defaultConfig())),
+                appFilesRoot = root,
+                downloader = downloader,
+                scope = this,
+            )
 
         runCurrent()
         assertTrue(controller.state.value.selectedStartupState is ModelStartupState.Downloading)
@@ -179,36 +188,32 @@ class ModelCatalogControllerTest {
         assertTrue(controller.state.value.selectedStartupState is ModelStartupState.Missing)
     }
 
+    private fun catalog(): ModelCatalog = ModelCatalog(
+        defaultModelId = "default",
+        models = listOf(defaultConfig(), optionalConfig()),
+    )
 
-    private fun catalog(): ModelCatalog =
-        ModelCatalog(
-            defaultModelId = "default",
-            models = listOf(defaultConfig(), optionalConfig()),
-        )
+    private fun defaultConfig(): ModelConfig = ModelConfig(
+        id = "default",
+        name = "Default Model",
+        url = "https://example.com/default.gguf",
+        fileName = "default.gguf",
+        relativePath = "models/default.gguf",
+        sha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        expectedBytes = 5,
+        inference = InferenceConfig(contextTokens = 128, maxTokens = 32, temperature = 0.7f, topP = 0.9f),
+    )
 
-    private fun defaultConfig(): ModelConfig =
-        ModelConfig(
-            id = "default",
-            name = "Default Model",
-            url = "https://example.com/default.gguf",
-            fileName = "default.gguf",
-            relativePath = "models/default.gguf",
-            sha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-            expectedBytes = 5,
-            inference = InferenceConfig(contextTokens = 128, maxTokens = 32, temperature = 0.7f, topP = 0.9f),
-        )
-
-    private fun optionalConfig(): ModelConfig =
-        ModelConfig(
-            id = "optional",
-            name = "Optional Model",
-            url = "https://example.com/optional.gguf",
-            fileName = "optional.gguf",
-            relativePath = "models/optional.gguf",
-            sha256 = "ec91fdd9256cb75ae611249b50cb7eb16533f0fa91b86239ec1d439a1ea033b8",
-            expectedBytes = 8,
-            inference = InferenceConfig(contextTokens = 128, maxTokens = 32, temperature = 0.7f, topP = 0.9f),
-        )
+    private fun optionalConfig(): ModelConfig = ModelConfig(
+        id = "optional",
+        name = "Optional Model",
+        url = "https://example.com/optional.gguf",
+        fileName = "optional.gguf",
+        relativePath = "models/optional.gguf",
+        sha256 = "ec91fdd9256cb75ae611249b50cb7eb16533f0fa91b86239ec1d439a1ea033b8",
+        expectedBytes = 8,
+        inference = InferenceConfig(contextTokens = 128, maxTokens = 32, temperature = 0.7f, topP = 0.9f),
+    )
 }
 
 private class CatalogByteSource(
@@ -231,19 +236,21 @@ private class SuspendedDownloader : ModelDownloader {
     override suspend fun download(
         config: ModelConfig,
         onProgress: (ModelDownloadProgress) -> Unit,
-    ): ModelResolutionState.Available =
-        suspendCancellableCoroutine { continuation: CancellableContinuation<ModelResolutionState.Available> ->
-            continuation.invokeOnCancellation {
-                wasCancelled = true
-            }
+    ): ModelResolutionState.Available = suspendCancellableCoroutine { continuation: CancellableContinuation<ModelResolutionState.Available> ->
+        continuation.invokeOnCancellation {
+            wasCancelled = true
         }
+    }
 }
 
 private class RecordingDownloadGateway : ModelDownloadCommandGateway {
     val started = mutableListOf<Pair<String, Boolean>>()
     val cancelled = mutableListOf<String>()
 
-    override fun start(modelId: String, replaceExisting: Boolean) {
+    override fun start(
+        modelId: String,
+        replaceExisting: Boolean,
+    ) {
         started += modelId to replaceExisting
     }
 

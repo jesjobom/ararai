@@ -9,27 +9,28 @@ import org.junit.Test
 class MarkdownTextTest {
     @Test
     fun `parses supported block markdown`() {
-        val blocks = parseMarkdownBlocks(
-            """
-            # Heading
+        val blocks =
+            parseMarkdownBlocks(
+                """
+                # Heading
 
-            Paragraph
+                Paragraph
 
-            - first
-            - second
+                - first
+                - second
 
-            1. one
-            2. two
+                1. one
+                2. two
 
-            > quoted
+                > quoted
 
-            ```kotlin
-            val answer = 42
-            ```
+                ```kotlin
+                val answer = 42
+                ```
 
-            ---
-            """.trimIndent(),
-        )
+                ---
+                """.trimIndent(),
+            )
 
         assertEquals(MarkdownBlock.Heading(1, "Heading"), blocks[0])
         assertEquals(MarkdownBlock.Paragraph("Paragraph"), blocks[1])
@@ -42,9 +43,10 @@ class MarkdownTextTest {
 
     @Test
     fun `styles supported inline markdown and preserves link target`() {
-        val result = parseInlineMarkdown(
-            "Use **bold**, *italic*, `code`, and [docs](https://example.com).",
-        )
+        val result =
+            parseInlineMarkdown(
+                "Use **bold**, *italic*, `code`, and [docs](https://example.com).",
+            )
 
         assertEquals("Use bold, italic, code, and docs.", result.text)
         assertTrue(result.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
@@ -62,17 +64,18 @@ class MarkdownTextTest {
 
     @Test
     fun `parses display math delimiters as blocks`() {
-        val blocks = parseMarkdownBlocks(
-            """
-            Before
+        val blocks =
+            parseMarkdownBlocks(
+                """
+                Before
 
-            ${'$'}${'$'}
-            C = D \times \frac{360^\circ}{\Delta \theta}
-            ${'$'}${'$'}
+                ${'$'}${'$'}
+                C = D \times \frac{360^\circ}{\Delta \theta}
+                ${'$'}${'$'}
 
-            \[E = mc^2\]
-            """.trimIndent(),
-        )
+                \[E = mc^2\]
+                """.trimIndent(),
+            )
 
         assertEquals(MarkdownBlock.Paragraph("Before"), blocks[0])
         assertEquals(

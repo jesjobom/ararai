@@ -12,24 +12,27 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class ConfiguredLocalLlmEngineTest {
-    private val config = InferenceConfig(
-        contextTokens = 128,
-        temperature = 0.7f,
-        topP = 0.9f,
-    )
+    private val config =
+        InferenceConfig(
+            contextTokens = 128,
+            temperature = 0.7f,
+            topP = 0.9f,
+        )
 
     @Test
     fun `delegates llama cpp models to llama cpp engine`() = runTest {
-        val llamaCppEngine = RecordingEngine(
-            events = listOf(GenerationEvent.Token("ok"), GenerationEvent.Completed),
-        )
+        val llamaCppEngine =
+            RecordingEngine(
+                events = listOf(GenerationEvent.Token("ok"), GenerationEvent.Completed),
+            )
         val engine = ConfiguredLocalLlmEngine(llamaCppEngine = llamaCppEngine)
-        val model = LocalModel(
-            id = "llama",
-            name = "Llama",
-            filePath = "/tmp/llama.gguf",
-            runtime = ModelRuntime.LlamaCpp,
-        )
+        val model =
+            LocalModel(
+                id = "llama",
+                name = "Llama",
+                filePath = "/tmp/llama.gguf",
+                runtime = ModelRuntime.LlamaCpp,
+            )
 
         engine.load(model, config)
 
@@ -44,19 +47,22 @@ class ConfiguredLocalLlmEngineTest {
     @Test
     fun `delegates litert lm models to litert lm engine`() = runTest {
         val llamaCppEngine = RecordingEngine()
-        val liteRtLmEngine = RecordingEngine(
-            events = listOf(GenerationEvent.Token("gemma"), GenerationEvent.Completed),
-        )
-        val engine = ConfiguredLocalLlmEngine(
-            llamaCppEngine = llamaCppEngine,
-            liteRtLmEngine = liteRtLmEngine,
-        )
-        val model = LocalModel(
-            id = "gemma-litert",
-            name = "Gemma LiteRT",
-            filePath = "/tmp/gemma.task",
-            runtime = ModelRuntime.LiteRtLm,
-        )
+        val liteRtLmEngine =
+            RecordingEngine(
+                events = listOf(GenerationEvent.Token("gemma"), GenerationEvent.Completed),
+            )
+        val engine =
+            ConfiguredLocalLlmEngine(
+                llamaCppEngine = llamaCppEngine,
+                liteRtLmEngine = liteRtLmEngine,
+            )
+        val model =
+            LocalModel(
+                id = "gemma-litert",
+                name = "Gemma LiteRT",
+                filePath = "/tmp/gemma.task",
+                runtime = ModelRuntime.LiteRtLm,
+            )
 
         engine.load(model, config)
 
@@ -92,12 +98,14 @@ class ConfiguredLocalLlmEngineTest {
         var unloadCalls: Int = 0
             private set
 
-        override suspend fun load(model: LocalModel, config: InferenceConfig) {
+        override suspend fun load(
+            model: LocalModel,
+            config: InferenceConfig,
+        ) {
             loadedModel = model
         }
 
-        override fun generate(request: PromptRequest): Flow<GenerationEvent> =
-            flowOf(*events.toTypedArray())
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(*events.toTypedArray())
 
         override suspend fun unload() {
             unloadCalls += 1

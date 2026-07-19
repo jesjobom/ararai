@@ -14,16 +14,18 @@ import org.junit.Test
 import java.util.ArrayDeque
 
 class LlamaCppLocalLlmEngineTest {
-    private val model = LocalModel(
-        id = "test",
-        name = "Test",
-        filePath = "/tmp/test.gguf",
-    )
-    private val config = InferenceConfig(
-        contextTokens = 128,
-        temperature = 0.7f,
-        topP = 0.9f,
-    )
+    private val model =
+        LocalModel(
+            id = "test",
+            name = "Test",
+            filePath = "/tmp/test.gguf",
+        )
+    private val config =
+        InferenceConfig(
+            contextTokens = 128,
+            temperature = 0.7f,
+            topP = 0.9f,
+        )
 
     @Test
     fun `loads model through native bridge with inference config`() = runTest {
@@ -128,11 +130,77 @@ class LlamaCppLocalLlmEngineTest {
     }
 
     @Test
+    fun `reuses same model when native load configuration is unchanged`() = runTest {
+        val bridge = RecordingBridge()
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+
+        engine.load(model, config)
+        engine.load(model, config)
+
+        assertEquals(1, bridge.loadCount)
+        assertEquals(emptyList<Long>(), bridge.unloadedHandles)
+    }
+
+    @Test
+    fun `reloads same model when any native load parameter changes`() = runTest {
+        val changedConfigs =
+            listOf(
+                config.copy(contextTokens = config.contextTokens + 1),
+                config.copy(temperature = config.temperature + 0.1f),
+                config.copy(topP = config.topP - 0.1f),
+                config.copy(topK = config.topK + 1),
+                config.copy(minP = config.minP + 0.01f),
+                config.copy(repeatPenalty = config.repeatPenalty + 0.1f),
+            )
+
+        changedConfigs.forEach { changedConfig ->
+            val bridge = RecordingBridge()
+            val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+
+            engine.load(model, config)
+            engine.load(model, changedConfig)
+
+            assertEquals("Expected reload for $changedConfig", 2, bridge.loadCount)
+            assertEquals("Expected old handle unload for $changedConfig", listOf(42L), bridge.unloadedHandles)
+        }
+    }
+
+    @Test
+    fun `reloads chat model with stable benchmark configuration`() = runTest {
+        val bridge = RecordingBridge()
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+        val chatConfig = config.copy(contextTokens = 4096, temperature = 0.7f, topP = 0.95f)
+        val benchmarkConfig = chatConfig.copy(contextTokens = 2048, maxTokens = 128, temperature = 0.2f, topP = 0.9f)
+
+        engine.load(model, chatConfig)
+        engine.load(model, benchmarkConfig)
+
+        assertEquals(2, bridge.loadCount)
+        assertEquals(2048, bridge.loadedContextTokens)
+        assertEquals(0.2f, bridge.loadedTemperature)
+        assertEquals(0.9f, bridge.loadedTopP)
+    }
+
+    @Test
+    fun `reloads same model when acceleration policy changes`() = runTest {
+        val bridge = RecordingBridge()
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+
+        engine.load(model, config)
+        engine.load(model.copy(acceleration = ModelAccelerationPolicy.CpuOnly), config)
+
+        assertEquals(2, bridge.loadCount)
+        assertEquals(listOf(999, 0), bridge.loadedGpuLayerCounts)
+        assertEquals(listOf(42L), bridge.unloadedHandles)
+    }
+
+    @Test
     fun `formats prompt with chat template before native generation`() = runTest {
-        val bridge = RecordingBridge(
-            tokens = listOf("ok"),
-            formattedPrompt = "<chat><user>oi</user><assistant>",
-        )
+        val bridge =
+            RecordingBridge(
+                tokens = listOf("ok"),
+                formattedPrompt = "<chat><user>oi</user><assistant>",
+            )
         val engine = LlamaCppLocalLlmEngine(bridge = bridge)
         engine.load(model, config)
 
@@ -179,34 +247,37 @@ class LlamaCppLocalLlmEngineTest {
         val engine = LlamaCppLocalLlmEngine(bridge = bridge)
         engine.load(model, config)
 
-        engine.generate(
-            PromptRequest(
-                MessageContent.TextPrompt(
-                    text = "describe",
-                    imageAttachments = listOf(ImageAttachment("file:///tmp/image.png", "image/png")),
+        engine
+            .generate(
+                PromptRequest(
+                    MessageContent.TextPrompt(
+                        text = "describe",
+                        imageAttachments = listOf(ImageAttachment("file:///tmp/image.png", "image/png")),
+                    ),
                 ),
-            ),
-        ).test {
-            assertEquals(
-                GenerationEvent.Failed("Selected llama.cpp model does not support image or audio input"),
-                awaitItem(),
-            )
-            awaitComplete()
-        }
+            ).test {
+                assertEquals(
+                    GenerationEvent.Failed("Selected llama.cpp model does not support image or audio input"),
+                    awaitItem(),
+                )
+                awaitComplete()
+            }
 
         assertEquals(emptyList<Long>(), bridge.generatedHandles)
     }
 
     @Test
     fun `retries cpu only when gpu generation returns invalid logits before tokens`() = runTest {
-        val bridge = RecordingBridge(
-            generationSteps = ArrayDeque(
-                listOf(
-                    GenerationStep(error = "Native sampler received invalid logits"),
-                    GenerationStep(tokens = listOf("ok")),
+        val bridge =
+            RecordingBridge(
+                generationSteps =
+                ArrayDeque(
+                    listOf(
+                        GenerationStep(error = "Native sampler received invalid logits"),
+                        GenerationStep(tokens = listOf("ok")),
+                    ),
                 ),
-            ),
-        )
+            )
         val engine = LlamaCppLocalLlmEngine(bridge = bridge)
         engine.load(model, config)
 
@@ -223,14 +294,16 @@ class LlamaCppLocalLlmEngineTest {
 
     @Test
     fun `reports cpu fallback failure when retry also returns invalid logits`() = runTest {
-        val bridge = RecordingBridge(
-            generationSteps = ArrayDeque(
-                listOf(
-                    GenerationStep(error = "Native sampler received invalid logits"),
-                    GenerationStep(error = "Native sampler received invalid logits"),
+        val bridge =
+            RecordingBridge(
+                generationSteps =
+                ArrayDeque(
+                    listOf(
+                        GenerationStep(error = "Native sampler received invalid logits"),
+                        GenerationStep(error = "Native sampler received invalid logits"),
+                    ),
                 ),
-            ),
-        )
+            )
         val engine = LlamaCppLocalLlmEngine(bridge = bridge)
         engine.load(model, config)
 
@@ -247,10 +320,11 @@ class LlamaCppLocalLlmEngineTest {
 
     @Test
     fun `does not retry cpu only after native generation emits tokens`() = runTest {
-        val bridge = RecordingBridge(
-            tokens = listOf("partial"),
-            generationError = "Native sampler received invalid logits",
-        )
+        val bridge =
+            RecordingBridge(
+                tokens = listOf("partial"),
+                generationError = "Native sampler received invalid logits",
+            )
         val engine = LlamaCppLocalLlmEngine(bridge = bridge)
         engine.load(model, config)
 
@@ -343,7 +417,10 @@ class LlamaCppLocalLlmEngineTest {
             return 41L + loadCount
         }
 
-        override fun formatChatPrompt(handle: Long, messages: List<PromptChatMessage>): String? {
+        override fun formatChatPrompt(
+            handle: Long,
+            messages: List<PromptChatMessage>,
+        ): String? {
             formatRequestedMessages = messages
             return formattedPrompt
         }
@@ -357,11 +434,12 @@ class LlamaCppLocalLlmEngineTest {
             generatedHandles += handle
             generatedPrompt = prompt
             generatedMaxTokens = maxTokens
-            val step = if (generationSteps.isEmpty()) {
-                GenerationStep(tokens = tokens, error = generationError)
-            } else {
-                generationSteps.removeFirst()
-            }
+            val step =
+                if (generationSteps.isEmpty()) {
+                    GenerationStep(tokens = tokens, error = generationError)
+                } else {
+                    generationSteps.removeFirst()
+                }
             for (token in step.tokens) {
                 if (!callback.onToken(token)) {
                     cancel(handle)
@@ -384,5 +462,4 @@ class LlamaCppLocalLlmEngineTest {
         val tokens: List<String> = emptyList(),
         val error: String? = null,
     )
-
 }

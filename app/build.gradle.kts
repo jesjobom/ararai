@@ -5,17 +5,21 @@ import java.time.format.DateTimeFormatter
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("io.gitlab.arturbosch.detekt")
 }
 
 fun buildTimestampVersion(): String =
     providers.environmentVariable("ARARAI_VERSION_TIMESTAMP").orNull
-        ?: ZonedDateTime.now(ZoneId.of("America/Toronto"))
+        ?: ZonedDateTime
+            .now(ZoneId.of("America/Toronto"))
             .format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"))
 
-val configuredDebugKeystore = providers.environmentVariable("ANDROID_DEBUG_KEYSTORE")
-    .orNull
-    ?.takeIf(String::isNotBlank)
-    ?.let(::file)
+val configuredDebugKeystore =
+    providers
+        .environmentVariable("ANDROID_DEBUG_KEYSTORE")
+        .orNull
+        ?.takeIf(String::isNotBlank)
+        ?.let(::file)
 
 android {
     namespace = "com.jesjobom.ararai"
@@ -33,15 +37,22 @@ android {
         ndk {
             abiFilters += "arm64-v8a"
         }
+
+        externalNativeBuild {
+            cmake {
+                arguments += "-DFETCHCONTENT_BASE_DIR=${rootProject.layout.buildDirectory.dir("fetch-content").get().asFile.absolutePath}"
+            }
+        }
     }
 
     buildTypes {
         debug {
             isDebuggable = true
             configuredDebugKeystore?.let { persistentKeystore ->
-                signingConfig = signingConfigs.getByName("debug").apply {
-                    storeFile = persistentKeystore
-                }
+                signingConfig =
+                    signingConfigs.getByName("debug").apply {
+                        storeFile = persistentKeystore
+                    }
             }
         }
         release {
@@ -79,6 +90,14 @@ android {
     }
 }
 
+detekt {
+    toolVersion = "1.23.8"
+    config.setFrom(rootProject.files("config/detekt/detekt.yml"))
+    baseline = rootProject.file("config/detekt/baseline.xml")
+    buildUponDefaultConfig = true
+    parallel = true
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
 
@@ -99,6 +118,7 @@ dependencies {
     implementation("ru.noties:jlatexmath-android:0.2.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.6.1")
@@ -110,4 +130,5 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")
     androidTestImplementation("androidx.test.ext:junit-ktx:1.2.1")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }

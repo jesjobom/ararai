@@ -5,8 +5,8 @@ import android.database.sqlite.SQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,17 +45,172 @@ class ChatSessionStoreTest {
     }
 
     @Test
+    fun `version two migration preserves structured messages and backfills media references`() {
+        createVersionTwoDatabase()
+
+        val store = store()
+        val messages = store.getMessages("session-1")
+
+        assertEquals(3, messages.size)
+        assertEquals("Reasoned answer", messages[0].text)
+        assertEquals("Private reasoning", (messages[0].content as MessageContent.TextPrompt).reasoningText)
+        assertEquals("file:///chat/image.jpg", messages[1].content.mediaUris().single())
+        assertEquals("file:///chat/audio.m4a", messages[2].content.mediaUris().single())
+        assertEquals(
+            setOf("file:///chat/image.jpg", "file:///chat/audio.m4a"),
+            store.referencedMediaUris(),
+        )
+    }
+
+    @Test
+    fun `in memory and sqlite stores return the same distinct media references`() {
+        val sqlite = store()
+        val memory = InMemoryChatSessionStore()
+
+        listOf<ChatSessionStore>(sqlite, memory).forEach { candidate ->
+            val first = candidate.createSession("First")
+            val second = candidate.createSession("Second")
+            candidate.appendMessage(
+                first.id,
+                ChatRole.User,
+                MessageContent.TextPrompt(
+                    text = "images",
+                    imageAttachments =
+                    listOf(
+                        ImageAttachment("file:///shared.jpg", "image/jpeg"),
+                        ImageAttachment("file:///first.jpg", "image/jpeg"),
+                    ),
+                ),
+            )
+            candidate.appendMessage(
+                second.id,
+                ChatRole.User,
+                MessageContent.AudioPromptContent(AudioPrompt("file:///shared.jpg", "audio/mp4")),
+            )
+        }
+
+        val expected = setOf("file:///shared.jpg", "file:///first.jpg")
+        assertEquals(expected, memory.referencedMediaUris())
+        assertEquals(expected, sqlite.referencedMediaUris())
+    }
+
+    @Test
+    fun `sqlite reference lookup does not decode complete message payloads`() {
+        val store = store()
+        repeat(12) { index ->
+            val session = store.createSession("Session $index")
+            store.appendMessage(
+                session.id,
+                ChatRole.User,
+                MessageContent.TextPrompt(
+                    text = "message $index",
+                    imageAttachments = listOf(ImageAttachment("file:///image-$index.jpg", "image/jpeg")),
+                ),
+            )
+        }
+        store.writableDatabase.execSQL("UPDATE chat_messages SET content_payload = 'invalid-payload'")
+
+        val references = store.referencedMediaUris()
+
+        assertEquals(12, references.size)
+        assertTrue(references.contains("file:///image-0.jpg"))
+        assertTrue(references.contains("file:///image-11.jpg"))
+    }
+
+    @Test
+    fun `message updates replace media references atomically`() {
+        val store = store()
+        val session = store.createSession("Media")
+        val message =
+            store.appendMessage(
+                session.id,
+                ChatRole.User,
+                MessageContent.TextPrompt(
+                    "before",
+                    imageAttachments = listOf(ImageAttachment("file:///before.jpg", "image/jpeg")),
+                ),
+            )
+
+        store.updateMessage(
+            message.id,
+            MessageContent.AudioPromptContent(AudioPrompt("file:///after.m4a", "audio/mp4")),
+        )
+
+        assertEquals(setOf("file:///after.m4a"), store.referencedMediaUris())
+    }
+
+    @Test
+    fun `failed reference replacement rolls back message and its old references`() {
+        val store = store()
+        val session = store.createSession("Media")
+        val message =
+            store.appendMessage(
+                session.id,
+                ChatRole.User,
+                MessageContent.TextPrompt(
+                    "before",
+                    imageAttachments = listOf(ImageAttachment("file:///before.jpg", "image/jpeg")),
+                ),
+            )
+        store.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER fail_media_reference_insert
+            BEFORE INSERT ON chat_media_references
+            WHEN NEW.uri = 'file:///blocked.jpg'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected reference failure');
+            END
+            """.trimIndent(),
+        )
+
+        assertThrows(android.database.sqlite.SQLiteException::class.java) {
+            store.updateMessage(
+                message.id,
+                MessageContent.TextPrompt(
+                    "after",
+                    imageAttachments = listOf(ImageAttachment("file:///blocked.jpg", "image/jpeg")),
+                ),
+            )
+        }
+
+        assertEquals("before", store.getMessages(session.id).single().text)
+        assertEquals(setOf("file:///before.jpg"), store.referencedMediaUris())
+    }
+
+    @Test
+    fun `shared media remains referenced until every owning session is deleted`() {
+        val store = store()
+        val first = store.createSession("First")
+        val second = store.createSession("Second")
+        val shared =
+            MessageContent.TextPrompt(
+                "shared",
+                imageAttachments = listOf(ImageAttachment("file:///shared.jpg", "image/jpeg")),
+            )
+        store.appendMessage(first.id, ChatRole.User, shared)
+        store.appendMessage(second.id, ChatRole.User, shared)
+
+        store.deleteSession(first.id)
+        assertEquals(setOf("file:///shared.jpg"), store.referencedMediaUris())
+
+        store.deleteSession(second.id)
+        assertTrue(store.referencedMediaUris().isEmpty())
+    }
+
+    @Test
     fun `persists assistant reasoning separately from final text`() {
         val store = store()
         val session = store.ensureSession()
-        val message = store.appendMessage(
-            sessionId = session.id,
-            role = ChatRole.Assistant,
-            content = MessageContent.TextPrompt(
-                text = "Final answer",
-                reasoningText = "Private scratchpad",
-            ),
-        )
+        val message =
+            store.appendMessage(
+                sessionId = session.id,
+                role = ChatRole.Assistant,
+                content =
+                MessageContent.TextPrompt(
+                    text = "Final answer",
+                    reasoningText = "Private scratchpad",
+                ),
+            )
 
         val restored = store().getMessages(session.id).single { it.id == message.id }
         val content = restored.content as MessageContent.TextPrompt
@@ -108,6 +263,7 @@ class ChatSessionStoreTest {
 
         assertTrue(store.getMessages("missing-session").isEmpty())
         assertEquals(0, messageCount(store))
+        assertTrue(store.referencedMediaUris().isEmpty())
     }
 
     @Test
@@ -142,13 +298,13 @@ class ChatSessionStoreTest {
 
         assertTrue(store.getMessages(session.id).isEmpty())
         assertEquals(originalTimestamp, store.listSessions().single().updatedAtMillis)
+        assertTrue(store.referencedMediaUris().isEmpty())
     }
 
-    private fun messageCount(store: SqliteChatSessionStore): Int =
-        store.readableDatabase.rawQuery("SELECT COUNT(*) FROM chat_messages", emptyArray()).use { cursor ->
-            cursor.moveToFirst()
-            cursor.getInt(0)
-        }
+    private fun messageCount(store: SqliteChatSessionStore): Int = store.readableDatabase.rawQuery("SELECT COUNT(*) FROM chat_messages", emptyArray()).use { cursor ->
+        cursor.moveToFirst()
+        cursor.getInt(0)
+    }
 
     private fun createLegacyDatabase() {
         val databaseFile = context.getDatabasePath(DATABASE_NAME)
@@ -193,8 +349,97 @@ class ChatSessionStoreTest {
         }
     }
 
-    private fun store(): SqliteChatSessionStore =
-        SqliteChatSessionStore(context).also(openStores::add)
+    private fun createVersionTwoDatabase() {
+        val databaseFile = context.getDatabasePath(DATABASE_NAME)
+        databaseFile.parentFile?.mkdirs()
+        SQLiteDatabase.openOrCreateDatabase(databaseFile, null).use { db ->
+            db.execSQL(
+                """
+                CREATE TABLE chat_sessions(
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    created_at_millis INTEGER NOT NULL,
+                    updated_at_millis INTEGER NOT NULL
+                )
+                """.trimIndent(),
+            )
+            db.execSQL(
+                """
+                CREATE TABLE chat_messages(
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    content_kind TEXT NOT NULL DEFAULT 'text',
+                    content_payload TEXT,
+                    created_at_millis INTEGER NOT NULL,
+                    FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+                )
+                """.trimIndent(),
+            )
+            db.execSQL("CREATE INDEX chat_messages_session_created ON chat_messages(session_id, created_at_millis)")
+            db.execSQL("INSERT INTO chat_sessions VALUES('session-1', 'Migrated', 100, 200)")
+            insertVersionTwoMessage(
+                db = db,
+                id = "reasoning",
+                role = "Assistant",
+                text = "Reasoned answer",
+                kind = "text",
+                payload = "${encodeField("Reasoned answer")}\nreasoning\t${encodeField("Private reasoning")}\n",
+                createdAt = 110,
+            )
+            insertVersionTwoMessage(
+                db = db,
+                id = "image",
+                role = "User",
+                text = "Image",
+                kind = "text",
+                payload = "${encodeField(
+                    "Image",
+                )}\nimage\t${encodeField(
+                    "file:///chat/image.jpg",
+                )}\t${encodeField("image/jpeg")}\t${encodeField("image.jpg")}\t${encodeField("42")}\n",
+                createdAt = 120,
+            )
+            insertVersionTwoMessage(
+                db = db,
+                id = "audio",
+                role = "User",
+                text = "Audio",
+                kind = "audio",
+                payload =
+                listOf("file:///chat/audio.m4a", "audio/mp4", "audio.m4a", "84", "1000")
+                    .joinToString("\t", transform = ::encodeField),
+                createdAt = 130,
+            )
+            db.version = 2
+        }
+    }
+
+    private fun insertVersionTwoMessage(
+        db: SQLiteDatabase,
+        id: String,
+        role: String,
+        text: String,
+        kind: String,
+        payload: String,
+        createdAt: Long,
+    ) {
+        db.execSQL(
+            """
+            INSERT INTO chat_messages(
+                id, session_id, role, text, content_kind, content_payload, created_at_millis
+            ) VALUES(?, 'session-1', ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            arrayOf<Any>(id, role, text, kind, payload, createdAt),
+        )
+    }
+
+    private fun encodeField(value: String): String = java.util.Base64
+        .getEncoder()
+        .encodeToString(value.toByteArray(Charsets.UTF_8))
+
+    private fun store(): SqliteChatSessionStore = SqliteChatSessionStore(context).also(openStores::add)
 
     private companion object {
         const val DATABASE_NAME = "ararai_chat.db"

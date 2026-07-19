@@ -11,16 +11,21 @@ class ConfiguredLocalLlmEngine(
     liteRtLmEngine: LocalLlmEngine? = null,
     liteRtLmCacheDir: String? = null,
 ) : LocalLlmEngine {
-    private val liteRtLmEngine: LocalLlmEngine = liteRtLmEngine ?: LiteRtLmLocalLlmEngine(
-        bridge = AndroidLiteRtLmBridge(cacheDir = liteRtLmCacheDir),
-    )
+    private val liteRtLmEngine: LocalLlmEngine =
+        liteRtLmEngine ?: LiteRtLmLocalLlmEngine(
+            bridge = AndroidLiteRtLmBridge(cacheDir = liteRtLmCacheDir),
+        )
     private var activeEngine: LocalLlmEngine? = null
 
-    override suspend fun load(model: LocalModel, config: InferenceConfig) {
-        val targetEngine = when (model.runtime) {
-            ModelRuntime.LlamaCpp -> llamaCppEngine
-            ModelRuntime.LiteRtLm -> liteRtLmEngine
-        }
+    override suspend fun load(
+        model: LocalModel,
+        config: InferenceConfig,
+    ) {
+        val targetEngine =
+            when (model.runtime) {
+                ModelRuntime.LlamaCpp -> llamaCppEngine
+                ModelRuntime.LiteRtLm -> liteRtLmEngine
+            }
         if (activeEngine !== targetEngine) {
             activeEngine?.unload()
             activeEngine = targetEngine
@@ -28,9 +33,8 @@ class ConfiguredLocalLlmEngine(
         targetEngine.load(model, config)
     }
 
-    override fun generate(request: PromptRequest): Flow<GenerationEvent> =
-        activeEngine?.generate(request)
-            ?: flowOf(GenerationEvent.Failed("Model is not loaded"))
+    override fun generate(request: PromptRequest): Flow<GenerationEvent> = activeEngine?.generate(request)
+        ?: flowOf(GenerationEvent.Failed("Model is not loaded"))
 
     override suspend fun unload() {
         activeEngine?.unload()

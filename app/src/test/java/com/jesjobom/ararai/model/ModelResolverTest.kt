@@ -1,22 +1,23 @@
 package com.jesjobom.ararai.model
 
-import java.io.File
-import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
+import java.nio.file.Files
 
 class ModelResolverTest {
-    private val config = ModelConfig(
-        id = "test-model",
-        name = "Test Model",
-        url = "https://example.com/test.gguf",
-        fileName = "test.gguf",
-        relativePath = "models/test.gguf",
-        sha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-        expectedBytes = 5,
-        inference = InferenceConfig(contextTokens = 128, temperature = 0.7f, topP = 0.9f),
-    )
+    private val config =
+        ModelConfig(
+            id = "test-model",
+            name = "Test Model",
+            url = "https://example.com/test.gguf",
+            fileName = "test.gguf",
+            relativePath = "models/test.gguf",
+            sha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            expectedBytes = 5,
+            inference = InferenceConfig(contextTokens = 128, temperature = 0.7f, topP = 0.9f),
+        )
 
     @Test
     fun `reports available when configured file exists and passes integrity`() {

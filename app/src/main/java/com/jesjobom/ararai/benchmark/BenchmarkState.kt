@@ -8,11 +8,12 @@ data class BenchmarkUiState(
     val maxTokens: Int,
     val canRun: Boolean,
     val isRunning: Boolean = false,
-    val status: String = if (canRun) {
-        "Ready"
-    } else {
-        "Selected model must be available locally"
-    },
+    val status: String =
+        if (canRun) {
+            "Ready"
+        } else {
+            "Selected model must be available locally"
+        },
     val result: BenchmarkResult? = null,
     val error: String? = null,
 )

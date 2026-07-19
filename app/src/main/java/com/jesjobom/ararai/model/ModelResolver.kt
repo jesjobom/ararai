@@ -9,7 +9,9 @@ sealed interface ModelResolutionState {
         val model: LocalModel,
     ) : ModelResolutionState
 
-    data class Missing(val config: ModelConfig) : ModelResolutionState
+    data class Missing(
+        val config: ModelConfig,
+    ) : ModelResolutionState
 
     data class IntegrityFailed(
         val config: ModelConfig,
@@ -38,7 +40,8 @@ class ModelResolver(
         return ModelResolutionState.Available(
             config = config,
             file = file,
-            model = LocalModel(
+            model =
+            LocalModel(
                 id = config.id,
                 name = config.name,
                 runtime = config.runtime,

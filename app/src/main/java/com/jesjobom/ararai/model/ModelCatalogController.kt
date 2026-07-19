@@ -1,6 +1,5 @@
 package com.jesjobom.ararai.model
 
-import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -11,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 
 data class ManagedModelItem(
     val config: ModelConfig,
@@ -32,8 +32,23 @@ data class ModelCatalogState(
 }
 
 interface ModelDownloadCommandGateway {
-    fun start(modelId: String, replaceExisting: Boolean = false)
+    fun start(
+        modelId: String,
+        replaceExisting: Boolean = false,
+    )
+
     fun cancel(modelId: String)
+}
+
+interface ModelDownloadServiceController {
+    val state: StateFlow<ModelCatalogState>
+
+    fun executeBackgroundDownload(
+        modelId: String,
+        replaceExisting: Boolean = false,
+    )
+
+    fun executeBackgroundCancel(modelId: String)
 }
 
 class ModelCatalogController(
@@ -44,16 +59,17 @@ class ModelCatalogController(
     private val selectionStore: ModelSelectionStore = InMemoryModelSelectionStore(),
     private val downloadGateway: ModelDownloadCommandGateway? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-) {
+) : ModelDownloadServiceController {
     private val downloadJobs = mutableMapOf<String, Job>()
     private val initialModels = catalog.models.map { ManagedModelItem(it, resolve(it)) }
-    private val _state = MutableStateFlow(
-        ModelCatalogState(
-            models = initialModels,
-            selectedModelId = restoredSelectedModelId(initialModels),
-        ),
-    )
-    val state: StateFlow<ModelCatalogState> = _state.asStateFlow()
+    private val _state =
+        MutableStateFlow(
+            ModelCatalogState(
+                models = initialModels,
+                selectedModelId = restoredSelectedModelId(initialModels),
+            ),
+        )
+    override val state: StateFlow<ModelCatalogState> = _state.asStateFlow()
 
     init {
         ensureBootstrapModelDownload()
@@ -109,65 +125,75 @@ class ModelCatalogController(
     }
 
     private fun restoredSelectedModelId(models: List<ManagedModelItem>): String {
-        val stored = selectionStore.selectedModelId()
-            ?.takeIf { modelId -> models.any { it.config.id == modelId } }
+        val stored =
+            selectionStore
+                .selectedModelId()
+                ?.takeIf { modelId -> models.any { it.config.id == modelId } }
         return stored
             ?: models.firstOrNull { it.state is ModelStartupState.Available }?.config?.id
             ?: catalog.defaultModelId
     }
 
-    private fun resolve(config: ModelConfig): ModelStartupState =
-        when (val resolution = resolver.resolve(config)) {
-            is ModelResolutionState.Available -> {
-                ModelStartupState.Available(resolution.model, config.inference)
-            }
-            is ModelResolutionState.Missing -> ModelStartupState.Missing
-            is ModelResolutionState.IntegrityFailed -> ModelStartupState.Invalid(resolution.reason)
+    private fun resolve(config: ModelConfig): ModelStartupState = when (val resolution = resolver.resolve(config)) {
+        is ModelResolutionState.Available -> {
+            ModelStartupState.Available(resolution.model, config.inference)
         }
+        is ModelResolutionState.Missing -> ModelStartupState.Missing
+        is ModelResolutionState.IntegrityFailed -> ModelStartupState.Invalid(resolution.reason)
+    }
 
     private fun startDownload(config: ModelConfig) {
-        val job = scope.launch {
-            updateModelState(config.id, ModelStartupState.Downloading())
-            try {
-                val available = downloader.download(config) { progress ->
+        val job =
+            scope.launch {
+                updateModelState(config.id, ModelStartupState.Downloading())
+                try {
+                    val available =
+                        downloader.download(config) { progress ->
+                            updateModelState(
+                                config.id,
+                                ModelStartupState.Downloading(
+                                    bytesDownloaded = progress.bytesDownloaded,
+                                    totalBytes = progress.totalBytes,
+                                ),
+                            )
+                        }
+                    updateModelState(config.id, ModelStartupState.Available(available.model, config.inference))
+                } catch (_: CancellationException) {
+                    updateModelState(config.id, resolve(config))
+                } catch (error: ModelDownloadException) {
                     updateModelState(
                         config.id,
-                        ModelStartupState.Downloading(
-                            bytesDownloaded = progress.bytesDownloaded,
-                            totalBytes = progress.totalBytes,
-                        ),
+                        ModelStartupState.Failed(error.message ?: "Configured model download failed"),
                     )
+                } finally {
+                    downloadJobs.remove(config.id)
                 }
-                updateModelState(config.id, ModelStartupState.Available(available.model, config.inference))
-            } catch (_: CancellationException) {
-                updateModelState(config.id, resolve(config))
-            } catch (error: ModelDownloadException) {
-                updateModelState(
-                    config.id,
-                    ModelStartupState.Failed(error.message ?: "Configured model download failed"),
-                )
-            } finally {
-                downloadJobs.remove(config.id)
             }
-        }
         downloadJobs[config.id] = job
     }
 
-    fun executeBackgroundDownload(modelId: String, replaceExisting: Boolean = false) {
+    override fun executeBackgroundDownload(
+        modelId: String,
+        replaceExisting: Boolean,
+    ) {
         val item = state.value.item(modelId)
         if (item.state is ModelStartupState.Downloading) return
         if (replaceExisting) deleteModelFiles(item.config)
         startDownload(item.config)
     }
 
-    fun executeBackgroundCancel(modelId: String) {
+    override fun executeBackgroundCancel(modelId: String) {
         downloadJobs.remove(modelId)?.cancel()
     }
 
-    private fun updateModelState(modelId: String, modelState: ModelStartupState) {
+    private fun updateModelState(
+        modelId: String,
+        modelState: ModelStartupState,
+    ) {
         _state.update { current ->
             current.copy(
-                models = current.models.map { item ->
+                models =
+                current.models.map { item ->
                     if (item.config.id == modelId) item.copy(state = modelState) else item
                 },
             )
@@ -181,7 +207,6 @@ class ModelCatalogController(
         if (tempFile.exists()) tempFile.delete()
     }
 
-    private fun ModelCatalogState.item(modelId: String): ManagedModelItem =
-        models.firstOrNull { it.config.id == modelId }
-            ?: throw IllegalArgumentException("Unknown model: $modelId")
+    private fun ModelCatalogState.item(modelId: String): ManagedModelItem = models.firstOrNull { it.config.id == modelId }
+        ?: throw IllegalArgumentException("Unknown model: $modelId")
 }

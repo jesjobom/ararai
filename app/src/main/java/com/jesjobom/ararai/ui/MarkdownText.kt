@@ -1,5 +1,6 @@
 package com.jesjobom.ararai.ui
 
+import android.widget.ImageView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,27 +12,26 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import android.widget.ImageView
 import ru.noties.jlatexmath.JLatexMathDrawable
 
 internal sealed interface MarkdownBlock {
@@ -135,8 +135,9 @@ internal fun parseMarkdownBlocks(source: String): List<MarkdownBlock> {
 internal fun MarkdownText(
     text: String,
     modifier: Modifier = Modifier,
+    parseBlocks: (String) -> List<MarkdownBlock> = ::parseMarkdownBlocks,
 ) {
-    val blocks = parseMarkdownBlocks(text)
+    val blocks = remember(text, parseBlocks) { parseBlocks(text) }
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -440,9 +441,8 @@ private val HORIZONTAL_RULE = Regex("^(?:-{3,}|\\*{3,}|_{3,})$")
 private val UNORDERED_LIST = Regex("^[-+*]\\s+(.+)$")
 private val ORDERED_LIST = Regex("^\\d+[.)]\\s+(.+)$")
 
-private fun listItem(line: String): Pair<Boolean, String>? =
-    ORDERED_LIST.matchEntire(line)?.let { true to it.groupValues[1] }
-        ?: UNORDERED_LIST.matchEntire(line)?.let { false to it.groupValues[1] }
+private fun listItem(line: String): Pair<Boolean, String>? = ORDERED_LIST.matchEntire(line)?.let { true to it.groupValues[1] }
+    ?: UNORDERED_LIST.matchEntire(line)?.let { false to it.groupValues[1] }
 
 private fun startsMarkdownBlock(line: String, allowParagraphStart: Boolean): Boolean {
     if (allowParagraphStart) return false

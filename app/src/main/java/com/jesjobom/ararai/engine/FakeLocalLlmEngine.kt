@@ -7,15 +7,19 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
 class FakeLocalLlmEngine(
-    private val chunks: List<String> = listOf(
-        "ArarAI phase 1 is running. ",
-        "Native llama.cpp inference comes next.",
-    ),
+    private val chunks: List<String> =
+        listOf(
+            "ArarAI phase 1 is running. ",
+            "Native llama.cpp inference comes next.",
+        ),
     private val delayMillis: Long = 0L,
 ) : LocalLlmEngine {
     private var loadedModel: LocalModel? = null
 
-    override suspend fun load(model: LocalModel, config: InferenceConfig) {
+    override suspend fun load(
+        model: LocalModel,
+        config: InferenceConfig,
+    ) {
         loadedModel = model
     }
 

@@ -50,16 +50,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.benchmark.BenchmarkResult
 import com.jesjobom.ararai.benchmark.BenchmarkUiState
 import com.jesjobom.ararai.benchmark.BenchmarkViewModel
-import com.jesjobom.ararai.chat.ChatSessionStore
 import com.jesjobom.ararai.chat.ChatMediaRepository
+import com.jesjobom.ararai.chat.ChatSessionStore
 import com.jesjobom.ararai.chat.ChatViewModel
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.ConfiguredLocalLlmEngine
+import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelCatalogController
 import com.jesjobom.ararai.model.ModelStartupState
@@ -88,15 +92,16 @@ internal fun ArarAiApp(
     onThemeModeChange: (ThemeMode) -> Unit,
     openModelManagementRequest: Int = 0,
     liteRtLmCacheDir: String? = null,
+    localLlmEngineFactory: () -> LocalLlmEngine = {
+        ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir)
+    },
 ) {
     val modelCatalogState by modelController.state.collectAsState()
     val startupState = modelCatalogState.selectedStartupState
     val modelConfig = modelCatalogState.selectedConfig
     var destination by remember { mutableStateOf(AppDestination.Home) }
-    val localLlmRuntime = remember(liteRtLmCacheDir) {
-        AppLocalLlmRuntime {
-            ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir)
-        }
+    val localLlmRuntime = remember(localLlmEngineFactory) {
+        AppLocalLlmRuntime(localLlmEngineFactory)
     }
     val chatViewModel = remember {
         val availableState = startupState as? ModelStartupState.Available
@@ -240,7 +245,7 @@ private fun ArarAiScaffold(
 }
 
 @Composable
-private fun HomeScreen(
+internal fun HomeScreen(
     modelStatus: ModelStatusUiState,
     appVersionLabel: String,
     onOpenChat: () -> Unit,
@@ -351,7 +356,7 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun SettingsScreen(
+internal fun SettingsScreen(
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
     onBack: () -> Unit,
@@ -377,6 +382,9 @@ private fun SettingsScreen(
             ThemeMode.entries.forEach { mode ->
                 Card(
                     onClick = { onThemeModeChange(mode) },
+                    modifier = Modifier
+                        .testTag("theme-option-${mode.name.lowercase(Locale.ROOT)}")
+                        .semantics { selected = themeMode == mode },
                     colors = CardDefaults.cardColors(
                         containerColor = if (themeMode == mode) {
                             MaterialTheme.colorScheme.secondaryContainer
@@ -605,7 +613,7 @@ private fun BenchmarkResultCard(result: BenchmarkResult) {
 }
 
 @Composable
-private fun ModelStatusScreen(
+internal fun ModelStatusScreen(
     models: List<ManagedModelItem>,
     selectedModelId: String,
     onBack: () -> Unit,

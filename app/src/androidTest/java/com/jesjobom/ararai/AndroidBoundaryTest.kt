@@ -6,18 +6,15 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.speech.tts.TextToSpeech
-import com.google.mlkit.nl.languageid.LanguageIdentification
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.jesjobom.ararai.chat.FileChatMediaRepository
 import com.jesjobom.ararai.engine.JniLlamaNativeBridge
 import com.jesjobom.ararai.ui.chatImageImporter
 import com.jesjobom.ararai.ui.compatibleVoices
-import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -25,6 +22,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class AndroidBoundaryTest {
@@ -32,10 +32,11 @@ class AndroidBoundaryTest {
 
     @Test
     fun manifestDeclaresAudioPermissionAndDisablesBackup() {
-        val packageInfo = context.packageManager.getPackageInfo(
-            context.packageName,
-            PackageManager.GET_PERMISSIONS,
-        )
+        val packageInfo =
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.GET_PERMISSIONS,
+            )
         val applicationInfo = context.packageManager.getApplicationInfo(context.packageName, 0)
 
         assertTrue(packageInfo.requestedPermissions.orEmpty().contains(Manifest.permission.RECORD_AUDIO))
@@ -46,10 +47,11 @@ class AndroidBoundaryTest {
 
     @Test
     fun importsImageThroughRealContentResolverProvider() {
-        val mediaDir = File(context.cacheDir, "instrumentation-chat-media").apply {
-            deleteRecursively()
-            mkdirs()
-        }
+        val mediaDir =
+            File(context.cacheDir, "instrumentation-chat-media").apply {
+                deleteRecursively()
+                mkdirs()
+            }
         val repository = FileChatMediaRepository(mediaDir)
         val importer = context.chatImageImporter(repository)
 
@@ -83,10 +85,11 @@ class AndroidBoundaryTest {
     fun nativeTextToSpeechInitializesWhenAvailable() {
         val initialized = CountDownLatch(1)
         var initializationStatus = TextToSpeech.ERROR
-        val engine = TextToSpeech(context) { status ->
-            initializationStatus = status
-            initialized.countDown()
-        }
+        val engine =
+            TextToSpeech(context) { status ->
+                initializationStatus = status
+                initialized.countDown()
+            }
 
         try {
             assertTrue("TextToSpeech initialization timed out", initialized.await(10, TimeUnit.SECONDS))
@@ -106,12 +109,12 @@ class AndroidBoundaryTest {
         val identifier = LanguageIdentification.getClient()
 
         try {
-            identifier.identifyLanguage("This response is written clearly in English.")
+            identifier
+                .identifyLanguage("This response is written clearly in English.")
                 .addOnSuccessListener {
                     languageTag = it
                     completed.countDown()
-                }
-                .addOnFailureListener {
+                }.addOnFailureListener {
                     failure = it
                     completed.countDown()
                 }
@@ -128,10 +131,11 @@ class AndroidBoundaryTest {
     fun installedEnglishTtsVoiceCanBeResolvedWhenAvailable() {
         val initialized = CountDownLatch(1)
         var initializationStatus = TextToSpeech.ERROR
-        val engine = TextToSpeech(context) { status ->
-            initializationStatus = status
-            initialized.countDown()
-        }
+        val engine =
+            TextToSpeech(context) { status ->
+                initializationStatus = status
+                initialized.countDown()
+            }
 
         try {
             assertTrue("TextToSpeech initialization timed out", initialized.await(10, TimeUnit.SECONDS))

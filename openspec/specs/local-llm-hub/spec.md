@@ -1,7 +1,11 @@
 # local-llm-hub Specification
 
 ## Purpose
-TBD - created by archiving change define-project-foundation. Update Purpose after archive.
+ArarAI is an Android hub for configured open LLMs. It manages model artifacts,
+app-owned conversations and media, and runs Chat inference locally through
+runtime-neutral boundaries without requiring an application backend, remote
+database, or hosted inference API. Native runtime, acceleration, memory,
+thermal, and real-model behavior remain subject to physical-device validation.
 ## Requirements
 ### Requirement: Android SDK 36 Target
 
@@ -2152,4 +2156,182 @@ or indefinitely.
   notification permission
 - **THEN** the app requests that permission
 - **AND** denial does not crash or immediately fail the model transfer.
+
+### Requirement: Source-safe fallback download resume
+
+The app SHALL NOT combine unverified partial bytes from one model download URL
+with bytes from a different URL. A resumed transfer that fails integrity SHALL
+receive at most one clean retry from byte zero on the same URL before the app
+advances to another configured source.
+
+#### Scenario: Change to a fallback source
+
+- **GIVEN** a partial model was obtained from one configured URL
+- **WHEN** the downloader advances to a different fallback URL
+- **THEN** it does not append the fallback response to unverified prior-source bytes.
+
+#### Scenario: Retry incompatible resumed content cleanly
+
+- **GIVEN** a server accepted a resume offset
+- **WHEN** the completed temporary artifact fails configured integrity validation
+- **THEN** the app deletes the incompatible temporary content
+- **AND** retries that URL once from byte zero.
+
+#### Scenario: Bound clean retries
+
+- **WHEN** the clean retry also fails
+- **THEN** the app advances or reports terminal failure without an unbounded loop.
+
+### Requirement: Bounded Chat streaming presentation
+
+The app SHALL preserve generated token order while bounding how frequently
+growing assistant content rebuilds structural UI state and expensive presentation
+work. Terminal events SHALL flush all buffered content immediately.
+
+#### Scenario: Receive a burst of tokens
+
+- **WHEN** the local engine emits multiple tokens within one presentation interval
+- **THEN** the app coalesces them into fewer display-state updates
+- **AND** preserves their exact order and content.
+
+#### Scenario: Complete or cancel between presentation updates
+
+- **WHEN** generation completes, fails, or is cancelled while display content is buffered
+- **THEN** the app flushes the latest content before publishing the terminal state
+- **AND** persists the same final partial or complete response.
+
+#### Scenario: Render unchanged streamed content
+
+- **WHEN** unrelated Chat state changes without changing displayed assistant text
+- **THEN** the app avoids reparsing that Markdown solely because of the unrelated state change.
+
+### Requirement: Efficient persisted media reference lookup
+
+The Chat persistence boundary SHALL enumerate referenced media without issuing
+one message query per session or materializing complete Chat histories. Reference
+updates SHALL remain transactionally consistent with message mutations.
+
+#### Scenario: Enumerate references across many sessions
+
+- **GIVEN** persisted image and audio messages across multiple sessions
+- **WHEN** media cleanup requests all referenced URIs
+- **THEN** SQLite returns the references through a bounded query path independent of session count
+- **AND** does not construct full message histories.
+
+#### Scenario: Mutate a message with media
+
+- **WHEN** a message containing media is inserted, updated, or deleted
+- **THEN** its persisted reference state changes in the same transaction
+- **AND** cleanup cannot observe a committed message without its references.
+
+### Requirement: Bounded complete Chat media reconciliation
+
+The app SHALL make every unreferenced app-owned Chat media file eligible for
+eventual reconciliation even when referenced files sort before it. The configured
+limit SHALL bound cleanup candidates, not permanently shield later orphan files.
+
+#### Scenario: Referenced files exceed the cleanup limit
+
+- **GIVEN** more referenced files than the reconciliation limit sort before an orphan
+- **WHEN** startup media reconciliation runs
+- **THEN** the orphan remains eligible for cleanup
+- **AND** referenced media is preserved.
+
+#### Scenario: Reject media outside app ownership
+
+- **WHEN** reconciliation encounters a content URI or path outside the Chat media directory
+- **THEN** it does not delete that resource.
+
+### Requirement: Configuration-aware llama.cpp runtime reuse
+
+The llama.cpp runtime SHALL reuse a loaded native model only when the requested
+model and every inference parameter bound during native loading are compatible
+with the retained handle.
+
+#### Scenario: Reuse an identical native configuration
+
+- **GIVEN** a llama.cpp model is loaded with a complete inference configuration
+- **WHEN** the same model and compatible configuration are requested again
+- **THEN** the app reuses the loaded native handle.
+
+#### Scenario: Reload after a load-bound parameter changes
+
+- **GIVEN** a llama.cpp model is already loaded
+- **WHEN** the same model is requested with a different load-bound context or
+  sampling parameter
+- **THEN** the app unloads the incompatible handle
+- **AND** loads the requested configuration before generation or benchmarking.
+
+### Requirement: Kotlin formatting and static-analysis gate
+
+The shared automated quality gate SHALL run pinned, check-only Kotlin formatting
+and static-analysis tasks in addition to tests, Android lint, builds, and strict
+OpenSpec validation.
+
+#### Scenario: Kotlin source violates an enforced rule
+
+- **WHEN** Kotlin source violates configured formatting or static-analysis policy
+- **THEN** the shared local and CI quality gate fails with an actionable diagnostic.
+
+### Requirement: Reproducible native CI caching
+
+CI SHALL reuse compatible Android/native toolchain and fetched-source inputs with
+cache keys that invalidate when their pinned versions or defining build inputs change.
+
+#### Scenario: Native build inputs remain compatible
+
+- **WHEN** a CI run restores a cache produced by matching tool and CMake inputs
+- **THEN** it reuses those inputs and still performs the required build validation.
+
+#### Scenario: Native build inputs change
+
+- **WHEN** a pinned tool version or defining CMake input changes
+- **THEN** CI does not treat incompatible cached native inputs as current.
+
+### Requirement: Automated critical Compose journey coverage
+
+The project SHALL automatically verify critical user journeys across Home,
+Chat, Models, and Settings using deterministic local fakes and stable UI semantics.
+
+#### Scenario: Navigate to Chat and submit
+
+- **GIVEN** a deterministic available local model
+- **WHEN** the test navigates from Home to Chat and submits a prompt
+- **THEN** it observes generation controls and the streamed result through UI semantics.
+
+#### Scenario: Recover from unavailable model state
+
+- **GIVEN** the selected model reports a retryable failure
+- **WHEN** the test opens model management and selects Retry
+- **THEN** it verifies the retry command and corresponding UI transition.
+
+#### Scenario: Manage sessions and appearance
+
+- **WHEN** tests rename or delete a Chat session and change appearance in Settings
+- **THEN** they verify the resulting visible state without relying on pixel coordinates.
+
+### Requirement: Automated foreground download lifecycle coverage
+
+The project SHALL automatically verify the service ownership and state
+transitions that keep foreground model downloads reliable across Android
+lifecycle events.
+
+#### Scenario: Redeliver a download command
+
+- **GIVEN** the service receives a redelivered download intent
+- **WHEN** it reattaches to application-scoped download state
+- **THEN** automated coverage verifies that the transfer remains owned exactly once
+- **AND** completion stops the service after no owned transfers remain.
+
+#### Scenario: Destroy a service with owned work
+
+- **GIVEN** the service owns one or more active transfers
+- **WHEN** the service is destroyed
+- **THEN** automated coverage verifies cancellation for each owned transfer
+- **AND** verifies cleanup of observation and ownership state.
+
+#### Scenario: Receive an empty start intent
+
+- **WHEN** Android invokes the service without a valid model command
+- **THEN** automated coverage verifies controlled non-sticky behavior without a crash.
 

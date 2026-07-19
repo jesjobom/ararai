@@ -26,14 +26,16 @@ class ChatTextToSpeechTest {
         val identifier = FakeLanguageIdentifier()
         val states = mutableListOf<ChatTextToSpeechState>()
         val controller = ChatTextToSpeechController(service, identifier, states::add)
-        val message = ChatMessage(
-            role = ChatRole.Assistant,
-            id = "message-1",
-            content = MessageContent.TextPrompt(
-                text = "Visible response",
-                reasoningText = "Private reasoning",
-            ),
-        )
+        val message =
+            ChatMessage(
+                role = ChatRole.Assistant,
+                id = "message-1",
+                content =
+                MessageContent.TextPrompt(
+                    text = "Visible response",
+                    reasoningText = "Private reasoning",
+                ),
+            )
 
         controller.prepare(message.id, message.text)
         assertFalse(controller.isPrepared(message.id))
@@ -48,7 +50,12 @@ class ChatTextToSpeechTest {
         assertEquals("message-1", controller.state.activeMessageId)
         service.complete()
         assertNull(controller.state.activeMessageId)
-        assertFalse(service.spokenRequests.single().text.contains("Private reasoning"))
+        assertFalse(
+            service.spokenRequests
+                .single()
+                .text
+                .contains("Private reasoning"),
+        )
     }
 
     @Test
@@ -109,7 +116,10 @@ class ChatTextToSpeechTest {
         staleListener.onIdentified("en")
 
         assertFalse(controller.isPrepared("message"))
-        identifier.requests.last().listener.onIdentified(null)
+        identifier.requests
+            .last()
+            .listener
+            .onIdentified(null)
         assertTrue(controller.isPrepared("message"))
 
         controller.toggle("message", "New response")
@@ -122,7 +132,11 @@ class ChatTextToSpeechTest {
         var stopCount = 0
         var closed = false
 
-        override fun speak(text: String, languageTag: String?, listener: ChatTextToSpeechListener) {
+        override fun speak(
+            text: String,
+            languageTag: String?,
+            listener: ChatTextToSpeechListener,
+        ) {
             spokenRequests += SpeechRequest(text, languageTag)
             this.listener = listener
         }
@@ -137,15 +151,17 @@ class ChatTextToSpeechTest {
 
         fun complete() = listener?.onResult(ChatTextToSpeechResult.Completed) ?: Unit
 
-        fun fail(message: String) =
-            listener?.onResult(ChatTextToSpeechResult.Failed(message)) ?: Unit
+        fun fail(message: String) = listener?.onResult(ChatTextToSpeechResult.Failed(message)) ?: Unit
     }
 
     private class FakeLanguageIdentifier : ChatLanguageIdentifier {
         val requests = mutableListOf<IdentificationRequest>()
         var closed = false
 
-        override fun identify(text: String, listener: ChatLanguageIdentificationListener) {
+        override fun identify(
+            text: String,
+            listener: ChatLanguageIdentificationListener,
+        ) {
             requests += IdentificationRequest(text, listener)
         }
 
@@ -156,7 +172,10 @@ class ChatTextToSpeechTest {
         fun complete(languageTag: String?) = requests.last().listener.onIdentified(languageTag)
     }
 
-    private data class SpeechRequest(val text: String, val languageTag: String?)
+    private data class SpeechRequest(
+        val text: String,
+        val languageTag: String?,
+    )
 
     private data class IdentificationRequest(
         val text: String,

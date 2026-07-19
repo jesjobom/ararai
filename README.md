@@ -54,19 +54,26 @@ The supported local and CI entry point is:
 scripts/quality-gate.sh
 ```
 
-It runs JVM/Robolectric tests, Android lint, the debug app build, the debug
-instrumentation APK build, and strict validation of every OpenSpec change. The
-same command is used by `.github/workflows/android-quality-gate.yml`.
+It runs pinned Kotlin formatting and static analysis, JVM/Robolectric tests,
+Android lint, the debug app build, the debug instrumentation APK build, and
+strict validation of every OpenSpec change. The same command is used by
+`.github/workflows/android-quality-gate.yml`.
 
 Individual commands remain useful while iterating:
 
 ```sh
+./gradlew spotlessCheck detekt
 ./gradlew testDebugUnitTest
 ./gradlew lintDebug
 ./gradlew assembleDebug
 ./gradlew assembleDebugAndroidTest
 openspec validate --all --strict
 ```
+
+Use `./gradlew spotlessApply` to format Kotlin sources locally. Detekt's
+reviewed legacy baseline and rule configuration live under `config/detekt/`;
+new findings are not added to the baseline as a routine fix. CI cache inputs
+and invalidation rules are documented in `docs/quality-gates.md`.
 
 With an authorized arm64 Android device connected, execute the instrumentation
 suite:

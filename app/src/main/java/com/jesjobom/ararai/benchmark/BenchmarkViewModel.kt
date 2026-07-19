@@ -33,7 +33,10 @@ class BenchmarkViewModel(
     private val _uiState = MutableStateFlow(createState())
     val uiState: StateFlow<BenchmarkUiState> = _uiState.asStateFlow()
 
-    fun onSelectedModelState(config: ModelConfig, state: ModelStartupState) {
+    fun onSelectedModelState(
+        config: ModelConfig,
+        state: ModelStartupState,
+    ) {
         selectedConfig = config
         selectedModel = (state as? ModelStartupState.Available)?.model
         selectedInference = stableBenchmarkConfig(config.inference)
@@ -54,95 +57,98 @@ class BenchmarkViewModel(
         val model = selectedModel ?: return
         val inference = selectedInference
 
-        benchmarkJob = scope.launch {
-            _uiState.update {
-                it.copy(
-                    isRunning = true,
-                    status = "Loading model",
-                    result = null,
-                    error = null,
-                )
-            }
-
-            try {
-                val loadStart = clock.nowNanos()
-                engine.load(model, inference)
-                val loadNanos = clock.nowNanos() - loadStart
-
-                var streamedChunks = 0
-                var generatedCharacters = 0
-                var firstTokenNanos: Long? = null
-                var runtimeMetrics: GenerationMetrics? = null
-                var failure: String? = null
-                var completed = false
-                val generationStart = clock.nowNanos()
-
-                _uiState.update { it.copy(status = "Generating benchmark response") }
-
-                engine.generate(PromptRequest(BENCHMARK_PROMPT)).collect { event ->
-                    when (event) {
-                        is GenerationEvent.Token -> {
-                            val now = clock.nowNanos()
-                            if (firstTokenNanos == null) {
-                                firstTokenNanos = now - generationStart
-                            }
-                            streamedChunks += 1
-                            generatedCharacters += event.text.length
-                        }
-                        is GenerationEvent.ReasoningToken -> Unit
-                        is GenerationEvent.Metrics -> runtimeMetrics = event.value
-                        is GenerationEvent.Failed -> failure = event.message
-                        GenerationEvent.Completed -> completed = true
-                    }
+        benchmarkJob =
+            scope.launch {
+                _uiState.update {
+                    it.copy(
+                        isRunning = true,
+                        status = "Loading model",
+                        result = null,
+                        error = null,
+                    )
                 }
 
-                val generationNanos = clock.nowNanos() - generationStart
-                val error = failure ?: if (!completed) "Benchmark did not complete" else null
-                if (error != null) {
+                try {
+                    val loadStart = clock.nowNanos()
+                    engine.load(model, inference)
+                    val loadNanos = clock.nowNanos() - loadStart
+
+                    var streamedChunks = 0
+                    var generatedCharacters = 0
+                    var firstTokenNanos: Long? = null
+                    var runtimeMetrics: GenerationMetrics? = null
+                    var failure: String? = null
+                    var completed = false
+                    val generationStart = clock.nowNanos()
+
+                    _uiState.update { it.copy(status = "Generating benchmark response") }
+
+                    engine.generate(PromptRequest(BENCHMARK_PROMPT)).collect { event ->
+                        when (event) {
+                            is GenerationEvent.Token -> {
+                                val now = clock.nowNanos()
+                                if (firstTokenNanos == null) {
+                                    firstTokenNanos = now - generationStart
+                                }
+                                streamedChunks += 1
+                                generatedCharacters += event.text.length
+                            }
+                            is GenerationEvent.ReasoningToken -> Unit
+                            is GenerationEvent.Metrics -> runtimeMetrics = event.value
+                            is GenerationEvent.Failed -> failure = event.message
+                            GenerationEvent.Completed -> completed = true
+                        }
+                    }
+
+                    val generationNanos = clock.nowNanos() - generationStart
+                    val error = failure ?: if (!completed) "Benchmark did not complete" else null
+                    if (error != null) {
+                        _uiState.update {
+                            it.copy(
+                                isRunning = false,
+                                status = "Benchmark failed",
+                                error = error,
+                            )
+                        }
+                        return@launch
+                    }
+
+                    val result =
+                        BenchmarkResult(
+                            loadMillis = nanosToMillis(loadNanos),
+                            firstTokenMillis =
+                            runtimeMetrics?.timeToFirstTokenMillis
+                                ?: firstTokenNanos?.let(::nanosToMillis),
+                            generationMillis = nanosToMillis(generationNanos),
+                            totalMillis = nanosToMillis(loadNanos + generationNanos),
+                            prefillTokens = runtimeMetrics?.prefillTokenCount,
+                            prefillTokensPerSecond = runtimeMetrics?.prefillTokensPerSecond,
+                            decodeTokens = runtimeMetrics?.decodeTokenCount,
+                            decodeTokensPerSecond = runtimeMetrics?.decodeTokensPerSecond,
+                            generatedCharacters = generatedCharacters,
+                            streamedChunks = streamedChunks,
+                            charactersPerSecond = ratePerSecond(generatedCharacters, generationNanos),
+                        )
+                    _uiState.update {
+                        it.copy(
+                            isRunning = false,
+                            status = "Benchmark complete",
+                            result = result,
+                        )
+                    }
+                } catch (error: Throwable) {
+                    if (error is kotlinx.coroutines.CancellationException) return@launch
                     _uiState.update {
                         it.copy(
                             isRunning = false,
                             status = "Benchmark failed",
-                            error = error,
+                            error = error.message ?: "Benchmark failed",
                         )
                     }
-                    return@launch
+                } finally {
+                    engine.unload()
                 }
-
-                val result = BenchmarkResult(
-                    loadMillis = nanosToMillis(loadNanos),
-                    firstTokenMillis = runtimeMetrics?.timeToFirstTokenMillis
-                        ?: firstTokenNanos?.let(::nanosToMillis),
-                    generationMillis = nanosToMillis(generationNanos),
-                    totalMillis = nanosToMillis(loadNanos + generationNanos),
-                    prefillTokens = runtimeMetrics?.prefillTokenCount,
-                    prefillTokensPerSecond = runtimeMetrics?.prefillTokensPerSecond,
-                    decodeTokens = runtimeMetrics?.decodeTokenCount,
-                    decodeTokensPerSecond = runtimeMetrics?.decodeTokensPerSecond,
-                    generatedCharacters = generatedCharacters,
-                    streamedChunks = streamedChunks,
-                    charactersPerSecond = ratePerSecond(generatedCharacters, generationNanos),
-                )
-                _uiState.update {
-                    it.copy(
-                        isRunning = false,
-                        status = "Benchmark complete",
-                        result = result,
-                    )
-                }
-            } catch (error: Throwable) {
-                if (error is kotlinx.coroutines.CancellationException) return@launch
-                _uiState.update {
-                    it.copy(
-                        isRunning = false,
-                        status = "Benchmark failed",
-                        error = error.message ?: "Benchmark failed",
-                    )
-                }
-            } finally {
-                engine.unload()
             }
-        }
     }
 
     fun onLeavingBenchmark() {
@@ -199,17 +205,19 @@ class BenchmarkViewModel(
         const val BENCHMARK_PROMPT =
             "Write one concise paragraph explaining why on-device AI performance should be benchmarked with stable parameters."
 
-        fun stableBenchmarkConfig(config: InferenceConfig): InferenceConfig =
-            config.copy(
-                contextTokens = config.contextTokens.coerceAtMost(2048),
-                maxTokens = config.maxTokens.coerceAtMost(BENCHMARK_MAX_TOKENS),
-                temperature = 0.2f,
-                topP = 0.9f,
-            )
+        fun stableBenchmarkConfig(config: InferenceConfig): InferenceConfig = config.copy(
+            contextTokens = config.contextTokens.coerceAtMost(2048),
+            maxTokens = config.maxTokens.coerceAtMost(BENCHMARK_MAX_TOKENS),
+            temperature = 0.2f,
+            topP = 0.9f,
+        )
 
         fun nanosToMillis(nanos: Long): Long = nanos / 1_000_000L
 
-        fun ratePerSecond(count: Int, durationNanos: Long): Double {
+        fun ratePerSecond(
+            count: Int,
+            durationNanos: Long,
+        ): Double {
             if (count == 0 || durationNanos <= 0L) return 0.0
             return count * 1_000_000_000.0 / durationNanos
         }

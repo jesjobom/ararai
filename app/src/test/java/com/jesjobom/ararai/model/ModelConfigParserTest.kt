@@ -1,29 +1,30 @@
 package com.jesjobom.ararai.model
 
-import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.fail
 import org.junit.Test
+import java.io.File
 
 class ModelConfigParserTest {
     @Test
     fun `parses the fixed model configuration`() {
-        val config = ModelConfigParser.parse(
-            """
-            model.id=smollm2-135m-q4
-            model.name=SmolLM2 135M Q4
-            model.url=https://example.com/smollm2-135m-q4.gguf
-            model.fileName=smollm2-135m-q4.gguf
-            model.relativePath=models/smollm2-135m-q4.gguf
-            model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-            model.expectedBytes=1234
-            inference.contextTokens=2048
-            inference.maxTokens=512
-            inference.temperature=0.7
-            inference.topP=0.9
-            """.trimIndent(),
-        )
+        val config =
+            ModelConfigParser.parse(
+                """
+                model.id=smollm2-135m-q4
+                model.name=SmolLM2 135M Q4
+                model.url=https://example.com/smollm2-135m-q4.gguf
+                model.fileName=smollm2-135m-q4.gguf
+                model.relativePath=models/smollm2-135m-q4.gguf
+                model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                model.expectedBytes=1234
+                inference.contextTokens=2048
+                inference.maxTokens=512
+                inference.temperature=0.7
+                inference.topP=0.9
+                """.trimIndent(),
+            )
 
         assertEquals("smollm2-135m-q4", config.id)
         assertEquals("SmolLM2 135M Q4", config.name)
@@ -49,12 +50,14 @@ class ModelConfigParserTest {
 
     @Test
     fun `parses optional fallback download urls`() {
-        val config = ModelConfigParser.parse(
-            validRawConfig() + """
+        val config =
+            ModelConfigParser.parse(
+                validRawConfig() +
+                    """
 
-            model.fallbackUrls=https://mirror.example.com/a.gguf, https://mirror.example.com/b.gguf
-            """.trimIndent(),
-        )
+                    model.fallbackUrls=https://mirror.example.com/a.gguf, https://mirror.example.com/b.gguf
+                    """.trimIndent(),
+            )
 
         assertEquals(
             listOf(
@@ -67,13 +70,15 @@ class ModelConfigParserTest {
 
     @Test
     fun `parses explicit multimodal input capabilities`() {
-        val config = ModelConfigParser.parse(
-            validRawConfig() + """
+        val config =
+            ModelConfigParser.parse(
+                validRawConfig() +
+                    """
 
-            model.capabilities.input.image=true
-            model.capabilities.input.audio=true
-            """.trimIndent(),
-        )
+                    model.capabilities.input.image=true
+                    model.capabilities.input.audio=true
+                    """.trimIndent(),
+            )
 
         assertEquals(true, config.inputCapabilities.text)
         assertEquals(true, config.inputCapabilities.image)
@@ -82,13 +87,15 @@ class ModelConfigParserTest {
 
     @Test
     fun `parses explicit reasoning capabilities`() {
-        val config = ModelConfigParser.parse(
-            validRawConfig() + """
+        val config =
+            ModelConfigParser.parse(
+                validRawConfig() +
+                    """
 
-            model.capabilities.reasoning.request=true
-            model.capabilities.reasoning.output=true
-            """.trimIndent(),
-        )
+                    model.capabilities.reasoning.request=true
+                    model.capabilities.reasoning.output=true
+                    """.trimIndent(),
+            )
 
         assertEquals(true, config.reasoningCapabilities.request)
         assertEquals(true, config.reasoningCapabilities.output)
@@ -96,24 +103,25 @@ class ModelConfigParserTest {
 
     @Test
     fun `parses configured runtime metadata`() {
-        val config = ModelConfigParser.parse(
-            """
-            model.id=gemma-litert
-            model.name=Gemma LiteRT
-            model.runtime=litert_lm
-            model.artifactFormat=litert_lm_bundle
-            model.acceleration=cpu_only
-            model.url=https://example.com/gemma-litert.task
-            model.fileName=gemma-litert.task
-            model.relativePath=models/litert-lm/gemma-litert.task
-            model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-            model.expectedBytes=1234
-            inference.contextTokens=2048
-            inference.maxTokens=512
-            inference.temperature=0.7
-            inference.topP=0.9
-            """.trimIndent(),
-        )
+        val config =
+            ModelConfigParser.parse(
+                """
+                model.id=gemma-litert
+                model.name=Gemma LiteRT
+                model.runtime=litert_lm
+                model.artifactFormat=litert_lm_bundle
+                model.acceleration=cpu_only
+                model.url=https://example.com/gemma-litert.task
+                model.fileName=gemma-litert.task
+                model.relativePath=models/litert-lm/gemma-litert.task
+                model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                model.expectedBytes=1234
+                inference.contextTokens=2048
+                inference.maxTokens=512
+                inference.temperature=0.7
+                inference.topP=0.9
+                """.trimIndent(),
+            )
 
         assertEquals(ModelRuntime.LiteRtLm, config.runtime)
         assertEquals(ModelArtifactFormat.LiteRtLmBundle, config.artifactFormat)
@@ -123,35 +131,36 @@ class ModelConfigParserTest {
 
     @Test
     fun `parses catalog with multiple configured models`() {
-        val catalog = ModelConfigParser.parseCatalog(
-            """
-            models.count=2
-            models.defaultId=tiny
-            chat.systemPrompt=Be brief.
-            models.0.id=tiny
-            models.0.name=Tiny Model
-            models.0.url=https://example.com/tiny.gguf
-            models.0.fileName=tiny.gguf
-            models.0.relativePath=models/tiny.gguf
-            models.0.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-            models.0.expectedBytes=1234
-            models.0.inference.contextTokens=1024
-            models.0.inference.maxTokens=128
-            models.0.inference.temperature=0.7
-            models.0.inference.topP=0.9
-            models.1.id=small
-            models.1.name=Small Model
-            models.1.url=https://example.com/small.gguf
-            models.1.fileName=small.gguf
-            models.1.relativePath=models/small.gguf
-            models.1.sha256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-            models.1.expectedBytes=5678
-            models.1.inference.contextTokens=2048
-            models.1.inference.maxTokens=256
-            models.1.inference.temperature=0.6
-            models.1.inference.topP=0.8
-            """.trimIndent(),
-        )
+        val catalog =
+            ModelConfigParser.parseCatalog(
+                """
+                models.count=2
+                models.defaultId=tiny
+                chat.systemPrompt=Be brief.
+                models.0.id=tiny
+                models.0.name=Tiny Model
+                models.0.url=https://example.com/tiny.gguf
+                models.0.fileName=tiny.gguf
+                models.0.relativePath=models/tiny.gguf
+                models.0.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                models.0.expectedBytes=1234
+                models.0.inference.contextTokens=1024
+                models.0.inference.maxTokens=128
+                models.0.inference.temperature=0.7
+                models.0.inference.topP=0.9
+                models.1.id=small
+                models.1.name=Small Model
+                models.1.url=https://example.com/small.gguf
+                models.1.fileName=small.gguf
+                models.1.relativePath=models/small.gguf
+                models.1.sha256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                models.1.expectedBytes=5678
+                models.1.inference.contextTokens=2048
+                models.1.inference.maxTokens=256
+                models.1.inference.temperature=0.6
+                models.1.inference.topP=0.8
+                """.trimIndent(),
+            )
 
         assertEquals("tiny", catalog.defaultModelId)
         assertEquals("Be brief.", catalog.chat.systemPrompt)
@@ -236,7 +245,9 @@ class ModelConfigParserTest {
     @Test
     fun `rejects relative path that does not match configured file name`() {
         try {
-            ModelConfigParser.parse(validRawConfig().replace("model.relativePath=models/smollm2-135m-q4.gguf", "model.relativePath=models/other.gguf"))
+            ModelConfigParser.parse(
+                validRawConfig().replace("model.relativePath=models/smollm2-135m-q4.gguf", "model.relativePath=models/other.gguf"),
+            )
             fail("Expected relative path mismatch to throw")
         } catch (error: IllegalArgumentException) {
             assertEquals("model.relativePath must match models/<model.fileName>", error.message)
@@ -246,7 +257,8 @@ class ModelConfigParserTest {
     @Test
     fun `rejects invalid integrity and inference bounds`() {
         assertInvalid(
-            raw = validRawConfig().replace(
+            raw =
+            validRawConfig().replace(
                 "model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "model.sha256=not-a-sha",
             ),
@@ -265,7 +277,8 @@ class ModelConfigParserTest {
             expectedMessage = "inference.maxTokens must be positive",
         )
         assertInvalid(
-            raw = validRawConfig().replace(
+            raw =
+            validRawConfig().replace(
                 "model.id=smollm2-135m-q4",
                 "model.id=smollm2-135m-q4\nmodel.runtime=litert_lm",
             ),
@@ -281,7 +294,10 @@ class ModelConfigParserTest {
         )
     }
 
-    private fun assertInvalid(raw: String, expectedMessage: String) {
+    private fun assertInvalid(
+        raw: String,
+        expectedMessage: String,
+    ) {
         try {
             ModelConfigParser.parse(raw)
             fail("Expected invalid config to throw")
@@ -306,10 +322,11 @@ class ModelConfigParserTest {
         """.trimIndent()
 
     private fun fixedModelCatalogFile(): File {
-        val candidates = listOf(
-            File("app/src/main/res/raw/fixed_model.properties"),
-            File("src/main/res/raw/fixed_model.properties"),
-        )
+        val candidates =
+            listOf(
+                File("app/src/main/res/raw/fixed_model.properties"),
+                File("src/main/res/raw/fixed_model.properties"),
+            )
         return candidates.firstOrNull { it.isFile }
             ?: error("Unable to locate fixed_model.properties from ${File(".").absolutePath}")
     }

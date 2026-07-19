@@ -41,6 +41,22 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Restore pinned Android toolchains
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/platforms/android-36
+            ${{ env.ANDROID_HOME }}/build-tools/36.0.0
+            ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+            ${{ env.ANDROID_HOME }}/cmake/3.22.1
+          key: android-toolchains-v1-${{ runner.os }}-sdk36-bt36.0.0-ndk28.2.13676358-cmake3.22.1
+
+      - name: Restore compatible native sources
+        uses: actions/cache@v4
+        with:
+          path: build/fetch-content
+          key: native-fetchcontent-v1-${{ runner.os }}-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties', 'app/build.gradle.kts', 'app/src/main/cpp/CMakeLists.txt', 'app/src/main/cpp/cmake/**') }}
+
       - name: Install pinned Android and OpenSpec tooling
         run: |
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"

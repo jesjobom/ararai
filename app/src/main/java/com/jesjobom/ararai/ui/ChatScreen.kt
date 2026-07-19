@@ -9,11 +9,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
@@ -26,9 +26,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,8 +38,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jesjobom.ararai.chat.ChatMessage
 import com.jesjobom.ararai.chat.ChatViewModel
-import com.jesjobom.ararai.chat.MessageContent
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,10 +75,6 @@ internal fun ChatScreen(
         state.isGenerating -> "Generating"
         else -> state.modelStatus
     }
-    val latestMessageKey = state.messages.lastOrNull()?.let { message ->
-        val reasoningText = (message.content as? MessageContent.TextPrompt)?.reasoningText.orEmpty()
-        "${message.id}:${message.text}:$reasoningText"
-    }
 
     DisposableEffect(textToSpeechController) {
         onDispose { textToSpeechController.close() }
@@ -95,25 +91,29 @@ internal fun ChatScreen(
     LaunchedEffect(state.selectedSessionId) {
         textToSpeechController.stop()
         followLatestMessages = true
+        state.messages.forEach { message ->
+            if (message.isEligibleForTextToSpeech(isStreaming = false)) {
+                textToSpeechController.prepare(message.id, message.text)
+            }
+        }
         if (state.messages.isNotEmpty()) {
             bottomRequester.bringIntoView()
         }
     }
 
-    LaunchedEffect(state.selectedSessionId, state.messages.size, latestMessageKey) {
-        if (state.messages.isNotEmpty() && followLatestMessages) {
-            bottomRequester.bringIntoView()
-        }
-    }
+    FollowLatestMessagesEffect(
+        sessionId = state.selectedSessionId,
+        messageCount = state.messages.size,
+        displayRevision = state.messageDisplayRevision,
+        enabled = followLatestMessages,
+        onFollowLatest = bottomRequester::bringIntoView,
+    )
 
-    LaunchedEffect(state.selectedSessionId, state.messages, state.isGenerating) {
-        state.messages.forEach { message ->
-            val isStreaming = state.isGenerating && message.id == state.messages.lastOrNull()?.id
-            if (message.isEligibleForTextToSpeech(isStreaming)) {
-                textToSpeechController.prepare(message.id, message.text)
-            }
-        }
-    }
+    CompletedAssistantPreparationEffect(
+        completedMessageId = state.completedAssistantMessageId,
+        messages = state.messages,
+        onPrepare = textToSpeechController::prepare,
+    )
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -319,6 +319,32 @@ internal fun ChatScreen(
     }
 }
 
+@Composable
+internal fun FollowLatestMessagesEffect(
+    sessionId: String?,
+    messageCount: Int,
+    displayRevision: Long,
+    enabled: Boolean,
+    onFollowLatest: suspend () -> Unit,
+) {
+    LaunchedEffect(sessionId, messageCount, displayRevision) {
+        if (messageCount > 0 && enabled) onFollowLatest()
+    }
+}
+
+@Composable
+internal fun CompletedAssistantPreparationEffect(
+    completedMessageId: String?,
+    messages: List<ChatMessage>,
+    onPrepare: (String, String) -> Unit,
+) {
+    LaunchedEffect(completedMessageId) {
+        val message = messages.firstOrNull { it.id == completedMessageId }
+        if (message != null && message.isEligibleForTextToSpeech(isStreaming = false)) {
+            onPrepare(message.id, message.text)
+        }
+    }
+}
 
 @Composable
 private fun EmptyChatState(modifier: Modifier = Modifier) {

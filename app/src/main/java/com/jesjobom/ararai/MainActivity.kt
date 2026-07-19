@@ -1,30 +1,30 @@
 package com.jesjobom.ararai
 
 import android.Manifest
-import android.os.Bundle
-import android.os.Build
-import android.content.pm.PackageManager
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
-import com.jesjobom.ararai.chat.SqliteChatSessionStore
 import com.jesjobom.ararai.chat.FileChatMediaRepository
+import com.jesjobom.ararai.chat.SqliteChatSessionStore
 import com.jesjobom.ararai.engine.prepareLiteRtLmCacheDir
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.settings.SharedPreferencesThemePreferenceStore
+import com.jesjobom.ararai.ui.AndroidChatTextToSpeechService
 import com.jesjobom.ararai.ui.ArarAiApp
 import com.jesjobom.ararai.ui.ArarAiTheme
-import com.jesjobom.ararai.ui.AndroidChatTextToSpeechService
 import com.jesjobom.ararai.ui.MlKitChatLanguageIdentifier
 import com.jesjobom.ararai.ui.androidChatMediaServices
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,9 +49,10 @@ class MainActivity : ComponentActivity() {
             val themeMode by themePreferenceStore.themeMode.collectAsState()
             val modelState by modelController.state.collectAsState()
             val openModelManagementRequest by openModelManagementRequests.collectAsState()
-            val notificationPermissionLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestPermission(),
-            ) { }
+            val notificationPermissionLauncher =
+                rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission(),
+                ) { }
             val isDownloading = modelState.models.any { it.state is ModelStartupState.Downloading }
             LaunchedEffect(isDownloading) {
                 if (
@@ -79,7 +80,8 @@ class MainActivity : ComponentActivity() {
                         themeMode = themeMode,
                         onThemeModeChange = themePreferenceStore::setThemeMode,
                         openModelManagementRequest = openModelManagementRequest,
-                        liteRtLmCacheDir = prepareLiteRtLmCacheDir(cacheDir) { error ->
+                        liteRtLmCacheDir =
+                        prepareLiteRtLmCacheDir(cacheDir) { error ->
                             Log.w("ArarAI.LiteRtLm", "Unable to prepare LiteRT-LM cache", error)
                         },
                     )

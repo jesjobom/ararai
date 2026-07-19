@@ -8,8 +8,13 @@ import com.jesjobom.ararai.model.LocalModel
 import kotlinx.coroutines.flow.Flow
 
 interface LocalLlmEngine {
-    suspend fun load(model: LocalModel, config: InferenceConfig)
+    suspend fun load(
+        model: LocalModel,
+        config: InferenceConfig,
+    )
+
     fun generate(request: PromptRequest): Flow<GenerationEvent>
+
     suspend fun unload()
 }
 
@@ -22,10 +27,11 @@ data class PromptRequest(
     constructor(prompt: String) : this(MessageContent.TextPrompt(prompt), userChatMessages(prompt))
 
     val prompt: String
-        get() = when (content) {
-            is MessageContent.TextPrompt -> content.text
-            is MessageContent.AudioPromptContent -> content.audio.displayName ?: "Audio prompt"
-        }
+        get() =
+            when (content) {
+                is MessageContent.TextPrompt -> content.text
+                is MessageContent.AudioPromptContent -> content.audio.displayName ?: "Audio prompt"
+            }
 
     val textPrompt: String?
         get() = (content as? MessageContent.TextPrompt)?.text
@@ -40,18 +46,16 @@ data class PromptRequest(
         get() = chatMessages.toPlainChatPrompt()
 
     companion object {
-        private fun defaultChatMessages(content: MessageContent): List<PromptChatMessage> =
-            when (content) {
-                is MessageContent.TextPrompt -> userChatMessages(content.text)
-                is MessageContent.AudioPromptContent -> emptyList()
-            }
+        private fun defaultChatMessages(content: MessageContent): List<PromptChatMessage> = when (content) {
+            is MessageContent.TextPrompt -> userChatMessages(content.text)
+            is MessageContent.AudioPromptContent -> emptyList()
+        }
 
-        private fun userChatMessages(prompt: String): List<PromptChatMessage> =
-            if (prompt.isBlank()) {
-                emptyList()
-            } else {
-                listOf(PromptChatMessage(PromptChatRole.User, prompt))
-            }
+        private fun userChatMessages(prompt: String): List<PromptChatMessage> = if (prompt.isBlank()) {
+            emptyList()
+        } else {
+            listOf(PromptChatMessage(PromptChatRole.User, prompt))
+        }
     }
 }
 
@@ -69,24 +73,35 @@ enum class PromptChatRole(
     Assistant("assistant", "Assistant"),
 }
 
-fun List<PromptChatMessage>.toPlainChatPrompt(): String =
-    this.filter { it.text.isNotBlank() }.let { messages ->
-        buildString {
-            messages.forEach { message ->
-                append(message.role.transcriptLabel)
-                append(": ")
-                append(message.text.trim())
-                append('\n')
-            }
-            append("Assistant:")
+fun List<PromptChatMessage>.toPlainChatPrompt(): String = this.filter { it.text.isNotBlank() }.let { messages ->
+    buildString {
+        messages.forEach { message ->
+            append(message.role.transcriptLabel)
+            append(": ")
+            append(message.text.trim())
+            append('\n')
         }
+        append("Assistant:")
     }
+}
 
 sealed interface GenerationEvent {
-    data class Token(val text: String) : GenerationEvent
-    data class ReasoningToken(val text: String) : GenerationEvent
-    data class Metrics(val value: GenerationMetrics) : GenerationEvent
-    data class Failed(val message: String) : GenerationEvent
+    data class Token(
+        val text: String,
+    ) : GenerationEvent
+
+    data class ReasoningToken(
+        val text: String,
+    ) : GenerationEvent
+
+    data class Metrics(
+        val value: GenerationMetrics,
+    ) : GenerationEvent
+
+    data class Failed(
+        val message: String,
+    ) : GenerationEvent
+
     data object Completed : GenerationEvent
 }
 

@@ -20,12 +20,21 @@ internal fun interface ChatTextToSpeechListener {
 
 internal sealed interface ChatTextToSpeechResult {
     data object Completed : ChatTextToSpeechResult
-    data class Failed(val message: String) : ChatTextToSpeechResult
+
+    data class Failed(
+        val message: String,
+    ) : ChatTextToSpeechResult
 }
 
 internal interface ChatTextToSpeechService : AutoCloseable {
-    fun speak(text: String, languageTag: String?, listener: ChatTextToSpeechListener)
+    fun speak(
+        text: String,
+        languageTag: String?,
+        listener: ChatTextToSpeechListener,
+    )
+
     fun stop()
+
     override fun close()
 }
 
@@ -45,7 +54,10 @@ internal class ChatTextToSpeechController(
     var state = ChatTextToSpeechState()
         private set
 
-    fun prepare(messageId: String, responseText: String) {
+    fun prepare(
+        messageId: String,
+        responseText: String,
+    ) {
         if (preparationTexts[messageId] == responseText) return
 
         preparationTexts[messageId] = responseText
@@ -62,7 +74,10 @@ internal class ChatTextToSpeechController(
 
     fun isPrepared(messageId: String): Boolean = state.preparedLanguageTags.containsKey(messageId)
 
-    fun toggle(messageId: String, responseText: String) {
+    fun toggle(
+        messageId: String,
+        responseText: String,
+    ) {
         if (state.activeMessageId == messageId) {
             stop()
             return
@@ -76,9 +91,10 @@ internal class ChatTextToSpeechController(
             if (currentRequest != requestId) return@speak
             when (result) {
                 ChatTextToSpeechResult.Completed -> updateState(state.copy(activeMessageId = null, error = null))
-                is ChatTextToSpeechResult.Failed -> updateState(
-                    state.copy(activeMessageId = null, error = result.message),
-                )
+                is ChatTextToSpeechResult.Failed ->
+                    updateState(
+                        state.copy(activeMessageId = null, error = result.message),
+                    )
             }
         }
     }
@@ -107,10 +123,9 @@ internal class ChatTextToSpeechController(
     }
 }
 
-internal fun ChatMessage.isEligibleForTextToSpeech(isStreaming: Boolean): Boolean =
-    role == ChatRole.Assistant &&
-        !isStreaming &&
-        (content as? MessageContent.TextPrompt)?.text?.isNotBlank() == true
+internal fun ChatMessage.isEligibleForTextToSpeech(isStreaming: Boolean): Boolean = role == ChatRole.Assistant &&
+    !isStreaming &&
+    (content as? MessageContent.TextPrompt)?.text?.isNotBlank() == true
 
 internal class AndroidChatTextToSpeechService(
     context: Context,
@@ -124,7 +139,11 @@ internal class AndroidChatTextToSpeechService(
     private var activeUtteranceId: String? = null
     private var defaultVoice: Voice? = null
 
-    override fun speak(text: String, languageTag: String?, listener: ChatTextToSpeechListener) {
+    override fun speak(
+        text: String,
+        languageTag: String?,
+        listener: ChatTextToSpeechListener,
+    ) {
         if (closed) {
             notify(listener, ChatTextToSpeechResult.Failed("Text-to-speech is no longer available"))
             return
@@ -173,22 +192,27 @@ internal class AndroidChatTextToSpeechService(
         }
         defaultVoice = currentEngine.voice
         initialized = true
-        currentEngine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) = Unit
+        currentEngine.setOnUtteranceProgressListener(
+            object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) = Unit
 
-            override fun onDone(utteranceId: String?) {
-                finish(utteranceId, ChatTextToSpeechResult.Completed)
-            }
+                override fun onDone(utteranceId: String?) {
+                    finish(utteranceId, ChatTextToSpeechResult.Completed)
+                }
 
-            @Deprecated("Deprecated in Android")
-            override fun onError(utteranceId: String?) {
-                finish(utteranceId, ChatTextToSpeechResult.Failed("Unable to play this response"))
-            }
+                @Deprecated("Deprecated in Android")
+                override fun onError(utteranceId: String?) {
+                    finish(utteranceId, ChatTextToSpeechResult.Failed("Unable to play this response"))
+                }
 
-            override fun onError(utteranceId: String?, errorCode: Int) {
-                finish(utteranceId, ChatTextToSpeechResult.Failed("Unable to play this response"))
-            }
-        })
+                override fun onError(
+                    utteranceId: String?,
+                    errorCode: Int,
+                ) {
+                    finish(utteranceId, ChatTextToSpeechResult.Failed("Unable to play this response"))
+                }
+            },
+        )
         speakPending()
     }
 
@@ -222,7 +246,10 @@ internal class AndroidChatTextToSpeechService(
                 ).forEach { voice ->
                     if (
                         currentEngine.setVoice(voice) == TextToSpeech.SUCCESS &&
-                        currentEngine.voice?.locale?.language.equals(locale.language, ignoreCase = true)
+                        currentEngine.voice
+                            ?.locale
+                            ?.language
+                            .equals(locale.language, ignoreCase = true)
                     ) {
                         Log.d(LOG_TAG, "Selected TTS voice ${voice.name} (${voice.locale.toLanguageTag()}) for $languageTag")
                         return true
@@ -231,7 +258,10 @@ internal class AndroidChatTextToSpeechService(
 
                 if (
                     currentEngine.setLanguage(locale) >= TextToSpeech.LANG_AVAILABLE &&
-                    currentEngine.voice?.locale?.language.equals(locale.language, ignoreCase = true)
+                    currentEngine.voice
+                        ?.locale
+                        ?.language
+                        .equals(locale.language, ignoreCase = true)
                 ) {
                     Log.d(LOG_TAG, "TTS engine selected ${currentEngine.voice?.name} for $languageTag")
                     return true
@@ -245,7 +275,10 @@ internal class AndroidChatTextToSpeechService(
         return currentEngine.setVoice(voice) == TextToSpeech.SUCCESS
     }
 
-    private fun finish(utteranceId: String?, result: ChatTextToSpeechResult) {
+    private fun finish(
+        utteranceId: String?,
+        result: ChatTextToSpeechResult,
+    ) {
         if (utteranceId == null || utteranceId != activeUtteranceId) return
         activeUtteranceId = null
         val listener = pending?.takeIf { it.utteranceId == utteranceId }?.listener
@@ -260,7 +293,10 @@ internal class AndroidChatTextToSpeechService(
         listener?.let { notify(it, ChatTextToSpeechResult.Failed(message)) }
     }
 
-    private fun notify(listener: ChatTextToSpeechListener, result: ChatTextToSpeechResult) {
+    private fun notify(
+        listener: ChatTextToSpeechListener,
+        result: ChatTextToSpeechResult,
+    ) {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             listener.onResult(result)
         } else {
@@ -288,7 +324,8 @@ internal fun compatibleVoices(
     val requestedLanguage = Locale.forLanguageTag(languageTag).language
     if (requestedLanguage.isBlank()) return emptyList()
 
-    return voices.orEmpty()
+    return voices
+        .orEmpty()
         .asSequence()
         .filter { it.locale.language.equals(requestedLanguage, ignoreCase = true) }
         .filterNot { it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
@@ -299,6 +336,5 @@ internal fun compatibleVoices(
                 .thenBy { it.latency }
                 .thenBy { it.locale.toLanguageTag() }
                 .thenBy { it.name },
-        )
-        .toList()
+        ).toList()
 }

@@ -14,24 +14,28 @@ data class ChatUiState(
     val sessions: List<ChatSessionUiState> = emptyList(),
     val selectedSessionId: String? = null,
     val messages: List<ChatMessage> = emptyList(),
+    val messageDisplayRevision: Long = 0L,
+    val completedAssistantMessageId: String? = null,
     val isLoadingModel: Boolean = false,
     val isGenerating: Boolean = false,
     val canRetryModelDownload: Boolean = false,
     val error: String? = null,
 ) {
     val canSubmit: Boolean
-        get() = modelStatus == MODEL_AVAILABLE &&
-            selectedSessionId != null &&
-            hasSubmittableDraft &&
-            !isLoadingModel &&
-            !isGenerating
+        get() =
+            modelStatus == MODEL_AVAILABLE &&
+                selectedSessionId != null &&
+                hasSubmittableDraft &&
+                !isLoadingModel &&
+                !isGenerating
 
     val hasSubmittableDraft: Boolean
-        get() = if (audioPrompt != null) {
-            prompt.isBlank()
-        } else {
-            prompt.isNotBlank() || imageAttachments.isNotEmpty()
-        }
+        get() =
+            if (audioPrompt != null) {
+                prompt.isBlank()
+            } else {
+                prompt.isNotBlank() || imageAttachments.isNotEmpty()
+            }
 
     val canDeleteCurrentSession: Boolean
         get() = selectedSessionId != null && sessions.size > 1
@@ -89,10 +93,11 @@ data class AudioPrompt(
 )
 
 val MessageContent.displayText: String
-    get() = when (this) {
-        is MessageContent.TextPrompt -> text
-        is MessageContent.AudioPromptContent -> audio.displayName ?: "Audio prompt"
-    }
+    get() =
+        when (this) {
+            is MessageContent.TextPrompt -> text
+            is MessageContent.AudioPromptContent -> audio.displayName ?: "Audio prompt"
+        }
 
 enum class ChatRole {
     User,

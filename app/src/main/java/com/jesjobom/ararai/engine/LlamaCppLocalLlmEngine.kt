@@ -29,20 +29,28 @@ class LlamaCppLocalLlmEngine(
     private var loadedMaxTokens: Int = DEFAULT_MAX_TOKENS
     private var loadedGpuLayerCount: Int = 0
 
-    override suspend fun load(model: LocalModel, config: InferenceConfig) {
+    override suspend fun load(
+        model: LocalModel,
+        config: InferenceConfig,
+    ) {
         check(model.runtime == ModelRuntime.LlamaCpp) {
             "Unsupported local model runtime: ${model.runtime.displayName}"
         }
 
-        val alreadyLoaded = synchronized(lock) {
-            val isLoaded = loadedHandle != 0L &&
-                loadedModelId == model.id &&
-                loadedModelPath == model.filePath
-            if (isLoaded) {
-                loadedMaxTokens = config.maxTokens
+        val requestedGpuLayerCount = gpuLayerCountFor(model.acceleration)
+        val alreadyLoaded =
+            synchronized(lock) {
+                val isCompatible =
+                    loadedState()?.isCompatibleWith(
+                        model = model,
+                        config = config,
+                        gpuLayerCount = requestedGpuLayerCount,
+                    ) == true
+                if (isCompatible) {
+                    loadedMaxTokens = config.maxTokens
+                }
+                isCompatible
             }
-            isLoaded
-        }
         if (alreadyLoaded) return
 
         unload()
@@ -51,7 +59,7 @@ class LlamaCppLocalLlmEngine(
             modelId = model.id,
             modelPath = model.filePath,
             config = config,
-            gpuLayerCount = gpuLayerCountFor(model.acceleration),
+            gpuLayerCount = requestedGpuLayerCount,
         )
     }
 
@@ -64,42 +72,46 @@ class LlamaCppLocalLlmEngine(
             return@callbackFlow
         }
 
-        val job = launch(dispatcher) {
-            try {
-                val result = generateWithState(
-                    state = state ?: return@launch,
-                    request = request,
-                    emitToken = { token -> trySend(GenerationEvent.Token(token)).isSuccess },
-                )
-                if (result.error == null) {
-                    trySend(GenerationEvent.Completed)
-                } else if (result.shouldRetryCpu) {
-                    val retryState = reloadCpuOnly(result.state)
-                    val retryResult = generateWithState(
-                        state = retryState,
-                        request = request,
-                        emitToken = { token -> trySend(GenerationEvent.Token(token)).isSuccess },
-                    )
-                    if (retryResult.error == null) {
+        val job =
+            launch(dispatcher) {
+                try {
+                    val result =
+                        generateWithState(
+                            state = state ?: return@launch,
+                            request = request,
+                            emitToken = { token -> trySend(GenerationEvent.Token(token)).isSuccess },
+                        )
+                    if (result.error == null) {
                         trySend(GenerationEvent.Completed)
+                    } else if (result.shouldRetryCpu) {
+                        val retryState = reloadCpuOnly(result.state)
+                        val retryResult =
+                            generateWithState(
+                                state = retryState,
+                                request = request,
+                                emitToken = { token -> trySend(GenerationEvent.Token(token)).isSuccess },
+                            )
+                        if (retryResult.error == null) {
+                            trySend(GenerationEvent.Completed)
+                        } else {
+                            trySend(GenerationEvent.Failed("CPU fallback failed: ${retryResult.error}"))
+                        }
                     } else {
-                        trySend(GenerationEvent.Failed("CPU fallback failed: ${retryResult.error}"))
+                        trySend(GenerationEvent.Failed(result.error))
                     }
-                } else {
-                    trySend(GenerationEvent.Failed(result.error))
+                } catch (error: Throwable) {
+                    trySend(GenerationEvent.Failed(error.message ?: "Native generation failed"))
+                } finally {
+                    close()
                 }
-            } catch (error: Throwable) {
-                trySend(GenerationEvent.Failed(error.message ?: "Native generation failed"))
-            } finally {
-                close()
             }
-        }
 
         awaitClose {
             if (job.isActive) {
-                val currentHandle = synchronized(lock) {
-                    if (loadedHandle != 0L) loadedHandle else handle
-                }
+                val currentHandle =
+                    synchronized(lock) {
+                        if (loadedHandle != 0L) loadedHandle else handle
+                    }
                 bridge.cancel(currentHandle)
             }
             job.cancel()
@@ -107,20 +119,22 @@ class LlamaCppLocalLlmEngine(
     }
 
     override suspend fun unload() {
-        val handle = synchronized(lock) {
-            val current = loadedHandle
-            loadedHandle = 0L
-            loadedModelId = null
-            loadedModelPath = null
-            loadedContextTokens = 0
-            loadedTemperature = 0f
-            loadedTopP = 0f
-            loadedTopK = 0
-            loadedMinP = 0f
-            loadedRepeatPenalty = 0f
-            loadedGpuLayerCount = 0
-            current
-        }
+        val handle =
+            synchronized(lock) {
+                val current = loadedHandle
+                loadedHandle = 0L
+                loadedModelId = null
+                loadedModelPath = null
+                loadedContextTokens = 0
+                loadedTemperature = 0f
+                loadedTopP = 0f
+                loadedTopK = 0
+                loadedMinP = 0f
+                loadedRepeatPenalty = 0f
+                loadedMaxTokens = DEFAULT_MAX_TOKENS
+                loadedGpuLayerCount = 0
+                current
+            }
         if (handle != 0L) {
             withContext(dispatcher) {
                 bridge.unloadModel(handle)
@@ -134,8 +148,25 @@ class LlamaCppLocalLlmEngine(
         config: InferenceConfig,
         gpuLayerCount: Int,
     ): LoadedState {
-        val handle = withContext(dispatcher) {
-            bridge.loadModel(
+        val handle =
+            withContext(dispatcher) {
+                bridge.loadModel(
+                    modelPath = modelPath,
+                    contextTokens = config.contextTokens,
+                    temperature = config.temperature,
+                    topP = config.topP,
+                    topK = config.topK,
+                    minP = config.minP,
+                    repeatPenalty = config.repeatPenalty,
+                    gpuLayerCount = gpuLayerCount,
+                )
+            }
+        check(handle != 0L) { "Native model load returned an empty handle" }
+
+        val state =
+            LoadedState(
+                handle = handle,
+                modelId = modelId,
                 modelPath = modelPath,
                 contextTokens = config.contextTokens,
                 temperature = config.temperature,
@@ -143,24 +174,9 @@ class LlamaCppLocalLlmEngine(
                 topK = config.topK,
                 minP = config.minP,
                 repeatPenalty = config.repeatPenalty,
+                maxTokens = config.maxTokens,
                 gpuLayerCount = gpuLayerCount,
             )
-        }
-        check(handle != 0L) { "Native model load returned an empty handle" }
-
-        val state = LoadedState(
-            handle = handle,
-            modelId = modelId,
-            modelPath = modelPath,
-            contextTokens = config.contextTokens,
-            temperature = config.temperature,
-            topP = config.topP,
-            topK = config.topK,
-            minP = config.minP,
-            repeatPenalty = config.repeatPenalty,
-            maxTokens = config.maxTokens,
-            gpuLayerCount = gpuLayerCount,
-        )
         synchronized(lock) {
             loadedHandle = state.handle
             loadedModelId = state.modelId
@@ -178,20 +194,21 @@ class LlamaCppLocalLlmEngine(
     }
 
     private suspend fun reloadCpuOnly(state: LoadedState): LoadedState {
-        val currentHandle = synchronized(lock) {
-            if (loadedHandle == state.handle) {
-                loadedHandle = 0L
-                loadedModelId = null
-                loadedModelPath = null
-                loadedContextTokens = 0
-                loadedTemperature = 0f
-                loadedTopP = 0f
-                loadedGpuLayerCount = 0
-                state.handle
-            } else {
-                0L
+        val currentHandle =
+            synchronized(lock) {
+                if (loadedHandle == state.handle) {
+                    loadedHandle = 0L
+                    loadedModelId = null
+                    loadedModelPath = null
+                    loadedContextTokens = 0
+                    loadedTemperature = 0f
+                    loadedTopP = 0f
+                    loadedGpuLayerCount = 0
+                    state.handle
+                } else {
+                    0L
+                }
             }
-        }
         if (currentHandle != 0L) {
             bridge.unloadModel(currentHandle)
         }
@@ -199,7 +216,8 @@ class LlamaCppLocalLlmEngine(
         return loadModel(
             modelId = state.modelId,
             modelPath = state.modelPath,
-            config = InferenceConfig(
+            config =
+            InferenceConfig(
                 contextTokens = state.contextTokens,
                 maxTokens = state.maxTokens,
                 temperature = state.temperature,
@@ -225,20 +243,23 @@ class LlamaCppLocalLlmEngine(
             )
         }
         val textPrompt = request.textPrompt ?: request.prompt
-        val chatMessages = request.chatMessages.ifEmpty {
-            listOf(PromptChatMessage(PromptChatRole.User, textPrompt))
-        }
+        val chatMessages =
+            request.chatMessages.ifEmpty {
+                listOf(PromptChatMessage(PromptChatRole.User, textPrompt))
+            }
         val prompt = bridge.formatChatPrompt(state.handle, chatMessages) ?: chatMessages.toPlainChatPrompt()
         var emittedTokens = 0
-        val error = bridge.generate(
-            handle = state.handle,
-            prompt = prompt,
-            maxTokens = state.maxTokens,
-            callback = LlamaTokenCallback { token ->
-                emittedTokens += 1
-                emitToken(token)
-            },
-        )
+        val error =
+            bridge.generate(
+                handle = state.handle,
+                prompt = prompt,
+                maxTokens = state.maxTokens,
+                callback =
+                LlamaTokenCallback { token ->
+                    emittedTokens += 1
+                    emitToken(token)
+                },
+            )
         return GenerationResult(
             state = state,
             error = error,
@@ -277,7 +298,21 @@ class LlamaCppLocalLlmEngine(
         val repeatPenalty: Float,
         val maxTokens: Int,
         val gpuLayerCount: Int,
-    )
+    ) {
+        fun isCompatibleWith(
+            model: LocalModel,
+            config: InferenceConfig,
+            gpuLayerCount: Int,
+        ): Boolean = modelId == model.id &&
+            modelPath == model.filePath &&
+            contextTokens == config.contextTokens &&
+            temperature == config.temperature &&
+            topP == config.topP &&
+            topK == config.topK &&
+            minP == config.minP &&
+            repeatPenalty == config.repeatPenalty &&
+            this.gpuLayerCount == gpuLayerCount
+    }
 
     private data class GenerationResult(
         val state: LoadedState,
@@ -290,11 +325,10 @@ class LlamaCppLocalLlmEngine(
                 state.gpuLayerCount > CPU_ONLY_LAYER_COUNT
     }
 
-    private fun gpuLayerCountFor(acceleration: ModelAccelerationPolicy): Int =
-        when (acceleration) {
-            ModelAccelerationPolicy.CpuOnly -> CPU_ONLY_LAYER_COUNT
-            ModelAccelerationPolicy.GpuPreferred -> DEFAULT_GPU_LAYER_COUNT
-        }
+    private fun gpuLayerCountFor(acceleration: ModelAccelerationPolicy): Int = when (acceleration) {
+        ModelAccelerationPolicy.CpuOnly -> CPU_ONLY_LAYER_COUNT
+        ModelAccelerationPolicy.GpuPreferred -> DEFAULT_GPU_LAYER_COUNT
+    }
 
     private companion object {
         const val DEFAULT_MAX_TOKENS = 128
@@ -327,7 +361,10 @@ interface LlamaNativeBridge {
         callback: LlamaTokenCallback,
     ): String?
 
-    fun formatChatPrompt(handle: Long, messages: List<PromptChatMessage>): String?
+    fun formatChatPrompt(
+        handle: Long,
+        messages: List<PromptChatMessage>,
+    ): String?
 
     fun cancel(handle: Long)
 
@@ -357,12 +394,14 @@ object JniLlamaNativeBridge : LlamaNativeBridge {
         callback: LlamaTokenCallback,
     ): String?
 
-    override fun formatChatPrompt(handle: Long, messages: List<PromptChatMessage>): String? =
-        formatStructuredChatPrompt(
-            handle = handle,
-            roles = messages.map { it.role.templateRole }.toTypedArray(),
-            contents = messages.map { it.text }.toTypedArray(),
-        )
+    override fun formatChatPrompt(
+        handle: Long,
+        messages: List<PromptChatMessage>,
+    ): String? = formatStructuredChatPrompt(
+        handle = handle,
+        roles = messages.map { it.role.templateRole }.toTypedArray(),
+        contents = messages.map { it.text }.toTypedArray(),
+    )
 
     private external fun formatStructuredChatPrompt(
         handle: Long,

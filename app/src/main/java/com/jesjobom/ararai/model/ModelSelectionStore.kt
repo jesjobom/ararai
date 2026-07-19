@@ -4,6 +4,7 @@ import android.content.Context
 
 interface ModelSelectionStore {
     fun selectedModelId(): String?
+
     fun saveSelectedModelId(modelId: String)
 }
 
@@ -24,8 +25,7 @@ class SharedPreferencesModelSelectionStore(
 ) : ModelSelectionStore {
     private val preferences = context.getSharedPreferences("ararai_preferences", Context.MODE_PRIVATE)
 
-    override fun selectedModelId(): String? =
-        preferences.getString(KEY_SELECTED_MODEL_ID, null)
+    override fun selectedModelId(): String? = preferences.getString(KEY_SELECTED_MODEL_ID, null)
 
     override fun saveSelectedModelId(modelId: String) {
         preferences.edit().putString(KEY_SELECTED_MODEL_ID, modelId).apply()

@@ -9,6 +9,7 @@ enum class ThemeMode { System, Light, Dark }
 
 interface ThemePreferenceStore {
     val themeMode: StateFlow<ThemeMode>
+
     fun setThemeMode(mode: ThemeMode)
 }
 
@@ -23,7 +24,9 @@ class InMemoryThemePreferenceStore(
     }
 }
 
-class SharedPreferencesThemePreferenceStore(context: Context) : ThemePreferenceStore {
+class SharedPreferencesThemePreferenceStore(
+    context: Context,
+) : ThemePreferenceStore {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val mutableThemeMode = MutableStateFlow(decodeThemeMode(preferences.getString(KEY_THEME_MODE, null)))
     override val themeMode: StateFlow<ThemeMode> = mutableThemeMode.asStateFlow()
@@ -37,7 +40,6 @@ class SharedPreferencesThemePreferenceStore(context: Context) : ThemePreferenceS
         const val PREFERENCES_NAME = "ararai_preferences"
         const val KEY_THEME_MODE = "theme_mode"
 
-        fun decodeThemeMode(value: String?): ThemeMode =
-            ThemeMode.entries.firstOrNull { it.name == value } ?: ThemeMode.System
+        fun decodeThemeMode(value: String?): ThemeMode = ThemeMode.entries.firstOrNull { it.name == value } ?: ThemeMode.System
     }
 }

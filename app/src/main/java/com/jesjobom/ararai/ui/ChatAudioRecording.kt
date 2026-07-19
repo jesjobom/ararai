@@ -11,41 +11,42 @@ internal data class RecordedAudio(
     val file: File,
     val durationMillis: Long,
 ) {
-    fun toAudioPrompt(): AudioPrompt =
-        recordedAudioPrompt(
-            file = file,
-            durationMillis = durationMillis,
-        )
+    fun toAudioPrompt(): AudioPrompt = recordedAudioPrompt(
+        file = file,
+        durationMillis = durationMillis,
+    )
 }
 
 internal fun recordedAudioPrompt(
     file: File,
     durationMillis: Long,
-): AudioPrompt =
-    AudioPrompt(
-        uri = file.absolutePath,
-        mimeType = RECORDED_AUDIO_MIME_TYPE,
-        displayName = file.name,
-        byteSize = file.length(),
-        durationMillis = durationMillis,
-    )
+): AudioPrompt = AudioPrompt(
+    uri = file.absolutePath,
+    mimeType = RECORDED_AUDIO_MIME_TYPE,
+    displayName = file.name,
+    byteSize = file.length(),
+    durationMillis = durationMillis,
+)
 
 internal class ChatAudioRecorder(
     override val file: File,
     private val sampleRate: Int = RECORDED_AUDIO_SAMPLE_RATE_HZ,
 ) : ChatAudioRecording {
-    private val bufferSize: Int = maxOf(
-        AudioRecord.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-        ),
-        RECORDED_AUDIO_BUFFER_SIZE_BYTES,
-    )
+    private val bufferSize: Int =
+        maxOf(
+            AudioRecord.getMinBufferSize(
+                sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+            ),
+            RECORDED_AUDIO_BUFFER_SIZE_BYTES,
+        )
     private var audioRecord: AudioRecord? = null
     private var recordingThread: Thread? = null
+
     @Volatile
     private var isRecording: Boolean = false
+
     @Volatile
     private var dataSize: Long = 0L
 
@@ -54,13 +55,14 @@ internal class ChatAudioRecorder(
         require(bufferSize > 0) { "Unable to initialize audio input" }
         file.parentFile?.mkdirs()
         dataSize = 0L
-        val recorder = AudioRecord(
-            android.media.MediaRecorder.AudioSource.MIC,
-            sampleRate,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize,
-        )
+        val recorder =
+            AudioRecord(
+                android.media.MediaRecorder.AudioSource.MIC,
+                sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize,
+            )
         if (recorder.state != AudioRecord.STATE_INITIALIZED) {
             recorder.release()
             error("Unable to initialize microphone")
@@ -71,41 +73,41 @@ internal class ChatAudioRecorder(
         }
         recorder.startRecording()
         isRecording = true
-        recordingThread = Thread(
-            {
-                FileOutputStream(file, true).buffered().use { output ->
-                    val buffer = ByteArray(bufferSize)
-                    while (isRecording) {
-                        val read = recorder.read(buffer, 0, buffer.size)
-                        if (read > 0) {
-                            output.write(buffer, 0, read)
-                            dataSize += read.toLong()
+        recordingThread =
+            Thread(
+                {
+                    FileOutputStream(file, true).buffered().use { output ->
+                        val buffer = ByteArray(bufferSize)
+                        while (isRecording) {
+                            val read = recorder.read(buffer, 0, buffer.size)
+                            if (read > 0) {
+                                output.write(buffer, 0, read)
+                                dataSize += read.toLong()
+                            }
                         }
                     }
-                }
-            },
-            "ChatAudioRecorder",
-        ).apply { start() }
+                },
+                "ChatAudioRecorder",
+            ).apply { start() }
     }
 
-    override fun stopSafely(): Boolean =
-        try {
-            isRecording = false
-            audioRecord?.stopSafely()
-            recordingThread?.join(1_000)
-            audioRecord?.release()
-            audioRecord = null
-            recordingThread = null
-            if (dataSize > 0L) {
-                file.writeWavHeader(dataSize = dataSize, sampleRate = sampleRate)
-            }
-            dataSize > 0L
-        } catch (_: RuntimeException) {
-            false
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-            false
+    override fun stopSafely(): Boolean = try {
+        isRecording = false
+        audioRecord?.stopSafely()
+        recordingThread?.join(1_000)
+        audioRecord?.release()
+        audioRecord = null
+        recordingThread = null
+        if (dataSize > 0L) {
+            file.writeWavHeader(dataSize = dataSize, sampleRate = sampleRate)
         }
+        dataSize > 0L
+    } catch (_: RuntimeException) {
+        false
+    } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+        false
+    }
 }
 
 private fun AudioRecord.stopSafely() {
@@ -143,25 +145,37 @@ internal fun createWavHeader(
     }
 }
 
-private fun File.writeWavHeader(dataSize: Long, sampleRate: Int) {
+private fun File.writeWavHeader(
+    dataSize: Long,
+    sampleRate: Int,
+) {
     RandomAccessFile(this, "rw").use { file ->
         file.seek(0)
         file.write(createWavHeader(dataSize = dataSize, sampleRate = sampleRate))
     }
 }
 
-private fun ByteArray.writeAscii(offset: Int, value: String) {
+private fun ByteArray.writeAscii(
+    offset: Int,
+    value: String,
+) {
     value.forEachIndexed { index, char -> this[offset + index] = char.code.toByte() }
 }
 
-private fun ByteArray.writeLittleEndianInt(offset: Int, value: Int) {
+private fun ByteArray.writeLittleEndianInt(
+    offset: Int,
+    value: Int,
+) {
     this[offset] = value.toByte()
     this[offset + 1] = (value shr 8).toByte()
     this[offset + 2] = (value shr 16).toByte()
     this[offset + 3] = (value shr 24).toByte()
 }
 
-private fun ByteArray.writeLittleEndianShort(offset: Int, value: Int) {
+private fun ByteArray.writeLittleEndianShort(
+    offset: Int,
+    value: Int,
+) {
     this[offset] = value.toByte()
     this[offset + 1] = (value shr 8).toByte()
 }

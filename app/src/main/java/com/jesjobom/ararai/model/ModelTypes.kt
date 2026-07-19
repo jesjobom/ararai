@@ -30,12 +30,12 @@ enum class ModelRuntime(
     val displayName: String,
 ) {
     LlamaCpp("llama_cpp", "llama.cpp"),
-    LiteRtLm("litert_lm", "LiteRT-LM");
+    LiteRtLm("litert_lm", "LiteRT-LM"),
+    ;
 
     companion object {
-        fun fromConfigValue(value: String): ModelRuntime =
-            entries.firstOrNull { it.configValue == value }
-                ?: throw IllegalArgumentException("Unsupported model runtime: $value")
+        fun fromConfigValue(value: String): ModelRuntime = entries.firstOrNull { it.configValue == value }
+            ?: throw IllegalArgumentException("Unsupported model runtime: $value")
     }
 }
 
@@ -44,12 +44,12 @@ enum class ModelArtifactFormat(
     val displayName: String,
 ) {
     Gguf("gguf", "GGUF"),
-    LiteRtLmBundle("litert_lm_bundle", "LiteRT-LM bundle");
+    LiteRtLmBundle("litert_lm_bundle", "LiteRT-LM bundle"),
+    ;
 
     companion object {
-        fun fromConfigValue(value: String): ModelArtifactFormat =
-            entries.firstOrNull { it.configValue == value }
-                ?: throw IllegalArgumentException("Unsupported model artifact format: $value")
+        fun fromConfigValue(value: String): ModelArtifactFormat = entries.firstOrNull { it.configValue == value }
+            ?: throw IllegalArgumentException("Unsupported model artifact format: $value")
     }
 }
 
@@ -58,12 +58,12 @@ enum class ModelAccelerationPolicy(
     val displayName: String,
 ) {
     GpuPreferred("gpu_preferred", "GPU preferred"),
-    CpuOnly("cpu_only", "CPU only");
+    CpuOnly("cpu_only", "CPU only"),
+    ;
 
     companion object {
-        fun fromConfigValue(value: String): ModelAccelerationPolicy =
-            entries.firstOrNull { it.configValue == value }
-                ?: throw IllegalArgumentException("Unsupported model acceleration policy: $value")
+        fun fromConfigValue(value: String): ModelAccelerationPolicy = entries.firstOrNull { it.configValue == value }
+            ?: throw IllegalArgumentException("Unsupported model acceleration policy: $value")
     }
 }
 

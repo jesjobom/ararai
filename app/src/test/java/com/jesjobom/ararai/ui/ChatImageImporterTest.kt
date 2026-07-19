@@ -5,12 +5,6 @@ import android.graphics.BitmapFactory
 import android.media.ExifInterface
 import android.net.Uri
 import com.jesjobom.ararai.chat.FileChatMediaRepository
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.IOException
-import java.io.InputStream
-import kotlin.io.path.createTempDirectory
 import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -20,6 +14,12 @@ import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.IOException
+import java.io.InputStream
+import kotlin.io.path.createTempDirectory
 
 @RunWith(RobolectricTestRunner::class)
 class ChatImageImporterTest {
@@ -45,12 +45,13 @@ class ChatImageImporterTest {
     fun `applies quarter-turn EXIF orientation before normalization`() {
         val mediaDir = temporaryDirectory()
         val source = jpeg(width = 80, height = 40)
-        val importer = importer(
-            mediaDir = mediaDir,
-            source = source,
-            normalizedDimension = 32,
-            orientation = ExifInterface.ORIENTATION_ROTATE_90,
-        )
+        val importer =
+            importer(
+                mediaDir = mediaDir,
+                source = source,
+                normalizedDimension = 32,
+                orientation = ExifInterface.ORIENTATION_ROTATE_90,
+            )
 
         val imported = importer.import(TEST_URI)
 
@@ -62,12 +63,13 @@ class ChatImageImporterTest {
 
     @Test
     fun `supports every transforming EXIF orientation`() {
-        val source = Bitmap.createBitmap(2, 3, Bitmap.Config.ARGB_8888).apply {
-            eraseColor(android.graphics.Color.BLUE)
-        }
+        val source =
+            Bitmap.createBitmap(2, 3, Bitmap.Config.ARGB_8888).apply {
+                eraseColor(android.graphics.Color.BLUE)
+            }
 
-        val transformingOrientations = ExifInterface.ORIENTATION_FLIP_HORIZONTAL..
-            ExifInterface.ORIENTATION_ROTATE_270
+        val transformingOrientations =
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL..ExifInterface.ORIENTATION_ROTATE_270
 
         transformingOrientations.forEach { orientation ->
             val transformed = source.applyExifOrientation(orientation)
@@ -85,16 +87,17 @@ class ChatImageImporterTest {
     fun `rejects declared source size before opening the provider`() {
         val mediaDir = temporaryDirectory()
         var opened = false
-        val importer = ChatImageImporter(
-            mediaRepository = FileChatMediaRepository(mediaDir),
-            openSource = {
-                opened = true
-                ByteArrayInputStream(byteArrayOf())
-            },
-            sourceDisplayName = { null },
-            declaredSourceSize = { 5L },
-            maxSourceBytes = 4L,
-        )
+        val importer =
+            ChatImageImporter(
+                mediaRepository = FileChatMediaRepository(mediaDir),
+                openSource = {
+                    opened = true
+                    ByteArrayInputStream(byteArrayOf())
+                },
+                sourceDisplayName = { null },
+                declaredSourceSize = { 5L },
+                maxSourceBytes = 4L,
+            )
 
         assertFailureContains("20 MB") { importer.import(TEST_URI) }
 
@@ -115,12 +118,13 @@ class ChatImageImporterTest {
     @Test
     fun `rejects decoded dimensions above the configured limit`() {
         val mediaDir = temporaryDirectory()
-        val importer = importer(
-            mediaDir = mediaDir,
-            source = jpeg(width = 20, height = 10),
-            maxDecodedDimension = 16,
-            normalizedDimension = 8,
-        )
+        val importer =
+            importer(
+                mediaDir = mediaDir,
+                source = jpeg(width = 20, height = 10),
+                maxDecodedDimension = 16,
+                normalizedDimension = 8,
+            )
 
         assertFailureContains("8192 px") { importer.import(TEST_URI) }
 
@@ -130,13 +134,14 @@ class ChatImageImporterTest {
     @Test
     fun `rejects malformed input and removes partial files`() {
         val mediaDir = temporaryDirectory()
-        val importer = ChatImageImporter(
-            mediaRepository = FileChatMediaRepository(mediaDir),
-            openSource = { ByteArrayInputStream("not an image".encodeToByteArray()) },
-            sourceDisplayName = { null },
-            declaredSourceSize = { null },
-            readBounds = { null },
-        )
+        val importer =
+            ChatImageImporter(
+                mediaRepository = FileChatMediaRepository(mediaDir),
+                openSource = { ByteArrayInputStream("not an image".encodeToByteArray()) },
+                sourceDisplayName = { null },
+                declaredSourceSize = { null },
+                readBounds = { null },
+            )
 
         assertFailureContains("decode") { importer.import(TEST_URI) }
 
@@ -146,12 +151,13 @@ class ChatImageImporterTest {
     @Test
     fun `cleans up when the provider fails during streaming`() {
         val mediaDir = temporaryDirectory()
-        val importer = ChatImageImporter(
-            mediaRepository = FileChatMediaRepository(mediaDir),
-            openSource = { FailingInputStream() },
-            sourceDisplayName = { null },
-            declaredSourceSize = { null },
-        )
+        val importer =
+            ChatImageImporter(
+                mediaRepository = FileChatMediaRepository(mediaDir),
+                openSource = { FailingInputStream() },
+                sourceDisplayName = { null },
+                declaredSourceSize = { null },
+            )
 
         assertFailureContains("provider failed") { importer.import(TEST_URI) }
 
@@ -161,12 +167,13 @@ class ChatImageImporterTest {
     @Test
     fun `cleans up when import is cancelled during streaming`() {
         val mediaDir = temporaryDirectory()
-        val importer = ChatImageImporter(
-            mediaRepository = FileChatMediaRepository(mediaDir),
-            openSource = { CancellingInputStream() },
-            sourceDisplayName = { null },
-            declaredSourceSize = { null },
-        )
+        val importer =
+            ChatImageImporter(
+                mediaRepository = FileChatMediaRepository(mediaDir),
+                openSource = { CancellingInputStream() },
+                sourceDisplayName = { null },
+                declaredSourceSize = { null },
+            )
 
         assertFailureContains("cancelled") { importer.import(TEST_URI) }
 
@@ -191,10 +198,12 @@ class ChatImageImporterTest {
         normalizedDimension = normalizedDimension,
     )
 
-    private fun temporaryDirectory(): File =
-        createTempDirectory("chat-image-import-").toFile().apply { deleteOnExit() }
+    private fun temporaryDirectory(): File = createTempDirectory("chat-image-import-").toFile().apply { deleteOnExit() }
 
-    private fun jpeg(width: Int, height: Int): ByteArray {
+    private fun jpeg(
+        width: Int,
+        height: Int,
+    ): ByteArray {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         return ByteArrayOutputStream().use { output ->
             assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output))
@@ -203,7 +212,10 @@ class ChatImageImporterTest {
         }
     }
 
-    private fun assertFailureContains(expected: String, block: () -> Unit) {
+    private fun assertFailureContains(
+        expected: String,
+        block: () -> Unit,
+    ) {
         try {
             block()
             fail("Expected import to fail")

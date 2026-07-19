@@ -13,11 +13,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class ChatViewModel(
@@ -28,17 +28,22 @@ class ChatViewModel(
     private val sessionStore: ChatSessionStore = InMemoryChatSessionStore(),
     private val mediaRepository: ChatMediaRepository = NoOpChatMediaRepository,
     private val promptContextBuilder: PromptContextBuilder = PromptContextBuilder(),
-    initialModelStatus: String = if (initialModel == null) {
-        "Model unavailable"
-    } else {
-        ChatUiState.MODEL_AVAILABLE
-    },
+    initialModelStatus: String =
+        if (initialModel == null) {
+            "Model unavailable"
+        } else {
+            ChatUiState.MODEL_AVAILABLE
+        },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val assistantPersistenceIntervalMillis: Long = DEFAULT_ASSISTANT_PERSISTENCE_INTERVAL_MILLIS,
+    private val assistantPresentationIntervalMillis: Long = DEFAULT_ASSISTANT_PRESENTATION_INTERVAL_MILLIS,
 ) {
     init {
         require(assistantPersistenceIntervalMillis > 0L) {
             "Assistant persistence interval must be positive"
+        }
+        require(assistantPresentationIntervalMillis > 0L) {
+            "Assistant presentation interval must be positive"
         }
     }
 
@@ -47,21 +52,23 @@ class ChatViewModel(
     private var generationJob: Job? = null
     private var activeAssistantMessageId: String? = null
     private var assistantPersistenceJob: Job? = null
+    private var assistantPresentationJob: Job? = null
     private var assistantBuffer: AssistantMessageBuffer? = null
     private val assistantBufferLock = Any()
     private val initialSession = sessionStore.ensureSession()
-    private val _uiState = MutableStateFlow(
-        ChatUiState(
-            modelStatus = initialModelStatus,
-            canAttachImage = initialModel?.inputCapabilities?.image == true,
-            canUseAudioPrompt = initialModel?.inputCapabilities?.audio == true,
-            canEnableReasoning = initialModel?.reasoningCapabilities?.request == true,
-            canShowReasoning = initialModel?.reasoningCapabilities?.output == true,
-            sessions = sessionStore.listSessions().toUiState(),
-            selectedSessionId = initialSession.id,
-            messages = sessionStore.getMessages(initialSession.id).toChatMessages(),
-        ),
-    )
+    private val _uiState =
+        MutableStateFlow(
+            ChatUiState(
+                modelStatus = initialModelStatus,
+                canAttachImage = initialModel?.inputCapabilities?.image == true,
+                canUseAudioPrompt = initialModel?.inputCapabilities?.audio == true,
+                canEnableReasoning = initialModel?.reasoningCapabilities?.request == true,
+                canShowReasoning = initialModel?.reasoningCapabilities?.output == true,
+                sessions = sessionStore.listSessions().toUiState(),
+                selectedSessionId = initialSession.id,
+                messages = sessionStore.getMessages(initialSession.id).toChatMessages(),
+            ),
+        )
 
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -182,7 +189,10 @@ class ChatViewModel(
         renameSession(sessionId, title)
     }
 
-    fun renameSession(sessionId: String, title: String) {
+    fun renameSession(
+        sessionId: String,
+        title: String,
+    ) {
         if (_uiState.value.sessions.none { it.id == sessionId }) return
         sessionStore.renameSession(sessionId, title)
         _uiState.update { it.copy(sessions = sessionStore.listSessions().toUiState(), error = null) }
@@ -199,15 +209,18 @@ class ChatViewModel(
 
         val deletingSelectedSession = current.selectedSessionId == sessionId
         if (deletingSelectedSession) deleteCurrentDraftMedia()
-        val deletedMedia = sessionStore.getMessages(sessionId)
-            .flatMapTo(linkedSetOf()) { it.content.mediaUris() }
+        val deletedMedia =
+            sessionStore
+                .getMessages(sessionId)
+                .flatMapTo(linkedSetOf()) { it.content.mediaUris() }
         sessionStore.deleteSession(sessionId)
         mediaRepository.deleteUnreferenced(deletedMedia, sessionStore.referencedMediaUris())
-        val next = if (current.selectedSessionId == sessionId) {
-            sessionStore.ensureSession()
-        } else {
-            sessionStore.listSessions().first { it.id == current.selectedSessionId }
-        }
+        val next =
+            if (current.selectedSessionId == sessionId) {
+                sessionStore.ensureSession()
+            } else {
+                sessionStore.listSessions().first { it.id == current.selectedSessionId }
+            }
         _uiState.update {
             it.copy(
                 sessions = sessionStore.listSessions().toUiState(),
@@ -246,10 +259,11 @@ class ChatViewModel(
     fun onModelStartupState(state: ModelStartupState) {
         val current = _uiState.value
         if (state is ModelStartupState.Available) {
-            val discardedUris = buildList {
-                if (!state.model.inputCapabilities.image) addAll(current.imageAttachments.map { it.uri })
-                if (!state.model.inputCapabilities.audio) current.audioPrompt?.uri?.let(::add)
-            }
+            val discardedUris =
+                buildList {
+                    if (!state.model.inputCapabilities.image) addAll(current.imageAttachments.map { it.uri })
+                    if (!state.model.inputCapabilities.audio) current.audioPrompt?.uri?.let(::add)
+                }
             deleteDraftMedia(discardedUris)
         } else {
             deleteCurrentDraftMedia()
@@ -384,13 +398,14 @@ class ChatViewModel(
         val submittedTitle = submittedContent.displayText
         maybeTitleSession(sessionId, submittedTitle)
         val history = sessionStore.getMessages(sessionId).toChatMessages()
-        val requestMessages = submittedContent.toRequestMessages(
-            systemPrompt = systemPrompt,
-            history = history,
-            inferenceConfig = inferenceForRequest,
-        )
+        val requestMessages =
+            submittedContent.toRequestMessages(
+                systemPrompt = systemPrompt,
+                history = history,
+                inferenceConfig = inferenceForRequest,
+            )
         val requestContent = submittedContent.toRequestContent(requestMessages)
-        val userMessage = sessionStore.appendMessage(sessionId, ChatRole.User, submittedContent).toChatMessage()
+        sessionStore.appendMessage(sessionId, ChatRole.User, submittedContent)
         val assistantMessage = sessionStore.appendMessage(sessionId, ChatRole.Assistant, "").toChatMessage()
         activeAssistantMessageId = assistantMessage.id
         synchronized(assistantBufferLock) {
@@ -408,74 +423,80 @@ class ChatViewModel(
             )
         }
 
-        generationJob = scope.launch {
-            if (modelForRequest == null) {
-                finalizeAssistantMessage()
-                _uiState.update {
-                    it.copy(
-                        isLoadingModel = false,
-                        isGenerating = false,
-                        error = "Model unavailable",
-                    )
-                }
-                return@launch
-            }
-
-            try {
-                engine.load(modelForRequest, inferenceForRequest)
-                _uiState.update { it.copy(isLoadingModel = false) }
-
-                engine.generate(
-                    PromptRequest(
-                        content = requestContent,
-                        chatMessages = requestMessages,
-                        reasoningEnabled = current.reasoningEnabled && modelForRequest.reasoningCapabilities.request,
-                        chatSessionId = sessionId,
-                    ),
-                ).collect { event ->
-                    when (event) {
-                        is GenerationEvent.Token -> appendAssistantToken(event.text)
-                        is GenerationEvent.ReasoningToken -> appendAssistantReasoningToken(event.text)
-                        is GenerationEvent.Metrics -> Unit
-                        is GenerationEvent.Failed -> {
-                            flushAssistantMessage()
-                            _uiState.update {
-                                it.copy(
-                                    isLoadingModel = false,
-                                    isGenerating = false,
-                                    error = event.message,
-                                )
-                            }
-                        }
-                        GenerationEvent.Completed -> {
-                            flushAssistantMessage()
-                            _uiState.update {
-                                it.copy(
-                                    isLoadingModel = false,
-                                    isGenerating = false,
-                                    prompt = "",
-                                    imageAttachments = emptyList(),
-                                    audioPrompt = null,
-                                    sessions = sessionStore.listSessions().toUiState(),
-                                )
-                            }
-                        }
+        generationJob =
+            scope.launch {
+                if (modelForRequest == null) {
+                    finalizeAssistantMessage()
+                    _uiState.update {
+                        it.copy(
+                            isLoadingModel = false,
+                            isGenerating = false,
+                            error = "Model unavailable",
+                        )
                     }
+                    return@launch
                 }
-            } catch (error: Throwable) {
-                if (error is kotlinx.coroutines.CancellationException) return@launch
-                flushAssistantMessage()
-                _uiState.update {
-                    it.copy(
-                        isLoadingModel = false,
-                        isGenerating = false,
-                        error = error.message ?: "Generation failed",
-                    )
+
+                try {
+                    engine.load(modelForRequest, inferenceForRequest)
+                    _uiState.update { it.copy(isLoadingModel = false) }
+
+                    engine
+                        .generate(
+                            PromptRequest(
+                                content = requestContent,
+                                chatMessages = requestMessages,
+                                reasoningEnabled = current.reasoningEnabled && modelForRequest.reasoningCapabilities.request,
+                                chatSessionId = sessionId,
+                            ),
+                        ).collect { event ->
+                            when (event) {
+                                is GenerationEvent.Token -> appendAssistantToken(event.text)
+                                is GenerationEvent.ReasoningToken -> appendAssistantReasoningToken(event.text)
+                                is GenerationEvent.Metrics -> Unit
+                                is GenerationEvent.Failed -> {
+                                    flushAssistantPresentation()
+                                    flushAssistantMessage()
+                                    _uiState.update {
+                                        it.copy(
+                                            isLoadingModel = false,
+                                            isGenerating = false,
+                                            error = event.message,
+                                        )
+                                    }
+                                }
+                                GenerationEvent.Completed -> {
+                                    flushAssistantPresentation()
+                                    flushAssistantMessage()
+                                    _uiState.update {
+                                        it.copy(
+                                            isLoadingModel = false,
+                                            isGenerating = false,
+                                            prompt = "",
+                                            imageAttachments = emptyList(),
+                                            audioPrompt = null,
+                                            sessions = sessionStore.listSessions().toUiState(),
+                                            completedAssistantMessageId = activeAssistantMessageId,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                } catch (error: Throwable) {
+                    if (error is kotlinx.coroutines.CancellationException) return@launch
+                    flushAssistantPresentation()
+                    flushAssistantMessage()
+                    _uiState.update {
+                        it.copy(
+                            isLoadingModel = false,
+                            isGenerating = false,
+                            error = error.message ?: "Generation failed",
+                        )
+                    }
+                } finally {
+                    finalizeAssistantMessage()
                 }
-            } finally {
-                finalizeAssistantMessage()
             }
-        }
     }
 
     private fun deleteCurrentDraftMedia() {
@@ -532,49 +553,77 @@ class ChatViewModel(
 
     private fun appendAssistantContent(update: (AssistantMessageBuffer) -> Unit) {
         val assistantMessageId = activeAssistantMessageId ?: return
-        val content = synchronized(assistantBufferLock) {
+        synchronized(assistantBufferLock) {
             val buffer = assistantBuffer?.takeIf { it.messageId == assistantMessageId } ?: return
             update(buffer)
-            buffer.dirty = true
-            buffer.snapshot()
+            buffer.persistenceDirty = true
+            buffer.presentationDirty = true
         }
-        _uiState.update { state ->
-            val updatedMessages = state.messages.toMutableList()
-            val assistantIndex = updatedMessages.indexOfLast { it.id == assistantMessageId }
-            if (assistantIndex >= 0) {
-                val currentAssistant = updatedMessages[assistantIndex]
-                val updatedAssistant = currentAssistant.copy(content = content)
-                updatedMessages[assistantIndex] = updatedAssistant
-            }
-            state.copy(messages = updatedMessages)
-        }
+        scheduleAssistantPresentation()
         scheduleAssistantPersistence()
+    }
+
+    private fun scheduleAssistantPresentation() {
+        synchronized(assistantBufferLock) {
+            if (assistantPresentationJob?.isActive == true || assistantBuffer?.presentationDirty != true) return
+            assistantPresentationJob =
+                scope.launch {
+                    delay(assistantPresentationIntervalMillis)
+                    flushAssistantPresentation()
+                }
+        }
+    }
+
+    private fun flushAssistantPresentation() {
+        val pending =
+            synchronized(assistantBufferLock) {
+                assistantPresentationJob?.cancel()
+                assistantPresentationJob = null
+                val buffer = assistantBuffer?.takeIf { it.presentationDirty } ?: return
+                buffer.presentationDirty = false
+                buffer.messageId to buffer.snapshot()
+            }
+        _uiState.update { state ->
+            val assistantIndex = state.messages.indexOfLast { it.id == pending.first }
+            if (assistantIndex < 0) return@update state
+            val updatedMessages = state.messages.toMutableList()
+            updatedMessages[assistantIndex] = updatedMessages[assistantIndex].copy(content = pending.second)
+            state.copy(
+                messages = updatedMessages,
+                messageDisplayRevision = state.messageDisplayRevision + 1L,
+            )
+        }
     }
 
     private fun scheduleAssistantPersistence() {
         synchronized(assistantBufferLock) {
-            if (assistantPersistenceJob?.isActive == true || assistantBuffer?.dirty != true) return
-            assistantPersistenceJob = scope.launch {
-                delay(assistantPersistenceIntervalMillis)
-                flushAssistantMessage()
-            }
+            if (assistantPersistenceJob?.isActive == true || assistantBuffer?.persistenceDirty != true) return
+            assistantPersistenceJob =
+                scope.launch {
+                    delay(assistantPersistenceIntervalMillis)
+                    flushAssistantMessage()
+                }
         }
     }
 
     private fun flushAssistantMessage() {
-        val pending = synchronized(assistantBufferLock) {
-            assistantPersistenceJob?.cancel()
-            assistantPersistenceJob = null
-            val buffer = assistantBuffer?.takeIf { it.dirty } ?: return
-            buffer.dirty = false
-            buffer.messageId to buffer.snapshot()
-        }
+        val pending =
+            synchronized(assistantBufferLock) {
+                assistantPersistenceJob?.cancel()
+                assistantPersistenceJob = null
+                val buffer = assistantBuffer?.takeIf { it.persistenceDirty } ?: return
+                buffer.persistenceDirty = false
+                buffer.messageId to buffer.snapshot()
+            }
         sessionStore.updateMessage(pending.first, pending.second)
     }
 
     private fun finalizeAssistantMessage() {
+        flushAssistantPresentation()
         flushAssistantMessage()
         synchronized(assistantBufferLock) {
+            assistantPresentationJob?.cancel()
+            assistantPresentationJob = null
             assistantPersistenceJob?.cancel()
             assistantPersistenceJob = null
             assistantBuffer = null
@@ -582,61 +631,62 @@ class ChatViewModel(
         }
     }
 
-    private fun maybeTitleSession(sessionId: String, submittedPrompt: String) {
+    private fun maybeTitleSession(
+        sessionId: String,
+        submittedPrompt: String,
+    ) {
         val session = sessionStore.listSessions().firstOrNull { it.id == sessionId } ?: return
         if (session.title != "New chat" || sessionStore.getMessages(sessionId).isNotEmpty()) return
         sessionStore.renameSession(sessionId, submittedPrompt.take(42))
     }
 
-    private fun ChatUiState.toSubmittedContent(): MessageContent =
-        audioPrompt?.let { MessageContent.AudioPromptContent(it) }
-            ?: MessageContent.TextPrompt(
-                text = prompt.trim(),
-                imageAttachments = imageAttachments,
-            )
+    private fun ChatUiState.toSubmittedContent(): MessageContent = audioPrompt?.let { MessageContent.AudioPromptContent(it) }
+        ?: MessageContent.TextPrompt(
+            text = prompt.trim(),
+            imageAttachments = imageAttachments,
+        )
 
     private fun MessageContent.toRequestMessages(
         systemPrompt: String,
         history: List<ChatMessage>,
         inferenceConfig: InferenceConfig,
-    ): List<PromptChatMessage> =
-        when (this) {
-            is MessageContent.TextPrompt -> promptContextBuilder.build(
+    ): List<PromptChatMessage> = when (this) {
+        is MessageContent.TextPrompt ->
+            promptContextBuilder.build(
                 systemPrompt = systemPrompt,
                 history = history,
-                userPrompt = text.ifBlank {
+                userPrompt =
+                text.ifBlank {
                     if (imageAttachments.isNotEmpty()) "Describe this image." else text
                 },
                 inferenceConfig = inferenceConfig,
             )
-            is MessageContent.AudioPromptContent -> promptContextBuilder.build(
+        is MessageContent.AudioPromptContent ->
+            promptContextBuilder.build(
                 systemPrompt = systemPrompt,
                 history = history,
                 userPrompt = "",
                 inferenceConfig = inferenceConfig,
             )
-        }
+    }
 
-    private fun MessageContent.toRequestContent(messages: List<PromptChatMessage>): MessageContent =
-        when (this) {
-            is MessageContent.TextPrompt -> copy(text = messages.toPlainChatPrompt())
-            is MessageContent.AudioPromptContent -> this
-        }
+    private fun MessageContent.toRequestContent(messages: List<PromptChatMessage>): MessageContent = when (this) {
+        is MessageContent.TextPrompt -> copy(text = messages.toPlainChatPrompt())
+        is MessageContent.AudioPromptContent -> this
+    }
 
-    private fun List<ChatSession>.toUiState(): List<ChatSessionUiState> =
-        map { ChatSessionUiState(id = it.id, title = it.title) }
+    private fun List<ChatSession>.toUiState(): List<ChatSessionUiState> = map { ChatSessionUiState(id = it.id, title = it.title) }
 
-    private fun List<StoredChatMessage>.toChatMessages(): List<ChatMessage> =
-        map { it.toChatMessage() }
+    private fun List<StoredChatMessage>.toChatMessages(): List<ChatMessage> = map { it.toChatMessage() }
 
-    private fun StoredChatMessage.toChatMessage(): ChatMessage =
-        ChatMessage(role = role, content = content, id = id)
+    private fun StoredChatMessage.toChatMessage(): ChatMessage = ChatMessage(role = role, content = content, id = id)
 
     private class AssistantMessageBuffer(
         val messageId: String,
         val text: StringBuilder = StringBuilder(),
         val reasoning: StringBuilder = StringBuilder(),
-        var dirty: Boolean = false,
+        var persistenceDirty: Boolean = false,
+        var presentationDirty: Boolean = false,
     ) {
         fun snapshot(): MessageContent.TextPrompt = MessageContent.TextPrompt(
             text = text.toString(),
@@ -646,5 +696,6 @@ class ChatViewModel(
 
     private companion object {
         const val DEFAULT_ASSISTANT_PERSISTENCE_INTERVAL_MILLIS = 250L
+        const val DEFAULT_ASSISTANT_PRESENTATION_INTERVAL_MILLIS = 50L
     }
 }

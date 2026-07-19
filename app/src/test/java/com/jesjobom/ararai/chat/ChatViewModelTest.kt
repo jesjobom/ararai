@@ -18,33 +18,36 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlin.io.path.createTempDirectory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.io.path.createTempDirectory
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ChatViewModelTest {
-    private val model = LocalModel(
-        id = "test-model",
-        name = "Test Model",
-        filePath = "/tmp/test.gguf",
-    )
+    private val model =
+        LocalModel(
+            id = "test-model",
+            name = "Test Model",
+            filePath = "/tmp/test.gguf",
+        )
 
-    private val inferenceConfig = InferenceConfig(
-        contextTokens = 128,
-        temperature = 0.7f,
-        topP = 0.9f,
-    )
+    private val inferenceConfig =
+        InferenceConfig(
+            contextTokens = 128,
+            temperature = 0.7f,
+            topP = 0.9f,
+        )
 
     @Test
     fun `keeps submit disabled until model is available`() {
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
-            initialModel = null,
-            inferenceConfig = inferenceConfig,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+                initialModel = null,
+                inferenceConfig = inferenceConfig,
+            )
 
         viewModel.onPromptChanged("hello")
 
@@ -53,11 +56,12 @@ class ChatViewModelTest {
 
     @Test
     fun `enables submit after startup state provides available model`() {
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
-            initialModel = null,
-            inferenceConfig = inferenceConfig,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+                initialModel = null,
+                inferenceConfig = inferenceConfig,
+            )
 
         viewModel.onModelStartupState(ModelStartupState.Available(model, inferenceConfig))
         viewModel.onPromptChanged("hello")
@@ -67,11 +71,12 @@ class ChatViewModelTest {
 
     @Test
     fun `keeps submit disabled for blank prompt even when model is available`() {
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+            )
 
         viewModel.onPromptChanged("   ")
 
@@ -80,11 +85,12 @@ class ChatViewModelTest {
 
     @Test
     fun `enables submit for image only draft when model supports images`() {
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
-            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true)),
-            inferenceConfig = inferenceConfig,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+                initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true)),
+                inferenceConfig = inferenceConfig,
+            )
 
         viewModel.attachImage(ImageAttachment("/tmp/image.jpg", "image/jpeg", "image.jpg"))
 
@@ -93,11 +99,12 @@ class ChatViewModelTest {
 
     @Test
     fun `exposes retry when startup download fails`() {
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
-            initialModel = null,
-            inferenceConfig = inferenceConfig,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+                initialModel = null,
+                inferenceConfig = inferenceConfig,
+            )
 
         viewModel.onModelStartupState(ModelStartupState.Failed("network down"))
 
@@ -107,11 +114,12 @@ class ChatViewModelTest {
 
     @Test
     fun `formats model download progress`() {
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
-            initialModel = null,
-            inferenceConfig = inferenceConfig,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+                initialModel = null,
+                inferenceConfig = inferenceConfig,
+            )
 
         viewModel.onModelStartupState(
             ModelStartupState.Downloading(bytesDownloaded = 50, totalBytes = 100),
@@ -123,11 +131,12 @@ class ChatViewModelTest {
 
     @Test
     fun `streams fake engine chunks into assistant message`() = runTest {
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = listOf("ola", " mundo")),
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = listOf("ola", " mundo")),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+            )
 
         viewModel.uiState.test {
             assertTrue(awaitItem().canSubmit.not())
@@ -156,11 +165,12 @@ class ChatViewModelTest {
 
     @Test
     fun `surfaces generation failure and preserves messages`() = runTest {
-        val viewModel = ChatViewModel(
-            engine = FailingEngine("generation failed"),
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FailingEngine("generation failed"),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+            )
 
         viewModel.uiState.test {
             awaitItem()
@@ -186,11 +196,12 @@ class ChatViewModelTest {
 
     @Test
     fun `surfaces load failure and preserves submitted message`() = runTest {
-        val viewModel = ChatViewModel(
-            engine = LoadFailingEngine("load failed"),
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = LoadFailingEngine("load failed"),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+            )
 
         viewModel.uiState.test {
             awaitItem()
@@ -214,12 +225,13 @@ class ChatViewModelTest {
     @Test
     fun `blocks second submit while first generation is active`() = runTest {
         val engine = SlowEngine()
-        val viewModel = ChatViewModel(
-            engine = engine,
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-            scope = this,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                scope = this,
+            )
 
         viewModel.onPromptChanged("first")
         viewModel.submitPrompt()
@@ -238,12 +250,13 @@ class ChatViewModelTest {
     @Test
     fun `leaving chat cancels active generation and keeps engine loaded`() = runTest {
         val engine = SlowEngine()
-        val viewModel = ChatViewModel(
-            engine = engine,
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-            scope = this,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                scope = this,
+            )
 
         viewModel.onPromptChanged("hello")
         viewModel.submitPrompt()
@@ -260,12 +273,13 @@ class ChatViewModelTest {
     @Test
     fun `cancel generation stops active job and unloads engine`() = runTest {
         val engine = SlowEngine()
-        val viewModel = ChatViewModel(
-            engine = engine,
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-            scope = this,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                scope = this,
+            )
 
         viewModel.onPromptChanged("hello")
         viewModel.submitPrompt()
@@ -277,19 +291,25 @@ class ChatViewModelTest {
         assertTrue(engine.unloadCalls > 0)
         assertFalse(viewModel.uiState.value.isGenerating)
         assertFalse(viewModel.uiState.value.isLoadingModel)
-        assertEquals("partial", viewModel.uiState.value.messages.last().text)
+        assertEquals(
+            "partial",
+            viewModel.uiState.value.messages
+                .last()
+                .text,
+        )
         assertEquals("hello", viewModel.uiState.value.prompt)
     }
 
     @Test
     fun `manages persistent chat sessions`() {
         val store = InMemoryChatSessionStore()
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-            sessionStore = store,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+            )
 
         val firstSession = viewModel.uiState.value.selectedSessionId
         viewModel.createSession()
@@ -299,10 +319,20 @@ class ChatViewModelTest {
         assertTrue(firstSession != secondSession)
 
         viewModel.renameCurrentSession("Work notes")
-        assertEquals("Work notes", viewModel.uiState.value.sessions.first { it.id == secondSession }.title)
+        assertEquals(
+            "Work notes",
+            viewModel.uiState.value.sessions
+                .first { it.id == secondSession }
+                .title,
+        )
 
         viewModel.renameSession(firstSession!!, "Earlier chat")
-        assertEquals("Earlier chat", viewModel.uiState.value.sessions.first { it.id == firstSession }.title)
+        assertEquals(
+            "Earlier chat",
+            viewModel.uiState.value.sessions
+                .first { it.id == firstSession }
+                .title,
+        )
         assertEquals(secondSession, viewModel.uiState.value.selectedSessionId)
 
         viewModel.selectSession(firstSession)
@@ -320,12 +350,13 @@ class ChatViewModelTest {
         val store = InMemoryChatSessionStore()
         val first = store.ensureSession()
         store.appendMessage(first.id, ChatRole.User, "first message")
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-            sessionStore = store,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+            )
         viewModel.createSession()
         val second = viewModel.uiState.value.selectedSessionId!!
         store.appendMessage(second, ChatRole.User, "second message")
@@ -344,12 +375,13 @@ class ChatViewModelTest {
     fun `removing a draft attachment deletes its app owned file`() {
         val mediaRepository = FileChatMediaRepository(createTempDirectory("chat-media-").toFile())
         val image = mediaRepository.createDraftFile("image-", ".jpg").apply { writeText("draft") }
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = emptyList()),
-            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true)),
-            inferenceConfig = inferenceConfig,
-            mediaRepository = mediaRepository,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = emptyList()),
+                initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true)),
+                inferenceConfig = inferenceConfig,
+                mediaRepository = mediaRepository,
+            )
 
         viewModel.attachImage(ImageAttachment(image.absolutePath, "image/jpeg"))
         viewModel.removeImage(image.absolutePath)
@@ -364,21 +396,36 @@ class ChatViewModelTest {
         val mediaRepository = FileChatMediaRepository(createTempDirectory("chat-media-").toFile())
         val exclusive = mediaRepository.createDraftFile("image-", ".jpg").apply { writeText("exclusive") }
         val shared = mediaRepository.createDraftFile("image-", ".jpg").apply { writeText("shared") }
-        store.appendMessage(first.id, ChatRole.User, MessageContent.TextPrompt("first", listOf(
-            ImageAttachment(exclusive.absolutePath, "image/jpeg"),
-            ImageAttachment(shared.absolutePath, "image/jpeg"),
-        )))
-        val second = store.createSession("Second")
-        store.appendMessage(second.id, ChatRole.User, MessageContent.TextPrompt("second", listOf(
-            ImageAttachment(shared.absolutePath, "image/jpeg"),
-        )))
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = emptyList()),
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-            sessionStore = store,
-            mediaRepository = mediaRepository,
+        store.appendMessage(
+            first.id,
+            ChatRole.User,
+            MessageContent.TextPrompt(
+                "first",
+                listOf(
+                    ImageAttachment(exclusive.absolutePath, "image/jpeg"),
+                    ImageAttachment(shared.absolutePath, "image/jpeg"),
+                ),
+            ),
         )
+        val second = store.createSession("Second")
+        store.appendMessage(
+            second.id,
+            ChatRole.User,
+            MessageContent.TextPrompt(
+                "second",
+                listOf(
+                    ImageAttachment(shared.absolutePath, "image/jpeg"),
+                ),
+            ),
+        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = emptyList()),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                mediaRepository = mediaRepository,
+            )
 
         viewModel.deleteSession(first.id)
 
@@ -397,13 +444,14 @@ class ChatViewModelTest {
             ChatRole.User,
             MessageContent.AudioPromptContent(AudioPrompt(audio.absolutePath, "audio/wav")),
         )
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = emptyList()),
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-            sessionStore = store,
-            mediaRepository = mediaRepository,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = emptyList()),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                mediaRepository = mediaRepository,
+            )
 
         viewModel.clearAllSessions()
 
@@ -417,14 +465,15 @@ class ChatViewModelTest {
         store.appendMessage(session.id, ChatRole.User, "Earlier question")
         store.appendMessage(session.id, ChatRole.Assistant, "Earlier answer")
         val engine = CapturingEngine()
-        val viewModel = ChatViewModel(
-            engine = engine,
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-            systemPrompt = "Be useful.",
-            sessionStore = store,
-            scope = this,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                systemPrompt = "Be useful.",
+                sessionStore = store,
+                scope = this,
+            )
 
         viewModel.onPromptChanged("Current question")
         viewModel.submitPrompt()
@@ -440,18 +489,26 @@ class ChatViewModelTest {
             engine.lastRequest!!.chatMessages,
         )
         assertEquals(session.id, engine.lastRequest!!.chatSessionId)
-        assertEquals("Current question", store.getMessages(session.id).filter { it.role == ChatRole.User }.last().text)
+        assertEquals(
+            "Current question",
+            store
+                .getMessages(session.id)
+                .filter { it.role == ChatRole.User }
+                .last()
+                .text,
+        )
     }
 
     @Test
     fun `submits text prompt with image attachment`() = runTest {
         val engine = CapturingEngine()
-        val viewModel = ChatViewModel(
-            engine = engine,
-            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true)),
-            inferenceConfig = inferenceConfig,
-            scope = this,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true)),
+                inferenceConfig = inferenceConfig,
+                scope = this,
+            )
 
         viewModel.onPromptChanged("Describe this")
         viewModel.attachImage(ImageAttachment("file:///tmp/image.png", "image/png", "image.png"))
@@ -461,18 +518,26 @@ class ChatViewModelTest {
         val content = engine.lastRequest!!.content as MessageContent.TextPrompt
         assertTrue(content.text.contains("User: Describe this"))
         assertEquals(listOf(ImageAttachment("file:///tmp/image.png", "image/png", "image.png")), content.imageAttachments)
-        assertEquals(1, viewModel.uiState.value.messages.first().content.let { it as MessageContent.TextPrompt }.imageAttachments.size)
+        assertEquals(
+            1,
+            viewModel.uiState.value.messages
+                .first()
+                .content
+                .let { it as MessageContent.TextPrompt }
+                .imageAttachments.size,
+        )
     }
 
     @Test
     fun `audio prompt is mutually exclusive with text and images`() = runTest {
         val engine = CapturingEngine()
-        val viewModel = ChatViewModel(
-            engine = engine,
-            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true, audio = true)),
-            inferenceConfig = inferenceConfig,
-            scope = this,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true, audio = true)),
+                inferenceConfig = inferenceConfig,
+                scope = this,
+            )
 
         viewModel.onPromptChanged("typed text")
         viewModel.attachImage(ImageAttachment("file:///tmp/image.png", "image/png"))
@@ -493,12 +558,13 @@ class ChatViewModelTest {
     @Test
     fun `submits recorded audio prompt directly`() = runTest {
         val engine = CapturingEngine()
-        val viewModel = ChatViewModel(
-            engine = engine,
-            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(audio = true)),
-            inferenceConfig = inferenceConfig,
-            scope = this,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model.copy(inputCapabilities = ModelInputCapabilities(audio = true)),
+                inferenceConfig = inferenceConfig,
+                scope = this,
+            )
         val audio = AudioPrompt("/tmp/recording.wav", "audio/wav", "recording.wav", durationMillis = 1_000)
 
         viewModel.submitAudioPrompt(audio)
@@ -506,7 +572,14 @@ class ChatViewModelTest {
 
         assertTrue(engine.lastRequest!!.content is MessageContent.AudioPromptContent)
         assertEquals(audio, (engine.lastRequest!!.content as MessageContent.AudioPromptContent).audio)
-        assertEquals(audio, (viewModel.uiState.value.messages.first().content as MessageContent.AudioPromptContent).audio)
+        assertEquals(
+            audio,
+            (
+                viewModel.uiState.value.messages
+                    .first()
+                    .content as MessageContent.AudioPromptContent
+                ).audio,
+        )
     }
 
     @Test
@@ -524,14 +597,15 @@ class ChatViewModelTest {
             ),
         )
         val engine = CapturingEngine()
-        val viewModel = ChatViewModel(
-            engine = engine,
-            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(audio = true)),
-            inferenceConfig = inferenceConfig,
-            systemPrompt = "Be useful.",
-            sessionStore = store,
-            scope = this,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model.copy(inputCapabilities = ModelInputCapabilities(audio = true)),
+                inferenceConfig = inferenceConfig,
+                systemPrompt = "Be useful.",
+                sessionStore = store,
+                scope = this,
+            )
         val audio = AudioPrompt("/tmp/current.wav", "audio/wav")
 
         viewModel.submitAudioPrompt(audio)
@@ -550,18 +624,21 @@ class ChatViewModelTest {
     @Test
     fun `gates reasoning settings by selected model capabilities`() = runTest {
         val engine = CapturingEngine()
-        val reasoningModel = model.copy(
-            reasoningCapabilities = ModelReasoningCapabilities(
-                request = true,
-                output = true,
-            ),
-        )
-        val viewModel = ChatViewModel(
-            engine = engine,
-            initialModel = reasoningModel,
-            inferenceConfig = inferenceConfig,
-            scope = this,
-        )
+        val reasoningModel =
+            model.copy(
+                reasoningCapabilities =
+                ModelReasoningCapabilities(
+                    request = true,
+                    output = true,
+                ),
+            )
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = reasoningModel,
+                inferenceConfig = inferenceConfig,
+                scope = this,
+            )
 
         viewModel.setReasoningEnabled(true)
         viewModel.setShowReasoning(true)
@@ -583,11 +660,12 @@ class ChatViewModelTest {
 
     @Test
     fun `ignores reasoning enable request when selected model does not support it`() {
-        val viewModel = ChatViewModel(
-            engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = listOf("ignored")),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+            )
 
         viewModel.setReasoningEnabled(true)
         viewModel.setShowReasoning(true)
@@ -599,49 +677,76 @@ class ChatViewModelTest {
     @Test
     fun `stores reasoning tokens separately from assistant answer`() = runTest {
         val engine = ReasoningEngine()
-        val viewModel = ChatViewModel(
-            engine = engine,
-            initialModel = model.copy(
-                reasoningCapabilities = ModelReasoningCapabilities(
-                    request = true,
-                    output = true,
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel =
+                model.copy(
+                    reasoningCapabilities =
+                    ModelReasoningCapabilities(
+                        request = true,
+                        output = true,
+                    ),
                 ),
-            ),
-            inferenceConfig = inferenceConfig,
-            scope = this,
-        )
+                inferenceConfig = inferenceConfig,
+                scope = this,
+            )
 
         viewModel.setReasoningEnabled(true)
         viewModel.onPromptChanged("solve")
         viewModel.submitPrompt()
         runCurrent()
 
-        val content = viewModel.uiState.value.messages.last().content as MessageContent.TextPrompt
+        val content =
+            viewModel.uiState.value.messages
+                .last()
+                .content as MessageContent.TextPrompt
         assertEquals("final", content.text)
         assertEquals("because ", content.reasoningText)
     }
 
     @Test
-    fun `batches streamed assistant persistence without delaying UI updates`() = runTest {
+    fun `coalesces streamed presentation independently from persistence`() = runTest {
         val store = CountingChatSessionStore()
-        val viewModel = ChatViewModel(
-            engine = BatchedStreamingEngine(),
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-            sessionStore = store,
-            scope = this,
-            assistantPersistenceIntervalMillis = 250L,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = BatchedStreamingEngine(),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                scope = this,
+                assistantPersistenceIntervalMillis = 250L,
+                assistantPresentationIntervalMillis = 50L,
+            )
 
         viewModel.onPromptChanged("hello")
         viewModel.submitPrompt()
         runCurrent()
 
-        assertEquals("three chunks", viewModel.uiState.value.messages.last().text)
+        assertEquals(
+            "",
+            viewModel.uiState.value.messages
+                .last()
+                .text,
+        )
+        assertEquals(0L, viewModel.uiState.value.messageDisplayRevision)
         assertEquals("", store.latestAssistantText())
         assertEquals(0, store.updateCalls)
 
-        advanceTimeBy(250L)
+        advanceTimeBy(50L)
+        runCurrent()
+
+        assertEquals(
+            "three chunks",
+            viewModel.uiState.value.messages
+                .last()
+                .text,
+        )
+        assertEquals(1L, viewModel.uiState.value.messageDisplayRevision)
+        assertEquals("", store.latestAssistantText())
+        assertEquals(0, store.updateCalls)
+
+        advanceTimeBy(200L)
         runCurrent()
 
         assertEquals("three chunks", store.latestAssistantText())
@@ -653,35 +758,57 @@ class ChatViewModelTest {
     @Test
     fun `flushes pending assistant content on completion`() = runTest {
         val store = CountingChatSessionStore()
-        val viewModel = streamingViewModel(
-            engine = TerminalStreamingEngine(GenerationEvent.Completed),
-            store = store,
-        )
+        val viewModel =
+            streamingViewModel(
+                engine = TerminalStreamingEngine(GenerationEvent.Completed),
+                store = store,
+            )
 
         viewModel.onPromptChanged("hello")
         viewModel.submitPrompt()
         runCurrent()
 
         assertEquals("partial", store.latestAssistantText())
+        assertEquals(
+            "partial",
+            viewModel.uiState.value.messages
+                .last()
+                .text,
+        )
+        assertEquals(1L, viewModel.uiState.value.messageDisplayRevision)
         assertEquals(1, store.updateCalls)
         assertFalse(viewModel.uiState.value.isGenerating)
+        assertEquals(
+            viewModel.uiState.value.messages
+                .last()
+                .id,
+            viewModel.uiState.value.completedAssistantMessageId,
+        )
     }
 
     @Test
     fun `flushes pending assistant content on generation failure`() = runTest {
         val store = CountingChatSessionStore()
-        val viewModel = streamingViewModel(
-            engine = TerminalStreamingEngine(GenerationEvent.Failed("failed")),
-            store = store,
-        )
+        val viewModel =
+            streamingViewModel(
+                engine = TerminalStreamingEngine(GenerationEvent.Failed("failed")),
+                store = store,
+            )
 
         viewModel.onPromptChanged("hello")
         viewModel.submitPrompt()
         runCurrent()
 
         assertEquals("partial", store.latestAssistantText())
+        assertEquals(
+            "partial",
+            viewModel.uiState.value.messages
+                .last()
+                .text,
+        )
         assertEquals(1, store.updateCalls)
         assertEquals("failed", viewModel.uiState.value.error)
+        assertEquals(null, viewModel.uiState.value.completedAssistantMessageId)
     }
 
     @Test
@@ -696,7 +823,14 @@ class ChatViewModelTest {
         runCurrent()
 
         assertEquals("partial", store.latestAssistantText())
+        assertEquals(
+            "partial",
+            viewModel.uiState.value.messages
+                .last()
+                .text,
+        )
         assertEquals(1, store.updateCalls)
+        assertEquals(null, viewModel.uiState.value.completedAssistantMessageId)
     }
 
     @Test
@@ -724,18 +858,19 @@ class ChatViewModelTest {
         sessionStore = store,
         scope = this,
         assistantPersistenceIntervalMillis = 250L,
+        assistantPresentationIntervalMillis = 50L,
     )
-
 
     @Test
     fun `unloads engine when model becomes unavailable`() = runTest {
         val engine = SlowEngine()
-        val viewModel = ChatViewModel(
-            engine = engine,
-            initialModel = model,
-            inferenceConfig = inferenceConfig,
-            scope = this,
-        )
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                scope = this,
+            )
 
         viewModel.onModelStartupState(ModelStartupState.Missing)
         runCurrent()
@@ -747,10 +882,12 @@ class ChatViewModelTest {
     private class FailingEngine(
         private val message: String,
     ) : LocalLlmEngine {
-        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+        override suspend fun load(
+            model: LocalModel,
+            config: InferenceConfig,
+        ) = Unit
 
-        override fun generate(request: PromptRequest): Flow<GenerationEvent> =
-            flowOf(GenerationEvent.Failed(message))
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(GenerationEvent.Failed(message))
 
         override suspend fun unload() = Unit
     }
@@ -758,12 +895,14 @@ class ChatViewModelTest {
     private class LoadFailingEngine(
         private val message: String,
     ) : LocalLlmEngine {
-        override suspend fun load(model: LocalModel, config: InferenceConfig) {
+        override suspend fun load(
+            model: LocalModel,
+            config: InferenceConfig,
+        ) {
             error(message)
         }
 
-        override fun generate(request: PromptRequest): Flow<GenerationEvent> =
-            flowOf(GenerationEvent.Token("unexpected"))
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(GenerationEvent.Token("unexpected"))
 
         override suspend fun unload() = Unit
     }
@@ -774,7 +913,10 @@ class ChatViewModelTest {
         var unloadCalls = 0
             private set
 
-        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+        override suspend fun load(
+            model: LocalModel,
+            config: InferenceConfig,
+        ) = Unit
 
         override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
             generateCalls += 1
@@ -788,7 +930,10 @@ class ChatViewModelTest {
     }
 
     private class BatchedStreamingEngine : LocalLlmEngine {
-        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+        override suspend fun load(
+            model: LocalModel,
+            config: InferenceConfig,
+        ) = Unit
 
         override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
             emit(GenerationEvent.Token("three"))
@@ -802,7 +947,10 @@ class ChatViewModelTest {
     private class TerminalStreamingEngine(
         private val terminalEvent: GenerationEvent,
     ) : LocalLlmEngine {
-        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+        override suspend fun load(
+            model: LocalModel,
+            config: InferenceConfig,
+        ) = Unit
 
         override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(
             GenerationEvent.Token("partial"),
@@ -818,7 +966,10 @@ class ChatViewModelTest {
         var updateCalls: Int = 0
             private set
 
-        override fun updateMessage(messageId: String, content: MessageContent) {
+        override fun updateMessage(
+            messageId: String,
+            content: MessageContent,
+        ) {
             updateCalls += 1
             delegate.updateMessage(messageId, content)
         }
@@ -835,7 +986,10 @@ class ChatViewModelTest {
         var lastRequest: PromptRequest? = null
             private set
 
-        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+        override suspend fun load(
+            model: LocalModel,
+            config: InferenceConfig,
+        ) = Unit
 
         override fun generate(request: PromptRequest): Flow<GenerationEvent> {
             lastRequest = request
@@ -847,14 +1001,16 @@ class ChatViewModelTest {
     }
 
     private class ReasoningEngine : LocalLlmEngine {
-        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+        override suspend fun load(
+            model: LocalModel,
+            config: InferenceConfig,
+        ) = Unit
 
-        override fun generate(request: PromptRequest): Flow<GenerationEvent> =
-            flowOf(
-                GenerationEvent.ReasoningToken("because "),
-                GenerationEvent.Token("final"),
-                GenerationEvent.Completed,
-            )
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(
+            GenerationEvent.ReasoningToken("because "),
+            GenerationEvent.Token("final"),
+            GenerationEvent.Completed,
+        )
 
         override suspend fun unload() = Unit
     }

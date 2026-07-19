@@ -11,4 +11,3 @@ class AppLocalLlmRuntime(
 ) {
     val engine: LocalLlmEngine = engineFactory()
 }
-

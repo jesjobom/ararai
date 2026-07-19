@@ -21,27 +21,30 @@ import org.junit.Test
 import java.nio.file.Files
 
 class LiteRtLmLocalLlmEngineTest {
-    private val config = InferenceConfig(
-        contextTokens = 128,
-        maxTokens = 8,
-        temperature = 0.7f,
-        topP = 0.9f,
-    )
-    private val model = LocalModel(
-        id = "gemma-litert",
-        name = "Gemma LiteRT",
-        filePath = "/tmp/gemma.litertlm",
-        runtime = ModelRuntime.LiteRtLm,
-        acceleration = ModelAccelerationPolicy.GpuPreferred,
-    )
+    private val config =
+        InferenceConfig(
+            contextTokens = 128,
+            maxTokens = 8,
+            temperature = 0.7f,
+            topP = 0.9f,
+        )
+    private val model =
+        LocalModel(
+            id = "gemma-litert",
+            name = "Gemma LiteRT",
+            filePath = "/tmp/gemma.litertlm",
+            runtime = ModelRuntime.LiteRtLm,
+            acceleration = ModelAccelerationPolicy.GpuPreferred,
+        )
 
     @Test
     fun `loads litert lm model with gpu preference and streams chunks`() = runTest {
         val bridge = RecordingBridge(chunks = listOf(LiteRtLmChunk(text = "ola"), LiteRtLmChunk(text = " mundo")))
-        val engine = LiteRtLmLocalLlmEngine(
-            bridge = bridge,
-            dispatcher = StandardTestDispatcher(testScheduler),
-        )
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
 
         engine.load(model, config)
 
@@ -61,29 +64,33 @@ class LiteRtLmLocalLlmEngineTest {
 
     @Test
     fun `streams LiteRT reasoning separately and forwards reasoning preference`() = runTest {
-        val bridge = RecordingBridge(
-            chunks = listOf(
-                LiteRtLmChunk(reasoning = "porque "),
-                LiteRtLmChunk(text = "resposta"),
-            ),
-        )
-        val engine = LiteRtLmLocalLlmEngine(
-            bridge = bridge,
-            dispatcher = StandardTestDispatcher(testScheduler),
-        )
+        val bridge =
+            RecordingBridge(
+                chunks =
+                listOf(
+                    LiteRtLmChunk(reasoning = "porque "),
+                    LiteRtLmChunk(text = "resposta"),
+                ),
+            )
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
 
         engine.load(model, config)
-        engine.generate(
-            PromptRequest(
-                content = MessageContent.TextPrompt("pense"),
-                reasoningEnabled = true,
-            ),
-        ).test {
-            assertEquals(GenerationEvent.ReasoningToken("porque "), awaitItem())
-            assertEquals(GenerationEvent.Token("resposta"), awaitItem())
-            assertEquals(GenerationEvent.Completed, awaitItem())
-            awaitComplete()
-        }
+        engine
+            .generate(
+                PromptRequest(
+                    content = MessageContent.TextPrompt("pense"),
+                    reasoningEnabled = true,
+                ),
+            ).test {
+                assertEquals(GenerationEvent.ReasoningToken("porque "), awaitItem())
+                assertEquals(GenerationEvent.Token("resposta"), awaitItem())
+                assertEquals(GenerationEvent.Completed, awaitItem())
+                awaitComplete()
+            }
 
         assertEquals(true, bridge.session.lastRequest?.reasoningEnabled)
     }
@@ -92,10 +99,11 @@ class LiteRtLmLocalLlmEngineTest {
     fun `does not cancel LiteRT generation based on callback chunk count`() = runTest {
         val chunks = List(config.maxTokens + 3) { LiteRtLmChunk(text = "chunk-$it") }
         val bridge = RecordingBridge(chunks = chunks)
-        val engine = LiteRtLmLocalLlmEngine(
-            bridge = bridge,
-            dispatcher = StandardTestDispatcher(testScheduler),
-        )
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
 
         engine.load(model, config)
         engine.generate(PromptRequest("continue")).test {
@@ -112,10 +120,11 @@ class LiteRtLmLocalLlmEngineTest {
     @Test
     fun `loads cpu backend when acceleration is cpu only`() = runTest {
         val bridge = RecordingBridge()
-        val engine = LiteRtLmLocalLlmEngine(
-            bridge = bridge,
-            dispatcher = StandardTestDispatcher(testScheduler),
-        )
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
 
         engine.load(model.copy(acceleration = ModelAccelerationPolicy.CpuOnly), config)
 
@@ -124,10 +133,11 @@ class LiteRtLmLocalLlmEngineTest {
 
     @Test
     fun `rejects non litert lm model`() = runTest {
-        val engine = LiteRtLmLocalLlmEngine(
-            bridge = RecordingBridge(),
-            dispatcher = StandardTestDispatcher(testScheduler),
-        )
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = RecordingBridge(),
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
 
         try {
             engine.load(model.copy(runtime = ModelRuntime.LlamaCpp), config)
@@ -139,10 +149,11 @@ class LiteRtLmLocalLlmEngineTest {
 
     @Test
     fun `reports failure when generation throws`() = runTest {
-        val engine = LiteRtLmLocalLlmEngine(
-            bridge = RecordingBridge(failure = IllegalStateException("boom")),
-            dispatcher = StandardTestDispatcher(testScheduler),
-        )
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = RecordingBridge(failure = IllegalStateException("boom")),
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
 
         engine.load(model, config)
 
@@ -155,22 +166,25 @@ class LiteRtLmLocalLlmEngineTest {
     @Test
     fun `passes multimodal request to litert session when capabilities allow it`() = runTest {
         val bridge = RecordingBridge(chunks = listOf(LiteRtLmChunk(text = "ok")))
-        val engine = LiteRtLmLocalLlmEngine(
-            bridge = bridge,
-            dispatcher = StandardTestDispatcher(testScheduler),
-        )
-        val multimodalModel = model.copy(
-            inputCapabilities = ModelInputCapabilities(image = true, audio = true),
-        )
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
+        val multimodalModel =
+            model.copy(
+                inputCapabilities = ModelInputCapabilities(image = true, audio = true),
+            )
 
         engine.load(multimodalModel, config)
         assertEquals(LiteRtLmWorkloadProfile.TextOnly, bridge.loadedProfile)
-        val request = PromptRequest(
-            MessageContent.TextPrompt(
-                text = "describe",
-                imageAttachments = listOf(ImageAttachment("file:///tmp/image.png", "image/png")),
-            ),
-        )
+        val request =
+            PromptRequest(
+                MessageContent.TextPrompt(
+                    text = "describe",
+                    imageAttachments = listOf(ImageAttachment("file:///tmp/image.png", "image/png")),
+                ),
+            )
 
         engine.generate(request).test {
             assertEquals(GenerationEvent.Token("ok"), awaitItem())
@@ -192,22 +206,27 @@ class LiteRtLmLocalLlmEngineTest {
     @Test
     fun `normalizes file uris to litert file paths`() {
         assertEquals("/tmp/image.png", "file:///tmp/image.png".toLiteRtFilePath())
-        assertEquals("/data/user/0/com.jesjobom.ararai/files/image.jpg", "file:/data/user/0/com.jesjobom.ararai/files/image.jpg".toLiteRtFilePath())
+        assertEquals(
+            "/data/user/0/com.jesjobom.ararai/files/image.jpg",
+            "file:/data/user/0/com.jesjobom.ararai/files/image.jpg".toLiteRtFilePath(),
+        )
         assertEquals("/tmp/image.png", "/tmp/image.png".toLiteRtFilePath())
     }
 
     @Test
     fun `reuses conversation only for matching session settings and transcript`() {
-        val key = LiteRtLmConversationKey(
-            sessionId = "session-1",
-            temperature = 0.7f,
-            topP = 0.9f,
-            reasoningEnabled = false,
-        )
-        val transcript = listOf(
-            PromptChatMessage(PromptChatRole.User, "question"),
-            PromptChatMessage(PromptChatRole.Assistant, "answer"),
-        )
+        val key =
+            LiteRtLmConversationKey(
+                sessionId = "session-1",
+                temperature = 0.7f,
+                topP = 0.9f,
+                reasoningEnabled = false,
+            )
+        val transcript =
+            listOf(
+                PromptChatMessage(PromptChatRole.User, "question"),
+                PromptChatMessage(PromptChatRole.Assistant, "answer"),
+            )
 
         assertTrue(canReuseLiteRtLmConversation(key, transcript, key, transcript))
         assertEquals(
@@ -226,13 +245,14 @@ class LiteRtLmLocalLlmEngineTest {
 
     @Test
     fun `maps native LiteRT benchmark metrics without using callback count`() {
-        val metrics = liteRtLmGenerationMetrics(
-            timeToFirstTokenInSecond = 0.125,
-            prefillTokenCount = 20,
-            decodeTokenCount = 8,
-            prefillTokensPerSecond = 100.0,
-            decodeTokensPerSecond = 16.0,
-        )
+        val metrics =
+            liteRtLmGenerationMetrics(
+                timeToFirstTokenInSecond = 0.125,
+                prefillTokenCount = 20,
+                decodeTokenCount = 8,
+                prefillTokensPerSecond = 100.0,
+                decodeTokensPerSecond = 16.0,
+            )
 
         assertEquals(125L, metrics.timeToFirstTokenMillis)
         assertEquals(20, metrics.prefillTokenCount)
@@ -257,14 +277,16 @@ class LiteRtLmLocalLlmEngineTest {
     @Test
     fun `builds LiteRT contents with current audio and textual chat context`() {
         val audio = AudioPrompt("file:///tmp/current.wav", "audio/wav")
-        val request = PromptRequest(
-            content = MessageContent.AudioPromptContent(audio),
-            chatMessages = listOf(
-                PromptChatMessage(PromptChatRole.System, "Be useful."),
-                PromptChatMessage(PromptChatRole.User, "Earlier question"),
-                PromptChatMessage(PromptChatRole.Assistant, "Earlier answer"),
-            ),
-        )
+        val request =
+            PromptRequest(
+                content = MessageContent.AudioPromptContent(audio),
+                chatMessages =
+                listOf(
+                    PromptChatMessage(PromptChatRole.System, "Be useful."),
+                    PromptChatMessage(PromptChatRole.User, "Earlier question"),
+                    PromptChatMessage(PromptChatRole.Assistant, "Earlier answer"),
+                ),
+            )
 
         val contents = request.toLiteRtInputParts()
 
@@ -278,23 +300,25 @@ class LiteRtLmLocalLlmEngineTest {
     @Test
     fun `rejects unsupported audio request before session generation`() = runTest {
         val bridge = RecordingBridge()
-        val engine = LiteRtLmLocalLlmEngine(
-            bridge = bridge,
-            dispatcher = StandardTestDispatcher(testScheduler),
-        )
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
 
         engine.load(model, config)
 
-        engine.generate(
-            PromptRequest(
-                MessageContent.AudioPromptContent(
-                    AudioPrompt("file:///tmp/audio.wav", "audio/wav"),
+        engine
+            .generate(
+                PromptRequest(
+                    MessageContent.AudioPromptContent(
+                        AudioPrompt("file:///tmp/audio.wav", "audio/wav"),
+                    ),
                 ),
-            ),
-        ).test {
-            assertEquals(GenerationEvent.Failed("Selected model does not support audio input"), awaitItem())
-            awaitComplete()
-        }
+            ).test {
+                assertEquals(GenerationEvent.Failed("Selected model does not support audio input"), awaitItem())
+                awaitComplete()
+            }
 
         assertEquals(null, bridge.session.lastRequest)
     }
@@ -302,10 +326,11 @@ class LiteRtLmLocalLlmEngineTest {
     @Test
     fun `unload closes the active session`() = runTest {
         val bridge = RecordingBridge()
-        val engine = LiteRtLmLocalLlmEngine(
-            bridge = bridge,
-            dispatcher = StandardTestDispatcher(testScheduler),
-        )
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
 
         engine.load(model, config)
         engine.unload()
@@ -390,11 +415,10 @@ class LiteRtLmLocalLlmEngineTest {
         assertTrue(owner.retained()?.resource === replacement)
     }
 
-    private fun resourceOwner(): RetainedResourceOwner<RecordingResource, String> =
-        RetainedResourceOwner(
-            cancelResource = { it.cancelCalls += 1 },
-            closeResource = { it.closeCalls += 1 },
-        )
+    private fun resourceOwner(): RetainedResourceOwner<RecordingResource, String> = RetainedResourceOwner(
+        cancelResource = { it.cancelCalls += 1 },
+        closeResource = { it.closeCalls += 1 },
+    )
 
     private class RecordingResource {
         var cancelCalls: Int = 0
@@ -446,7 +470,10 @@ class LiteRtLmLocalLlmEngineTest {
         var lastRequest: PromptRequest? = null
             private set
 
-        override fun generate(request: PromptRequest, config: InferenceConfig): Flow<LiteRtLmChunk> {
+        override fun generate(
+            request: PromptRequest,
+            config: InferenceConfig,
+        ): Flow<LiteRtLmChunk> {
             lastRequest = request
             return if (failure != null) {
                 flow { throw failure }

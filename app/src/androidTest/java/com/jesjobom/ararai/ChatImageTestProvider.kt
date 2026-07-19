@@ -35,21 +35,34 @@ class ChatImageTestProvider : ContentProvider() {
     ): Cursor {
         val columns = projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
         return MatrixCursor(columns).apply {
-            addRow(columns.map { column ->
-                when (column) {
-                    OpenableColumns.DISPLAY_NAME -> "provider-image.png"
-                    OpenableColumns.SIZE -> imageFile.length()
-                    else -> null
-                }
-            })
+            addRow(
+                columns.map { column ->
+                    when (column) {
+                        OpenableColumns.DISPLAY_NAME -> "provider-image.png"
+                        OpenableColumns.SIZE -> imageFile.length()
+                        else -> null
+                    }
+                },
+            )
         }
     }
 
-    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor =
-        ParcelFileDescriptor.open(imageFile, ParcelFileDescriptor.MODE_READ_ONLY)
+    override fun openFile(
+        uri: Uri,
+        mode: String,
+    ): ParcelFileDescriptor = ParcelFileDescriptor.open(imageFile, ParcelFileDescriptor.MODE_READ_ONLY)
 
-    override fun insert(uri: Uri, values: ContentValues?): Uri? = null
-    override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
+    override fun insert(
+        uri: Uri,
+        values: ContentValues?,
+    ): Uri? = null
+
+    override fun delete(
+        uri: Uri,
+        selection: String?,
+        selectionArgs: Array<out String>?,
+    ): Int = 0
+
     override fun update(
         uri: Uri,
         values: ContentValues?,

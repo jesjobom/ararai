@@ -90,9 +90,10 @@ behavior, implement the smallest complete change, then refactor without changing
 the contract. Domain logic, ViewModels, persistence, catalog/download behavior,
 media boundaries, and runtime ownership belong in automated tests.
 
-`scripts/quality-gate.sh` is the common local/CI gate. It runs unit/Robolectric
-tests, lint, debug app and instrumentation builds, and `openspec validate --all
---strict`. Android instrumentation execution requires a connected arm64 device:
+`scripts/quality-gate.sh` is the common local/CI gate. It runs pinned Kotlin
+formatting and static analysis, unit/Robolectric tests, lint, debug app and
+instrumentation builds, and `openspec validate --all --strict`. Android
+instrumentation execution requires a connected arm64 device:
 
 ```sh
 ./gradlew connectedDebugAndroidTest

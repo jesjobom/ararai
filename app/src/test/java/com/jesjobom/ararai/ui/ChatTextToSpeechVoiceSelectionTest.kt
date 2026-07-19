@@ -2,12 +2,12 @@ package com.jesjobom.ararai.ui
 
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
-import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.util.Locale
 
 @RunWith(RobolectricTestRunner::class)
 class ChatTextToSpeechVoiceSelectionTest {
@@ -15,17 +15,19 @@ class ChatTextToSpeechVoiceSelectionTest {
     fun selectsOnlyInstalledVoicesMatchingDetectedLanguage() {
         val portuguese = voice("pt-br", Locale.forLanguageTag("pt-BR"))
         val english = voice("en-us", Locale.US)
-        val missingEnglish = voice(
-            name = "en-gb-missing",
-            locale = Locale.UK,
-            features = setOf(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED),
-        )
+        val missingEnglish =
+            voice(
+                name = "en-gb-missing",
+                locale = Locale.UK,
+                features = setOf(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED),
+            )
 
-        val result = compatibleVoices(
-            voices = setOf(portuguese, missingEnglish, english),
-            languageTag = "en",
-            currentVoice = portuguese,
-        )
+        val result =
+            compatibleVoices(
+                voices = setOf(portuguese, missingEnglish, english),
+                languageTag = "en",
+                currentVoice = portuguese,
+            )
 
         assertEquals(listOf(english), result)
     }

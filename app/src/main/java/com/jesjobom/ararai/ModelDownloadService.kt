@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.jesjobom.ararai.model.ModelDownloadServiceController
 import com.jesjobom.ararai.model.ModelStartupState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,41 +31,51 @@ class ModelDownloadService : Service() {
     private var observation: Job? = null
     private var lastNotificationAtMillis = 0L
     private var lastNotifiedPercent = -1
-    private val controller get() = (application as ArarAiApplication).modelController
+    internal var controllerOverride: ModelDownloadServiceController? = null
+    internal var elapsedRealtime: () -> Long = SystemClock::elapsedRealtime
+    private val controller: ModelDownloadServiceController
+        get() = controllerOverride ?: (application as ArarAiApplication).modelController
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         startInForeground(preparingNotification())
-        observation = scope.launch {
-            controller.state.collectLatest { state ->
-                val active = state.models.filter { it.config.id in ownedModelIds }
-                active.filter { it.state is ModelStartupState.Downloading }
-                    .forEach { observedDownloadingIds += it.config.id }
-                active.filter {
-                    it.config.id in observedDownloadingIds && it.state !is ModelStartupState.Downloading
-                }.forEach {
-                    ownedModelIds.remove(it.config.id)
-                    observedDownloadingIds.remove(it.config.id)
-                }
-                val downloading = active.firstOrNull { it.state is ModelStartupState.Downloading }
-                if (downloading != null) {
-                    val downloadState = downloading.state as ModelStartupState.Downloading
-                    if (shouldNotify(downloadState)) {
-                        notificationManager.notify(
-                            NOTIFICATION_ID,
-                            downloadNotification(downloading.config.name, downloadState, downloading.config.id),
-                        )
+        observation =
+            scope.launch {
+                controller.state.collectLatest { state ->
+                    val active = state.models.filter { it.config.id in ownedModelIds }
+                    active
+                        .filter { it.state is ModelStartupState.Downloading }
+                        .forEach { observedDownloadingIds += it.config.id }
+                    active
+                        .filter {
+                            it.config.id in observedDownloadingIds && it.state !is ModelStartupState.Downloading
+                        }.forEach {
+                            ownedModelIds.remove(it.config.id)
+                            observedDownloadingIds.remove(it.config.id)
+                        }
+                    val downloading = active.firstOrNull { it.state is ModelStartupState.Downloading }
+                    if (downloading != null) {
+                        val downloadState = downloading.state as ModelStartupState.Downloading
+                        if (shouldNotify(downloadState)) {
+                            notificationManager.notify(
+                                NOTIFICATION_ID,
+                                downloadNotification(downloading.config.name, downloadState, downloading.config.id),
+                            )
+                        }
+                    } else if (hasReceivedCommand && ownedModelIds.isEmpty()) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
                     }
-                } else if (hasReceivedCommand && ownedModelIds.isEmpty()) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
                 }
             }
-        }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int,
+    ): Int {
         val modelId = intent?.getStringExtra(EXTRA_MODEL_ID) ?: return START_NOT_STICKY
         hasReceivedCommand = true
         when (intent.action) {
@@ -101,22 +112,28 @@ class ModelDownloadService : Service() {
         )
     }
 
-    private fun preparingNotification(): Notification =
-        NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Preparing model download")
-            .setOngoing(true)
-            .setContentIntent(openAppIntent())
-            .build()
+    private fun preparingNotification(): Notification = NotificationCompat
+        .Builder(this, CHANNEL_ID)
+        .setSmallIcon(android.R.drawable.stat_sys_download)
+        .setContentTitle("Preparing model download")
+        .setOngoing(true)
+        .setContentIntent(openAppIntent())
+        .build()
 
-    private fun downloadNotification(name: String, state: ModelStartupState.Downloading, modelId: String): Notification {
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Downloading $name")
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setContentIntent(openAppIntent())
-            .addAction(0, "Cancel", cancelPendingIntent(modelId))
+    private fun downloadNotification(
+        name: String,
+        state: ModelStartupState.Downloading,
+        modelId: String,
+    ): Notification {
+        val builder =
+            NotificationCompat
+                .Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle("Downloading $name")
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(openAppIntent())
+                .addAction(0, "Cancel", cancelPendingIntent(modelId))
         val total = state.totalBytes
         if (total != null && total > 0L) {
             val percent = progressPercent(state)
@@ -130,7 +147,7 @@ class ModelDownloadService : Service() {
     }
 
     private fun shouldNotify(state: ModelStartupState.Downloading): Boolean {
-        val now = SystemClock.elapsedRealtime()
+        val now = elapsedRealtime()
         val percent = progressPercent(state)
         val shouldNotify = lastNotifiedPercent < 0 || percent >= 100 || now - lastNotificationAtMillis >= 500L
         if (shouldNotify) {
@@ -180,15 +197,20 @@ class ModelDownloadService : Service() {
         private const val CHANNEL_ID = "model_downloads"
         private const val NOTIFICATION_ID = 1001
 
-        fun downloadIntent(context: Context, modelId: String, replaceExisting: Boolean): Intent =
-            Intent(context, ModelDownloadService::class.java)
-                .setAction(ACTION_DOWNLOAD)
-                .putExtra(EXTRA_MODEL_ID, modelId)
-                .putExtra(EXTRA_REPLACE, replaceExisting)
+        fun downloadIntent(
+            context: Context,
+            modelId: String,
+            replaceExisting: Boolean,
+        ): Intent = Intent(context, ModelDownloadService::class.java)
+            .setAction(ACTION_DOWNLOAD)
+            .putExtra(EXTRA_MODEL_ID, modelId)
+            .putExtra(EXTRA_REPLACE, replaceExisting)
 
-        fun cancelIntent(context: Context, modelId: String): Intent =
-            Intent(context, ModelDownloadService::class.java)
-                .setAction(ACTION_CANCEL)
-                .putExtra(EXTRA_MODEL_ID, modelId)
+        fun cancelIntent(
+            context: Context,
+            modelId: String,
+        ): Intent = Intent(context, ModelDownloadService::class.java)
+            .setAction(ACTION_CANCEL)
+            .putExtra(EXTRA_MODEL_ID, modelId)
     }
 }

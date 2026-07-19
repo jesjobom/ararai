@@ -9,29 +9,38 @@ internal fun interface ChatLanguageIdentificationListener {
 }
 
 internal interface ChatLanguageIdentifier : AutoCloseable {
-    fun identify(text: String, listener: ChatLanguageIdentificationListener)
+    fun identify(
+        text: String,
+        listener: ChatLanguageIdentificationListener,
+    )
+
     override fun close()
 }
 
 internal class MlKitChatLanguageIdentifier : ChatLanguageIdentifier {
-    private val client = LanguageIdentification.getClient(
-        LanguageIdentificationOptions.Builder()
-            .setConfidenceThreshold(MINIMUM_CONFIDENCE)
-            .build(),
-    )
+    private val client =
+        LanguageIdentification.getClient(
+            LanguageIdentificationOptions
+                .Builder()
+                .setConfidenceThreshold(MINIMUM_CONFIDENCE)
+                .build(),
+        )
     private var closed = false
 
-    override fun identify(text: String, listener: ChatLanguageIdentificationListener) {
+    override fun identify(
+        text: String,
+        listener: ChatLanguageIdentificationListener,
+    ) {
         if (closed) return
-        client.identifyLanguage(text)
+        client
+            .identifyLanguage(text)
             .addOnSuccessListener { languageTag ->
                 if (!closed) {
                     val detectedTag = languageTag.takeUnless { it == UNDETERMINED_LANGUAGE }
                     Log.d(LOG_TAG, "Language identification completed: ${detectedTag ?: "undetermined"}")
                     listener.onIdentified(detectedTag)
                 }
-            }
-            .addOnFailureListener { error ->
+            }.addOnFailureListener { error ->
                 if (!closed) {
                     Log.w(LOG_TAG, "Language identification failed; using default TTS voice", error)
                     listener.onIdentified(null)

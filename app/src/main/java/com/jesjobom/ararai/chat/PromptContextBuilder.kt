@@ -15,8 +15,9 @@ class PromptContextBuilder(
     ): List<PromptChatMessage> {
         val systemMessage = PromptChatMessage(PromptChatRole.System, systemPrompt.trim())
         val currentTurn = PromptChatMessage(PromptChatRole.User, userPrompt.trim())
-        val maxChars = ((inferenceConfig.contextTokens - inferenceConfig.maxTokens).coerceAtLeast(32) * charsPerToken)
-            .coerceAtLeast(systemMessage.estimatedLength() + currentTurn.estimatedLength())
+        val maxChars =
+            ((inferenceConfig.contextTokens - inferenceConfig.maxTokens).coerceAtLeast(32) * charsPerToken)
+                .coerceAtLeast(systemMessage.estimatedLength() + currentTurn.estimatedLength())
         val selectedHistory = mutableListOf<ChatMessage>()
         var used = systemMessage.estimatedLength() + currentTurn.estimatedLength()
 
@@ -36,13 +37,13 @@ class PromptContextBuilder(
     }
 
     private fun ChatMessage.toPromptMessage(): PromptChatMessage {
-        val role = when (role) {
-            ChatRole.User -> PromptChatRole.User
-            ChatRole.Assistant -> PromptChatRole.Assistant
-        }
+        val role =
+            when (role) {
+                ChatRole.User -> PromptChatRole.User
+                ChatRole.Assistant -> PromptChatRole.Assistant
+            }
         return PromptChatMessage(role, text.trim())
     }
 
-    private fun PromptChatMessage.estimatedLength(): Int =
-        role.transcriptLabel.length + text.length + 3
+    private fun PromptChatMessage.estimatedLength(): Int = role.transcriptLabel.length + text.length + 3
 }

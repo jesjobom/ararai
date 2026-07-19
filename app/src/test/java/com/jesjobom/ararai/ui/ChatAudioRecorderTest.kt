@@ -1,16 +1,17 @@
 package com.jesjobom.ararai.ui
 
-import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.io.File
 
 class ChatAudioRecorderTest {
     @Test
     fun `formats recorded audio prompt metadata`() {
-        val file = File.createTempFile("recording-", ".wav").apply {
-            writeBytes(byteArrayOf(1, 2, 3))
-            deleteOnExit()
-        }
+        val file =
+            File.createTempFile("recording-", ".wav").apply {
+                writeBytes(byteArrayOf(1, 2, 3))
+                deleteOnExit()
+            }
 
         val prompt = recordedAudioPrompt(file = file, durationMillis = 12_345)
 
@@ -48,15 +49,15 @@ class ChatAudioRecorderTest {
     }
 }
 
-private fun ByteArray.decodeAscii(offset: Int, length: Int): String =
-    copyOfRange(offset, offset + length).decodeToString()
+private fun ByteArray.decodeAscii(
+    offset: Int,
+    length: Int,
+): String = copyOfRange(offset, offset + length).decodeToString()
 
-private fun ByteArray.readLittleEndianInt(offset: Int): Int =
-    (this[offset].toInt() and 0xff) or
-        ((this[offset + 1].toInt() and 0xff) shl 8) or
-        ((this[offset + 2].toInt() and 0xff) shl 16) or
-        ((this[offset + 3].toInt() and 0xff) shl 24)
+private fun ByteArray.readLittleEndianInt(offset: Int): Int = (this[offset].toInt() and 0xff) or
+    ((this[offset + 1].toInt() and 0xff) shl 8) or
+    ((this[offset + 2].toInt() and 0xff) shl 16) or
+    ((this[offset + 3].toInt() and 0xff) shl 24)
 
-private fun ByteArray.readLittleEndianShort(offset: Int): Int =
-    (this[offset].toInt() and 0xff) or
-        ((this[offset + 1].toInt() and 0xff) shl 8)
+private fun ByteArray.readLittleEndianShort(offset: Int): Int = (this[offset].toInt() and 0xff) or
+    ((this[offset + 1].toInt() and 0xff) shl 8)

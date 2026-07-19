@@ -25,15 +25,19 @@ object ModelConfigParser {
 
         require(count > 0) { "models.count must be positive" }
 
-        val models = (0 until count).map { index ->
-            properties.parseModel(
-                modelPrefix = "models.$index.",
-                inferencePrefix = "models.$index.inference.",
-            )
-        }
-        val defaultModelId = properties.getProperty("models.defaultId")?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: models.first().id
+        val models =
+            (0 until count).map { index ->
+                properties.parseModel(
+                    modelPrefix = "models.$index.",
+                    inferencePrefix = "models.$index.inference.",
+                )
+            }
+        val defaultModelId =
+            properties
+                .getProperty("models.defaultId")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: models.first().id
 
         return ModelCatalog(
             defaultModelId = defaultModelId,
@@ -42,58 +46,69 @@ object ModelConfigParser {
         )
     }
 
-    private fun Properties.parseChatConfig(): ChatConfig =
-        ChatConfig(
-            systemPrompt = optional("chat.systemPrompt", ModelCatalog.DEFAULT_SYSTEM_PROMPT),
-        )
+    private fun Properties.parseChatConfig(): ChatConfig = ChatConfig(
+        systemPrompt = optional("chat.systemPrompt", ModelCatalog.DEFAULT_SYSTEM_PROMPT),
+    )
 
-    private fun Properties.parseModel(modelPrefix: String, inferencePrefix: String): ModelConfig =
-        ModelConfig(
-            id = required("${modelPrefix}id"),
-            name = required("${modelPrefix}name"),
-            runtime = ModelRuntime.fromConfigValue(
-                optional("${modelPrefix}runtime", ModelRuntime.LlamaCpp.configValue),
-            ),
-            artifactFormat = ModelArtifactFormat.fromConfigValue(
-                optional("${modelPrefix}artifactFormat", ModelArtifactFormat.Gguf.configValue),
-            ),
-            acceleration = ModelAccelerationPolicy.fromConfigValue(
-                optional("${modelPrefix}acceleration", ModelAccelerationPolicy.GpuPreferred.configValue),
-            ),
-            url = required("${modelPrefix}url"),
-            fallbackUrls = optionalList("${modelPrefix}fallbackUrls"),
-            fileName = required("${modelPrefix}fileName"),
-            relativePath = required("${modelPrefix}relativePath"),
-            sha256 = required("${modelPrefix}sha256").lowercase(),
-            expectedBytes = getProperty("${modelPrefix}expectedBytes")?.toLong(),
-            inference = InferenceConfig(
-                contextTokens = required("${inferencePrefix}contextTokens").toInt(),
-                maxTokens = required("${inferencePrefix}maxTokens").toInt(),
-                temperature = required("${inferencePrefix}temperature").toFloat(),
-                topP = required("${inferencePrefix}topP").toFloat(),
-                topK = optional("${inferencePrefix}topK", "40").toInt(),
-                minP = optional("${inferencePrefix}minP", "0.05").toFloat(),
-                repeatPenalty = optional("${inferencePrefix}repeatPenalty", "1.10").toFloat(),
-            ),
-            inputCapabilities = ModelInputCapabilities(
-                text = optionalBoolean("${modelPrefix}capabilities.input.text", defaultValue = true),
-                image = optionalBoolean("${modelPrefix}capabilities.input.image", defaultValue = false),
-                audio = optionalBoolean("${modelPrefix}capabilities.input.audio", defaultValue = false),
-            ),
-            reasoningCapabilities = ModelReasoningCapabilities(
-                request = optionalBoolean("${modelPrefix}capabilities.reasoning.request", defaultValue = false),
-                output = optionalBoolean("${modelPrefix}capabilities.reasoning.output", defaultValue = false),
-            ),
-        ).also { it.validate() }
+    private fun Properties.parseModel(
+        modelPrefix: String,
+        inferencePrefix: String,
+    ): ModelConfig = ModelConfig(
+        id = required("${modelPrefix}id"),
+        name = required("${modelPrefix}name"),
+        runtime =
+        ModelRuntime.fromConfigValue(
+            optional("${modelPrefix}runtime", ModelRuntime.LlamaCpp.configValue),
+        ),
+        artifactFormat =
+        ModelArtifactFormat.fromConfigValue(
+            optional("${modelPrefix}artifactFormat", ModelArtifactFormat.Gguf.configValue),
+        ),
+        acceleration =
+        ModelAccelerationPolicy.fromConfigValue(
+            optional("${modelPrefix}acceleration", ModelAccelerationPolicy.GpuPreferred.configValue),
+        ),
+        url = required("${modelPrefix}url"),
+        fallbackUrls = optionalList("${modelPrefix}fallbackUrls"),
+        fileName = required("${modelPrefix}fileName"),
+        relativePath = required("${modelPrefix}relativePath"),
+        sha256 = required("${modelPrefix}sha256").lowercase(),
+        expectedBytes = getProperty("${modelPrefix}expectedBytes")?.toLong(),
+        inference =
+        InferenceConfig(
+            contextTokens = required("${inferencePrefix}contextTokens").toInt(),
+            maxTokens = required("${inferencePrefix}maxTokens").toInt(),
+            temperature = required("${inferencePrefix}temperature").toFloat(),
+            topP = required("${inferencePrefix}topP").toFloat(),
+            topK = optional("${inferencePrefix}topK", "40").toInt(),
+            minP = optional("${inferencePrefix}minP", "0.05").toFloat(),
+            repeatPenalty = optional("${inferencePrefix}repeatPenalty", "1.10").toFloat(),
+        ),
+        inputCapabilities =
+        ModelInputCapabilities(
+            text = optionalBoolean("${modelPrefix}capabilities.input.text", defaultValue = true),
+            image = optionalBoolean("${modelPrefix}capabilities.input.image", defaultValue = false),
+            audio = optionalBoolean("${modelPrefix}capabilities.input.audio", defaultValue = false),
+        ),
+        reasoningCapabilities =
+        ModelReasoningCapabilities(
+            request = optionalBoolean("${modelPrefix}capabilities.reasoning.request", defaultValue = false),
+            output = optionalBoolean("${modelPrefix}capabilities.reasoning.output", defaultValue = false),
+        ),
+    ).also { it.validate() }
 
-    private fun Properties.required(key: String): String =
-        getProperty(key)?.trim()?.takeIf { it.isNotEmpty() }
-            ?: throw IllegalArgumentException("Missing required model config field: $key")
+    private fun Properties.required(key: String): String = getProperty(key)?.trim()?.takeIf { it.isNotEmpty() }
+        ?: throw IllegalArgumentException("Missing required model config field: $key")
 
-    private fun Properties.optional(key: String, defaultValue: String): String =
-        getProperty(key)?.trim()?.takeIf { it.isNotEmpty() } ?: defaultValue
+    private fun Properties.optional(
+        key: String,
+        defaultValue: String,
+    ): String = getProperty(key)?.trim()?.takeIf { it.isNotEmpty() } ?: defaultValue
 
-    private fun Properties.optionalBoolean(key: String, defaultValue: Boolean): Boolean {
+    private fun Properties.optionalBoolean(
+        key: String,
+        defaultValue: Boolean,
+    ): Boolean {
         val raw = getProperty(key)?.trim()?.takeIf { it.isNotEmpty() } ?: return defaultValue
         return when (raw.lowercase()) {
             "true" -> true
@@ -102,12 +117,11 @@ object ModelConfigParser {
         }
     }
 
-    private fun Properties.optionalList(key: String): List<String> =
-        getProperty(key)
-            ?.split(',')
-            ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
-            ?: emptyList()
+    private fun Properties.optionalList(key: String): List<String> = getProperty(key)
+        ?.split(',')
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        ?: emptyList()
 
     private fun ModelConfig.validate() {
         require(relativePath.startsWith("models/")) {
