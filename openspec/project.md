@@ -25,6 +25,10 @@ inference remains device-, driver-, model-, and workload-dependent.
   completed assistant responses.
 - Structured prompts can contain text, normalized images, or recorded audio
   when the selected model declares the corresponding input capability.
+- Experimental Voice Chat v0 runs stateless, half-duplex direct-audio turns for
+  audio-capable models, compares offline WebRTC/Silero VAD and Android capture
+  preprocessing, speaks streamed answers incrementally, and retains neither
+  conversational context nor Voice Chat history.
 - Diagnostics expose model/runtime metadata and local benchmark measurements.
 - Conversations, preferences, models, runtime caches, and Chat media are local.
   Android backup and device transfer are disabled for the application.
@@ -42,6 +46,8 @@ local model is sufficient for the core Chat inference flow.
 - llama.cpp through JNI/NDK for GGUF artifacts
 - LiteRT-LM 0.14.0 for configured LiteRT-LM bundles
 - Bundled ML Kit Language ID 17.0.6 for offline response-language detection
+- Android VAD 2.0.10 WebRTC/Silero adapters and ONNX Runtime Android 1.22.0 for
+  experimental offline pause-detection comparison
 - Plain SQLite for Chat sessions/messages and local preferences for model
   selection
 - Debug builds/signing only
@@ -65,6 +71,8 @@ The principal boundaries are:
 - `engine/`: runtime-neutral contracts plus llama.cpp and LiteRT-LM adapters;
 - `chat/`: session state, context construction, SQLite persistence, streaming
   durability, and media ownership;
+- `voice/`: stateless voice-loop coordination, PCM capture/VAD, experimental
+  preprocessing and diagnostics, response segmentation, and sequential TTS;
 - `ui/`: navigation and Compose presentation, with injectable adapters around
   image import, audio recording/playback, response language identification,
   native text-to-speech, decoding, and draft cleanup;

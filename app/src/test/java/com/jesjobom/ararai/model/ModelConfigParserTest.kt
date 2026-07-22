@@ -19,6 +19,7 @@ class ModelConfigParserTest {
                 model.relativePath=models/smollm2-135m-q4.gguf
                 model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 model.expectedBytes=1234
+                model.recommendedFreeRamBytes=4294967296
                 inference.contextTokens=2048
                 inference.maxTokens=512
                 inference.temperature=0.7
@@ -39,6 +40,7 @@ class ModelConfigParserTest {
         assertEquals(false, config.reasoningCapabilities.output)
         assertEquals("models/smollm2-135m-q4.gguf", config.relativePath)
         assertEquals(1234L, config.expectedBytes)
+        assertEquals(4294967296L, config.recommendedFreeRamBytes)
         assertEquals(2048, config.inference.contextTokens)
         assertEquals(512, config.inference.maxTokens)
         assertEquals(0.7f, config.inference.temperature)
@@ -179,6 +181,7 @@ class ModelConfigParserTest {
         assertEquals("smollm2-135m-instruct-q4-k-m", catalog.defaultModelId)
         assertEquals(4, catalog.models.size)
         assertEquals("Gemma 4 E2B IT LiteRT-LM", catalog.models[3].name)
+        assertEquals(4294967296L, catalog.models[3].recommendedFreeRamBytes)
         assertFalse(catalog.models.any { it.id.contains("qwen", ignoreCase = true) })
         assertFalse(catalog.models[0].reasoningCapabilities.request)
         assertFalse(catalog.models[0].reasoningCapabilities.output)

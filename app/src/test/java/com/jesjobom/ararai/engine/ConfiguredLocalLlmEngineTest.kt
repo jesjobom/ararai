@@ -65,9 +65,11 @@ class ConfiguredLocalLlmEngineTest {
             )
 
         engine.load(model, config)
+        engine.prepare(LocalLlmWorkload.Audio)
 
         assertEquals(null, llamaCppEngine.loadedModel)
         assertEquals(model, liteRtLmEngine.loadedModel)
+        assertEquals(LocalLlmWorkload.Audio, liteRtLmEngine.preparedWorkload)
         engine.generate(PromptRequest("oi")).test {
             assertEquals(GenerationEvent.Token("gemma"), awaitItem())
             assertEquals(GenerationEvent.Completed, awaitItem())
@@ -97,6 +99,8 @@ class ConfiguredLocalLlmEngineTest {
             private set
         var unloadCalls: Int = 0
             private set
+        var preparedWorkload: LocalLlmWorkload? = null
+            private set
 
         override suspend fun load(
             model: LocalModel,
@@ -106,6 +110,10 @@ class ConfiguredLocalLlmEngineTest {
         }
 
         override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(*events.toTypedArray())
+
+        override suspend fun prepare(workload: LocalLlmWorkload) {
+            preparedWorkload = workload
+        }
 
         override suspend fun unload() {
             unloadCalls += 1

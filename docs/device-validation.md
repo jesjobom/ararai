@@ -53,6 +53,28 @@ symbol loading without downloading a production model.
 - Background/foreground, lock/unlock, and return through recents during load and
   generation. Confirm no duplicate generation and recoverable UI state.
 
+## Voice Chat v0
+
+- Use an audio-capable LiteRT-LM model; confirm unsupported models disable Start
+  and link to model management.
+- Deny microphone permission, grant it on retry, start/stop while listening, and
+  leave the screen in every phase. Confirm no recording or TTS continues.
+- Compare WebRTC and Silero with the same ten synthetic turns in quiet, fan/TV,
+  street, near/far, and multilingual conditions. Record false starts, false
+  endings, missed endings, pause latency, CPU, memory, battery, and temperature.
+- Start with the experimental baseline of Silero/Aggressive, 300 ms speech
+  confirmation, 300 ms pre-roll, and 500 ms minimum speech. Vary one setting at
+  a time and record the effective values with each result.
+- Compare MIC, VOICE_RECOGNITION, and VOICE_COMMUNICATION with native noise
+  suppression requested and disabled. Record the effective source/effect shown
+  by diagnostics rather than assuming vendor support.
+- Confirm the microphone is inactive during model processing/TTS, response
+  segments remain ordered, Stop flushes speech, and no callback restarts work.
+- After completion, failure, Stop, activity destruction, and forced process death,
+  verify Voice Chat WAVs are absent after the next launch and Chat media remains.
+- Confirm Voice Chat creates no session/history, does not carry prior turns into
+  a new request, and clears in-memory diagnostics when its owner is destroyed.
+
 ## Media, permissions, storage, and privacy
 
 - Deny microphone permission, retry, grant it, record, cancel, record again, and send.

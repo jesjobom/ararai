@@ -13,9 +13,20 @@ interface LocalLlmEngine {
         config: InferenceConfig,
     )
 
+    suspend fun prepare(workload: LocalLlmWorkload) = Unit
+
     fun generate(request: PromptRequest): Flow<GenerationEvent>
 
     suspend fun unload()
+}
+
+data class LocalLlmWorkload(
+    val image: Boolean = false,
+    val audio: Boolean = false,
+) {
+    companion object {
+        val Audio = LocalLlmWorkload(audio = true)
+    }
 }
 
 data class PromptRequest(

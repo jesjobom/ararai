@@ -17,12 +17,17 @@ backend, or external database.
   controls when declared by the selected model.
 - Offline response-language detection and language-aware native Android
   text-to-speech playback for completed assistant responses.
+- Experimental stateless Voice Chat v0 for audio-capable LiteRT-LM models. It
+  compares offline WebRTC/Silero voice-activity detection, Android capture
+  sources, and optional native noise suppression, then speaks streamed answers
+  in ordered segments. Voice turns, audio, responses, and diagnostics are not
+  persisted and no context is carried between turns.
 - Capability-gated image and audio prompts. Imported images are normalized and
   recordings are stored as app-owned Chat media.
 - Diagnostics for model/runtime identity and local inference performance.
 - Resumable model downloads continue under an Android foreground service with
   progress and cancellation in a persistent notification.
-- Home, Chat, Models, Diagnostics, and Settings destinations implemented with
+- Home, Chat, Voice Chat v0, Models, Diagnostics, and Settings destinations implemented with
   Jetpack Compose.
 - Persistent System, Light, and Dark appearance selection with Material dynamic
   colors on supported devices.
@@ -41,6 +46,8 @@ memory, thermal, and multimodal behavior require physical-device validation.
 - Build Tools 36.0.0, NDK 28.2.13676358, CMake 3.22.1
 - Local runtimes: llama.cpp through JNI/NDK and LiteRT-LM 0.14.0
 - Bundled ML Kit Language ID 17.0.6
+- Android VAD 2.0.10 (WebRTC and Silero) plus ONNX Runtime Android 1.22.0
+  transitively for the experimental Silero comparison
 - Debug signing/builds only; release signing is not configured
 
 Model definitions and their runtime, artifact, capability, integrity, and
@@ -111,6 +118,11 @@ device therefore does not restore conversations, media, models, or settings.
 Model downloads still require network access to their configured artifact URLs.
 Once a valid model is present, core inference and Chat do not call a hosted
 inference service.
+
+Voice Chat v0 keeps only bounded timing/configuration diagnostics in memory.
+Its temporary WAV is deleted after each exchange, cancellation, or failure and
+stale Voice Chat temporary files are reconciled on startup. It does not write
+voice messages or generated text to the Chat database.
 
 ## Planning and sources of truth
 

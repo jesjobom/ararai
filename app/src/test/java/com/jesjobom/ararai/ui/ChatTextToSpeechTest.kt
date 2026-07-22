@@ -135,6 +135,7 @@ class ChatTextToSpeechTest {
         override fun speak(
             text: String,
             languageTag: String?,
+            speechRate: Float,
             listener: ChatTextToSpeechListener,
         ) {
             spokenRequests += SpeechRequest(text, languageTag)

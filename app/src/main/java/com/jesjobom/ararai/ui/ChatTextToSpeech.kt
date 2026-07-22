@@ -16,6 +16,11 @@ import java.util.UUID
 
 internal fun interface ChatTextToSpeechListener {
     fun onResult(result: ChatTextToSpeechResult)
+
+    fun onRangeStart(
+        start: Int,
+        endExclusive: Int,
+    ) = Unit
 }
 
 internal sealed interface ChatTextToSpeechResult {
@@ -30,6 +35,7 @@ internal interface ChatTextToSpeechService : AutoCloseable {
     fun speak(
         text: String,
         languageTag: String?,
+        speechRate: Float = 1.0f,
         listener: ChatTextToSpeechListener,
     )
 
@@ -142,6 +148,7 @@ internal class AndroidChatTextToSpeechService(
     override fun speak(
         text: String,
         languageTag: String?,
+        speechRate: Float,
         listener: ChatTextToSpeechListener,
     ) {
         if (closed) {
@@ -149,7 +156,7 @@ internal class AndroidChatTextToSpeechService(
             return
         }
         stop()
-        pending = PendingSpeech(text, languageTag, listener)
+        pending = PendingSpeech(text, languageTag, speechRate, listener)
         if (initialized) {
             speakPending()
         } else if (engine == null) {
@@ -196,6 +203,18 @@ internal class AndroidChatTextToSpeechService(
             object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) = Unit
 
+                override fun onRangeStart(
+                    utteranceId: String?,
+                    start: Int,
+                    end: Int,
+                    frame: Int,
+                ) {
+                    val speech = pending ?: return
+                    if (utteranceId == activeUtteranceId && speech.utteranceId == utteranceId) {
+                        mainHandler.post { speech.listener.onRangeStart(start, end) }
+                    }
+                }
+
                 override fun onDone(utteranceId: String?) {
                     finish(utteranceId, ChatTextToSpeechResult.Completed)
                 }
@@ -223,15 +242,20 @@ internal class AndroidChatTextToSpeechService(
             notify(speech.listener, ChatTextToSpeechResult.Failed("The default text-to-speech voice is unavailable"))
             return
         }
+        if (engine?.setSpeechRate(speech.speechRate) != TextToSpeech.SUCCESS) {
+            notify(speech.listener, ChatTextToSpeechResult.Failed("Unable to apply the selected speech rate"))
+            return
+        }
         val utteranceId = UUID.randomUUID().toString()
         activeUtteranceId = utteranceId
+        pending = speech.copy(utteranceId = utteranceId)
         val result = engine?.speak(speech.text, TextToSpeech.QUEUE_FLUSH, Bundle(), utteranceId)
         if (result != TextToSpeech.SUCCESS) {
             activeUtteranceId = null
+            pending = null
             notify(speech.listener, ChatTextToSpeechResult.Failed("Unable to start text-to-speech playback"))
             return
         }
-        pending = speech.copy(utteranceId = utteranceId)
     }
 
     private fun configureVoice(languageTag: String?): Boolean {
@@ -307,6 +331,7 @@ internal class AndroidChatTextToSpeechService(
     private data class PendingSpeech(
         val text: String,
         val languageTag: String?,
+        val speechRate: Float,
         val listener: ChatTextToSpeechListener,
         val utteranceId: String? = null,
     )

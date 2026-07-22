@@ -114,7 +114,7 @@ class LiteRtLmLocalLlmEngine(
                         trySend(GenerationEvent.Failed(failure))
                         return@launch
                     }
-                    val session = ensureProfile(request)
+                    val session = ensureProfile(LiteRtLmWorkloadProfile.from(request))
                     session.generate(request, initialState.config).collect { chunk ->
                         if (chunk.text.isNotEmpty()) {
                             trySend(GenerationEvent.Token(chunk.text))
@@ -139,6 +139,12 @@ class LiteRtLmLocalLlmEngine(
                 synchronized(lock) { loadedSession }?.cancel()
             }
             job.cancel()
+        }
+    }
+
+    override suspend fun prepare(workload: LocalLlmWorkload) {
+        withContext(dispatcher) {
+            ensureProfile(LiteRtLmWorkloadProfile(image = workload.image, audio = workload.audio))
         }
     }
 
@@ -168,8 +174,7 @@ class LiteRtLmLocalLlmEngine(
         val capabilities: ModelInputCapabilities,
     )
 
-    private suspend fun ensureProfile(request: PromptRequest): LiteRtLmSession {
-        val desiredProfile = LiteRtLmWorkloadProfile.from(request)
+    private suspend fun ensureProfile(desiredProfile: LiteRtLmWorkloadProfile): LiteRtLmSession {
         val snapshot =
             synchronized(lock) {
                 ProfileState(
@@ -272,6 +277,7 @@ class AndroidLiteRtLmBridge(
         inputCapabilities: ModelInputCapabilities,
         profile: LiteRtLmWorkloadProfile,
     ): LiteRtLmSession {
+        val startedAt = System.nanoTime()
         ExperimentalFlags.enableBenchmark = true
         ExperimentalFlags.enableSpeculativeDecoding = true
         val backend = if (useGpu) Backend.GPU() else Backend.CPU()
@@ -288,11 +294,21 @@ class AndroidLiteRtLmBridge(
 
         return try {
             engine.initialize()
+            Log.d(
+                LOG_TAG,
+                "Engine initialized: profile=$profile, elapsed=${startedAt.elapsedMillis()} ms",
+            )
             AndroidLiteRtLmSession(engine)
         } catch (error: Throwable) {
             engine.close()
             throw error
         }
+    }
+
+    private fun Long.elapsedMillis(): Long = (System.nanoTime() - this) / 1_000_000
+
+    private companion object {
+        const val LOG_TAG = "ArarAI.LiteRtLm"
     }
 }
 
@@ -310,6 +326,7 @@ private class AndroidLiteRtLmSession(
         request: PromptRequest,
         config: InferenceConfig,
     ): Flow<LiteRtLmChunk> = callbackFlow {
+        val generationStartedAt = System.nanoTime()
         val samplerConfig =
             SamplerConfig(
                 topK = DEFAULT_TOP_K,
@@ -348,6 +365,10 @@ private class AndroidLiteRtLmSession(
                     ),
                 )
             }
+        Log.d(
+            LOG_TAG,
+            "Conversation ready: reused=$canReuse, elapsed=${generationStartedAt.elapsedMillis()} ms",
+        )
         val reusable = key.sessionId != null
         val completed = AtomicBoolean(false)
 
@@ -358,6 +379,9 @@ private class AndroidLiteRtLmSession(
             val callback =
                 object : MessageCallback {
                     override fun onMessage(message: Message) {
+                        if (previousText.isEmpty() && previousReasoning.isEmpty()) {
+                            Log.d(LOG_TAG, "First model callback: ${generationStartedAt.elapsedMillis()} ms")
+                        }
                         val currentText = message.text()
                         val currentReasoning = message.reasoning()
                         val textDelta = currentText.deltaAfter(previousText)
@@ -375,6 +399,12 @@ private class AndroidLiteRtLmSession(
                                 Log.w("ArarAI.LiteRtLm", "Unable to read LiteRT-LM benchmark metrics", error)
                             }.getOrNull()
                             ?.let { benchmark ->
+                                Log.d(
+                                    LOG_TAG,
+                                    "Generation benchmark: ttft=${benchmark.timeToFirstTokenInSecond * 1_000} ms, " +
+                                        "prefillTokens=${benchmark.lastPrefillTokenCount}, " +
+                                        "prefillTokensPerSecond=${benchmark.lastPrefillTokensPerSecond}",
+                                )
                                 trySend(
                                     LiteRtLmChunk(
                                         metrics =
@@ -408,6 +438,7 @@ private class AndroidLiteRtLmSession(
                 }
 
             conversation.sendMessageAsync(request.toCurrentLiteRtContents(), callback)
+            Log.d(LOG_TAG, "Audio request submitted: ${generationStartedAt.elapsedMillis()} ms")
         } catch (error: Throwable) {
             close(error)
         }
@@ -442,7 +473,10 @@ private class AndroidLiteRtLmSession(
         const val DEFAULT_TOP_K = 40
         const val DEFAULT_SEED = 0
         const val ENABLE_THINKING_CONTEXT_KEY = "enable_thinking"
+        const val LOG_TAG = "ArarAI.LiteRtLm"
     }
+
+    private fun Long.elapsedMillis(): Long = (System.nanoTime() - this) / 1_000_000
 
     private data class RetainedConversationState(
         val key: LiteRtLmConversationKey,

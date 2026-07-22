@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -44,6 +46,9 @@ import com.jesjobom.ararai.ui.HomeScreen
 import com.jesjobom.ararai.ui.ModelStatusScreen
 import com.jesjobom.ararai.ui.ModelStatusUiState
 import com.jesjobom.ararai.ui.SettingsScreen
+import com.jesjobom.ararai.ui.VoiceChatScreen
+import com.jesjobom.ararai.voice.VadProvider
+import com.jesjobom.ararai.voice.VoiceChatUiState
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -83,11 +88,13 @@ class CriticalComposeJourneysTest {
                             modelName = model.name,
                             title = "Model ready",
                             detail = model.filePath,
+                            capabilities = listOf("Text"),
                             progressPercent = null,
                             canRetry = false,
                         ),
                         appVersionLabel = "test",
                         onOpenChat = { chatOpen = true },
+                        onOpenVoiceChat = {},
                         onOpenDiagnostics = {},
                         onOpenModelStatus = {},
                         onOpenSettings = {},
@@ -96,7 +103,7 @@ class CriticalComposeJourneysTest {
             }
         }
 
-        composeRule.onNodeWithText("Open chat").performClick()
+        composeRule.onNodeWithText("Chat").performClick()
         composeRule.onNodeWithText("Message").performTextInput("Hello")
         composeRule.onNodeWithContentDescription("Send").performClick()
         composeRule.onNodeWithText("Cancel generation").assertIsDisplayed()
@@ -221,6 +228,67 @@ class CriticalComposeJourneysTest {
         composeRule.runOnIdle { assertEquals(ThemeMode.Dark, themeMode) }
     }
 
+    @Test
+    fun voiceResponsePreviewOpensTheCompleteResponse() {
+        val response = "First spoken line. Second spoken line. Complete response remains available."
+        composeRule.setContent {
+            MaterialTheme {
+                VoiceChatScreen(
+                    state =
+                    VoiceChatUiState(
+                        responsePreview = response,
+                        spokenRange = 6..11,
+                        readingAnchor = 11,
+                    ),
+                    onEnter = {},
+                    onStart = {},
+                    onStop = {},
+                    onDismissError = {},
+                    onSettings = {},
+                    onOpenModels = {},
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("voice-response-preview").assertIsDisplayed().performClick()
+        composeRule.onNodeWithText("Voice Chat").assertIsDisplayed()
+        composeRule.onNodeWithText("Local diagnostics", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithText("Response").assertIsDisplayed()
+        composeRule.onNodeWithText(response).assertIsDisplayed()
+    }
+
+    @Test
+    fun voiceChatSettingsSelectReadingSpeed() {
+        var savedSettings: com.jesjobom.ararai.voice.VoiceChatSettings? = null
+        composeRule.setContent {
+            MaterialTheme {
+                VoiceChatScreen(
+                    state = VoiceChatUiState(),
+                    onEnter = {},
+                    onStart = {},
+                    onStop = {},
+                    onDismissError = {},
+                    onSettings = { savedSettings = it },
+                    onOpenModels = {},
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Voice Chat settings").performClick()
+        composeRule.onNodeWithTag("voice-speech-rate-slider")
+            .performSemanticsAction(SemanticsActions.SetProgress) { setProgress -> setProgress(2.0f) }
+        composeRule.onNodeWithText("Silero").performClick()
+        composeRule.onNodeWithText("WebRTC").performClick()
+        composeRule.onNodeWithText("Save").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(2.0f, savedSettings?.speechRateMultiplier)
+            assertEquals(VadProvider.WebRtc, savedSettings?.vadProvider)
+        }
+    }
+
     private fun availableModel() = LocalModel(
         id = "test-model",
         name = "Test model",
@@ -253,6 +321,7 @@ class CriticalComposeJourneysTest {
         override fun speak(
             text: String,
             languageTag: String?,
+            speechRate: Float,
             listener: ChatTextToSpeechListener,
         ) = Unit
 

@@ -27,11 +27,14 @@ import com.jesjobom.ararai.ui.ArarAiApp
 import com.jesjobom.ararai.ui.ArarAiTheme
 import com.jesjobom.ararai.ui.MlKitChatLanguageIdentifier
 import com.jesjobom.ararai.ui.androidChatMediaServices
+import com.jesjobom.ararai.voice.SharedPreferencesVoiceChatPreferences
+import com.jesjobom.ararai.voice.reconcileVoiceTemporaryFiles
 import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
     private val openModelManagementRequests = MutableStateFlow(0)
 
+    @Suppress("LongMethod")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleNavigationIntent(intent)
@@ -43,6 +46,9 @@ class MainActivity : ComponentActivity() {
         val chatMediaRepository = FileChatMediaRepository(java.io.File(filesDir, "chat_media"))
         val chatMediaServices = androidChatMediaServices(chatMediaRepository)
         val themePreferenceStore = SharedPreferencesThemePreferenceStore(this)
+        val voiceChatPreferences = SharedPreferencesVoiceChatPreferences(this)
+        val voiceTemporaryDirectory = java.io.File(cacheDir, "voice_chat")
+        reconcileVoiceTemporaryFiles(voiceTemporaryDirectory)
         chatMediaRepository.reconcile(chatSessionStore.referencedMediaUris())
 
         setContent {
@@ -79,6 +85,8 @@ class MainActivity : ComponentActivity() {
                         appVersionLabel = "v${BuildConfig.VERSION_NAME}",
                         themeMode = themeMode,
                         onThemeModeChange = themePreferenceStore::setThemeMode,
+                        voiceChatPreferences = voiceChatPreferences,
+                        voiceTemporaryDirectory = voiceTemporaryDirectory,
                         openModelManagementRequest = openModelManagementRequest,
                         liteRtLmCacheDir =
                         prepareLiteRtLmCacheDir(cacheDir) { error ->

@@ -2,7 +2,10 @@ package com.jesjobom.ararai.ui
 
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.model.ModelAccelerationPolicy
 import com.jesjobom.ararai.model.ModelConfig
+import com.jesjobom.ararai.model.ModelInputCapabilities
+import com.jesjobom.ararai.model.ModelReasoningCapabilities
 import com.jesjobom.ararai.model.ModelStartupState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -97,7 +100,25 @@ class ModelStatusUiStateTest {
 
         assertEquals("Model ready", state.title)
         assertEquals("Ready Model", state.modelName)
+        assertEquals("Available locally", state.detail)
         assertNull(state.progressPercent)
+    }
+
+    @Test
+    fun `exposes model capabilities as presentation labels`() {
+        val config =
+            config().copy(
+                acceleration = ModelAccelerationPolicy.GpuPreferred,
+                inputCapabilities = ModelInputCapabilities(text = true, image = true, audio = true),
+                reasoningCapabilities = ModelReasoningCapabilities(request = true, output = true),
+            )
+
+        val state = ModelStatusUiState.from(config, ModelStartupState.Missing)
+
+        assertEquals(
+            listOf("Text", "Voice", "Image", "Reasoning", "GPU"),
+            state.capabilities,
+        )
     }
 
     private fun config(): ModelConfig = ModelConfig(

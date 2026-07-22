@@ -3,6 +3,7 @@ package com.jesjobom.ararai.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,10 +21,10 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -68,17 +69,24 @@ import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelCatalogController
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.settings.ThemeMode
+import com.jesjobom.ararai.voice.AndroidVoiceTurnCapture
+import com.jesjobom.ararai.voice.SequentialVoiceSpeechQueue
+import com.jesjobom.ararai.voice.VoiceChatPreferences
+import com.jesjobom.ararai.voice.VoiceChatViewModel
+import java.io.File
 import java.util.Locale
 
 private enum class AppDestination {
     Home,
     Chat,
+    VoiceChat,
     Diagnostics,
     ModelStatus,
     Settings,
 }
 
 @Composable
+@Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod", "MaxLineLength")
 internal fun ArarAiApp(
     modelController: ModelCatalogController,
     chatSessionStore: ChatSessionStore,
@@ -90,12 +98,15 @@ internal fun ArarAiApp(
     appVersionLabel: String,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
+    voiceChatPreferences: VoiceChatPreferences,
+    voiceTemporaryDirectory: File,
     openModelManagementRequest: Int = 0,
     liteRtLmCacheDir: String? = null,
     localLlmEngineFactory: () -> LocalLlmEngine = {
         ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir)
     },
 ) {
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val modelCatalogState by modelController.state.collectAsState()
     val startupState = modelCatalogState.selectedStartupState
     val modelConfig = modelCatalogState.selectedConfig
@@ -121,9 +132,29 @@ internal fun ArarAiApp(
             initialState = startupState,
         )
     }
+    val voiceChatViewModel = remember {
+        VoiceChatViewModel(
+            engine = localLlmRuntime.engine,
+            systemPrompt = systemPrompt,
+            preferences = voiceChatPreferences,
+            captureFactory = { settings -> AndroidVoiceTurnCapture(appContext, voiceTemporaryDirectory, settings) },
+            speechQueueFactory = { onStarted, onRange, onComplete, onError ->
+                SequentialVoiceSpeechQueue(
+                    speech = chatTextToSpeechServiceFactory(),
+                    languageIdentifier = chatLanguageIdentifierFactory(),
+                    speechRate = { voiceChatPreferences.settings.value.speechRateMultiplier },
+                    onSpeechStarted = onStarted,
+                    onSpeechRange = onRange,
+                    onQueueComplete = onComplete,
+                    onError = onError,
+                )
+            },
+        )
+    }
     fun returnHome() {
         when (destination) {
             AppDestination.Chat -> chatViewModel.onLeavingChat()
+            AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
             AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
             AppDestination.Home, AppDestination.ModelStatus, AppDestination.Settings -> Unit
         }
@@ -138,6 +169,7 @@ internal fun ArarAiApp(
         if (openModelManagementRequest > 0) {
             when (destination) {
                 AppDestination.Chat -> chatViewModel.onLeavingChat()
+                AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
                 AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
                 AppDestination.Home, AppDestination.ModelStatus, AppDestination.Settings -> Unit
             }
@@ -147,6 +179,7 @@ internal fun ArarAiApp(
 
     LaunchedEffect(startupState) {
         chatViewModel.onModelStartupState(startupState)
+        voiceChatViewModel.onModelStartupState(startupState)
     }
 
     LaunchedEffect(modelConfig, startupState) {
@@ -158,6 +191,7 @@ internal fun ArarAiApp(
             modelStatus = ModelStatusUiState.from(modelConfig, startupState),
             appVersionLabel = appVersionLabel,
             onOpenChat = { destination = AppDestination.Chat },
+            onOpenVoiceChat = { destination = AppDestination.VoiceChat },
             onOpenDiagnostics = { destination = AppDestination.Diagnostics },
             onOpenModelStatus = { destination = AppDestination.ModelStatus },
             onOpenSettings = { destination = AppDestination.Settings },
@@ -170,6 +204,22 @@ internal fun ArarAiApp(
             onBack = { returnHome() },
             onRetryModelDownload = { modelController.retry(modelCatalogState.selectedModelId) },
         )
+        AppDestination.VoiceChat -> {
+            val voiceState by voiceChatViewModel.state.collectAsState()
+            VoiceChatScreen(
+                state = voiceState,
+                onEnter = voiceChatViewModel::onEnteringVoiceChat,
+                onStart = voiceChatViewModel::start,
+                onStop = voiceChatViewModel::stop,
+                onDismissError = voiceChatViewModel::dismissError,
+                onSettings = voiceChatViewModel::updateSettings,
+                onOpenModels = {
+                    voiceChatViewModel.onLeavingVoiceChat()
+                    destination = AppDestination.ModelStatus
+                },
+                onBack = { returnHome() },
+            )
+        }
         AppDestination.Diagnostics -> BenchmarkScreen(
             viewModel = benchmarkViewModel,
             onBack = { returnHome() },
@@ -245,10 +295,12 @@ private fun ArarAiScaffold(
 }
 
 @Composable
+@Suppress("LongParameterList", "LongMethod", "MaxLineLength")
 internal fun HomeScreen(
     modelStatus: ModelStatusUiState,
     appVersionLabel: String,
     onOpenChat: () -> Unit,
+    onOpenVoiceChat: () -> Unit,
     onOpenDiagnostics: () -> Unit,
     onOpenModelStatus: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -274,61 +326,31 @@ internal fun HomeScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            ElevatedCard(
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ),
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Chat,
-                            contentDescription = null,
-                        )
-                        Text(
-                            text = "Chat",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                    Text(
-                        text = "Start a local conversation with the selected model.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Button(
-                        onClick = onOpenChat,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Chat,
-                            contentDescription = null,
-                        )
-                        Text(
-                            text = "Open chat",
-                            modifier = Modifier.padding(start = 8.dp),
-                        )
-                    }
-                }
-            }
+            HomeConversationCard(
+                title = "Chat",
+                detail = "Start a local conversation with the selected model.",
+                icon = Icons.AutoMirrored.Filled.Chat,
+                onClick = onOpenChat,
+            )
+
+            HomeConversationCard(
+                title = "Voice Chat",
+                detail = "Start a stateless local voice conversation with the selected model.",
+                icon = Icons.Filled.Mic,
+                onClick = onOpenVoiceChat,
+            )
 
             StatusCard(
-                title = modelStatus.title,
+                title = "Model Manager",
                 value = modelStatus.modelName,
-                detail = modelStatus.detail,
+                detail = modelStatus.title,
+                tags = modelStatus.capabilities,
                 icon = when {
                     modelStatus.progressPercent != null -> Icons.Filled.CloudDownload
                     modelStatus.canRetry -> Icons.Filled.Error
                     modelStatus.title.contains("ready", ignoreCase = true) -> Icons.Filled.CheckCircle
                     else -> Icons.Filled.Storage
                 },
-                actionLabel = "Manage models",
                 onAction = onOpenModelStatus,
             )
 
@@ -337,9 +359,7 @@ internal fun HomeScreen(
                 value = "Selected model runtime check",
                 detail = "Run a single benchmark when you need troubleshooting data.",
                 icon = Icons.Filled.Build,
-                actionLabel = "Open diagnostics",
                 onAction = onOpenDiagnostics,
-                secondary = true,
             )
 
             StatusCard(
@@ -347,9 +367,7 @@ internal fun HomeScreen(
                 value = "Appearance and preferences",
                 detail = "Choose how ArarAI looks and manage future application options.",
                 icon = Icons.Filled.Settings,
-                actionLabel = "Open settings",
                 onAction = onOpenSettings,
-                secondary = true,
             )
         }
     }
@@ -438,23 +456,55 @@ private val ThemeMode.description: String
     }
 
 @Composable
+private fun HomeConversationCard(
+    title: String,
+    detail: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    ElevatedCard(
+        onClick = onClick,
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(imageVector = icon, contentDescription = null)
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+@Composable
+@Suppress("LongParameterList")
 private fun StatusCard(
     title: String,
     value: String,
     detail: String,
+    tags: List<String> = emptyList(),
     icon: ImageVector,
-    actionLabel: String,
     onAction: () -> Unit,
-    secondary: Boolean = false,
 ) {
     Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (secondary) {
-                MaterialTheme.colorScheme.surface
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant
-            },
-        ),
+        onClick = onAction,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -482,9 +532,7 @@ private fun StatusCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            TextButton(onClick = onAction) {
-                Text(actionLabel)
-            }
+            CapabilityTags(tags)
         }
     }
 }
@@ -652,6 +700,7 @@ internal fun ModelStatusScreen(
 }
 
 @Composable
+@Suppress("CyclomaticComplexMethod", "LongMethod")
 private fun ModelCard(
     item: ManagedModelItem,
     isSelected: Boolean,
@@ -704,22 +753,32 @@ private fun ModelCard(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(
-                    onClick = {},
-                    label = { Text(item.config.runtime.displayName) },
-                )
-                AssistChip(
-                    onClick = {},
-                    label = { Text(item.config.acceleration.displayName) },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Filled.Bolt,
-                            contentDescription = null,
-                        )
-                    },
-                )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                MetadataBadge(item.config.runtime.displayName)
+                MetadataBadge(item.config.acceleration.displayName)
+                item.config.capabilityLabels().forEach { capability ->
+                    MetadataBadge(capability)
+                }
             }
+
+            val installedBytes = (item.state as? ModelStartupState.Available)
+                ?.model
+                ?.filePath
+                ?.let(::File)
+                ?.takeIf(File::isFile)
+                ?.length()
+                ?.takeIf { it > 0L }
+            LabeledValue(
+                label = if (installedBytes != null) "Installed size" else "Approx. download",
+                value = (installedBytes ?: item.config.expectedBytes)?.toStorageSize() ?: "Unknown",
+            )
+            LabeledValue(
+                label = "Recommended free RAM",
+                value = item.config.recommendedFreeRamBytes?.toStorageSize() ?: "Not specified",
+            )
 
             Text(
                 text = status.detail,
@@ -773,6 +832,44 @@ private fun ModelCard(
                 Spacer(modifier = Modifier.height(4.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun CapabilityTags(tags: List<String>) {
+    if (tags.isEmpty()) return
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        tags.forEach { tag ->
+            MetadataBadge(tag)
+        }
+    }
+}
+
+@Composable
+private fun MetadataBadge(label: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
+}
+
+private fun Long.toStorageSize(): String {
+    val gibibyte = 1024.0 * 1024.0 * 1024.0
+    val mebibyte = 1024.0 * 1024.0
+    return if (this >= gibibyte) {
+        String.format(Locale.US, "%.1f GB", this / gibibyte)
+    } else {
+        String.format(Locale.US, "%.0f MB", this / mebibyte)
     }
 }
 

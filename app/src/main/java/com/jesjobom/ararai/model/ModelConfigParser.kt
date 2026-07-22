@@ -74,6 +74,7 @@ object ModelConfigParser {
         relativePath = required("${modelPrefix}relativePath"),
         sha256 = required("${modelPrefix}sha256").lowercase(),
         expectedBytes = getProperty("${modelPrefix}expectedBytes")?.toLong(),
+        recommendedFreeRamBytes = getProperty("${modelPrefix}recommendedFreeRamBytes")?.toLong(),
         inference =
         InferenceConfig(
             contextTokens = required("${inferencePrefix}contextTokens").toInt(),
@@ -143,6 +144,9 @@ object ModelConfigParser {
         }
         require(expectedBytes == null || expectedBytes > 0) {
             "model.expectedBytes must be positive when present"
+        }
+        require(recommendedFreeRamBytes == null || recommendedFreeRamBytes > 0) {
+            "model.recommendedFreeRamBytes must be positive when present"
         }
         require((listOf(url) + fallbackUrls).all { it.startsWith("https://") }) {
             "model download URLs must use https"

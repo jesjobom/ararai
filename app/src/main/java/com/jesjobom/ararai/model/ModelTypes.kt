@@ -79,6 +79,7 @@ data class ModelConfig(
     val relativePath: String,
     val sha256: String,
     val expectedBytes: Long?,
+    val recommendedFreeRamBytes: Long? = null,
     val inference: InferenceConfig,
     val inputCapabilities: ModelInputCapabilities = ModelInputCapabilities(),
     val reasoningCapabilities: ModelReasoningCapabilities = ModelReasoningCapabilities(),

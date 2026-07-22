@@ -204,6 +204,28 @@ class LiteRtLmLocalLlmEngineTest {
     }
 
     @Test
+    fun `prepares audio workload before the first audio request`() = runTest {
+        val bridge = RecordingBridge()
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
+        val audioModel = model.copy(inputCapabilities = ModelInputCapabilities(audio = true))
+
+        engine.load(audioModel, config)
+        engine.prepare(LocalLlmWorkload.Audio)
+
+        assertEquals(
+            listOf(
+                LiteRtLmWorkloadProfile.TextOnly,
+                LiteRtLmWorkloadProfile(image = false, audio = true),
+            ),
+            bridge.loadedProfiles,
+        )
+    }
+
+    @Test
     fun `normalizes file uris to litert file paths`() {
         assertEquals("/tmp/image.png", "file:///tmp/image.png".toLiteRtFilePath())
         assertEquals(

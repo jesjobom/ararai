@@ -114,6 +114,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.14.0")
     implementation("com.google.mlkit:language-id:17.0.6")
+    implementation("com.github.gkonovalov.android-vad:webrtc:2.0.10")
+    implementation("com.github.gkonovalov.android-vad:silero:2.0.10")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("ru.noties:jlatexmath-android:0.2.0")
 

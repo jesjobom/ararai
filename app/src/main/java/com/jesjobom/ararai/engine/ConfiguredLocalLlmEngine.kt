@@ -36,6 +36,10 @@ class ConfiguredLocalLlmEngine(
     override fun generate(request: PromptRequest): Flow<GenerationEvent> = activeEngine?.generate(request)
         ?: flowOf(GenerationEvent.Failed("Model is not loaded"))
 
+    override suspend fun prepare(workload: LocalLlmWorkload) {
+        checkNotNull(activeEngine) { "Model is not loaded" }.prepare(workload)
+    }
+
     override suspend fun unload() {
         activeEngine?.unload()
         activeEngine = null

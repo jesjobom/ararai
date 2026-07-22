@@ -1,5 +1,6 @@
 package com.jesjobom.ararai.ui
 
+import com.jesjobom.ararai.model.ModelAccelerationPolicy
 import com.jesjobom.ararai.model.ModelConfig
 import com.jesjobom.ararai.model.ModelStartupState
 
@@ -7,6 +8,7 @@ data class ModelStatusUiState(
     val modelName: String,
     val title: String,
     val detail: String,
+    val capabilities: List<String>,
     val progressPercent: Int?,
     val canRetry: Boolean,
 ) {
@@ -20,6 +22,7 @@ data class ModelStatusUiState(
                     modelName = config.name,
                     title = "Not downloaded",
                     detail = "Download this model to use it locally",
+                    capabilities = config.capabilityLabels(),
                     progressPercent = null,
                     canRetry = false,
                 )
@@ -28,6 +31,7 @@ data class ModelStatusUiState(
                     modelName = config.name,
                     title = "Model invalid",
                     detail = startupState.reason,
+                    capabilities = config.capabilityLabels(),
                     progressPercent = null,
                     canRetry = false,
                 )
@@ -36,7 +40,8 @@ data class ModelStatusUiState(
                 ModelStatusUiState(
                     modelName = startupState.model.name,
                     title = "Model ready",
-                    detail = startupState.model.filePath,
+                    detail = "Available locally",
+                    capabilities = config.capabilityLabels(),
                     progressPercent = null,
                     canRetry = false,
                 )
@@ -45,6 +50,7 @@ data class ModelStatusUiState(
                     modelName = config.name,
                     title = "Download failed",
                     detail = startupState.message,
+                    capabilities = config.capabilityLabels(),
                     progressPercent = null,
                     canRetry = true,
                 )
@@ -68,11 +74,20 @@ data class ModelStatusUiState(
                 } else {
                     "Waiting for download progress"
                 },
+                capabilities = config.capabilityLabels(),
                 progressPercent = percent,
                 canRetry = false,
             )
         }
     }
+}
+
+internal fun ModelConfig.capabilityLabels(): List<String> = buildList {
+    if (inputCapabilities.text) add("Text")
+    if (inputCapabilities.audio) add("Voice")
+    if (inputCapabilities.image) add("Image")
+    if (reasoningCapabilities.request || reasoningCapabilities.output) add("Reasoning")
+    add(if (acceleration == ModelAccelerationPolicy.CpuOnly) "CPU" else "GPU")
 }
 
 private fun Long.toByteText(): String = if (this < 1024L) {
