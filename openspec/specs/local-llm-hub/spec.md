@@ -172,7 +172,8 @@ its default inference limits.
 - **WHEN** the app starts
 - **THEN** it can parse a configured model catalog
 - **AND** each entry defines the model ID, source URL, expected local path,
-  integrity metadata, and default inference parameters
+  integrity metadata, expected download size, recommended free RAM, and default
+  inference parameters
 - **AND** the default inference parameters include context size, sampling
   values, and maximum generated tokens.
 
@@ -181,6 +182,41 @@ its default inference limits.
 - **WHEN** the user opens the model management screen
 - **THEN** the app shows only models declared by checked-in configuration
 - **AND** the UI does not allow arbitrary model entries to be added.
+
+#### Scenario: Validate model resource metadata
+
+- **GIVEN** a catalog entry declares expected download size or recommended free
+  RAM
+- **WHEN** the app parses the catalog
+- **THEN** each declared value is a positive byte count
+- **AND** the values remain part of the same model configuration as runtime,
+  acceleration, capabilities, and inference parameters.
+
+### Requirement: Model Management Metadata Presentation
+
+Home and model management SHALL present model metadata without exposing the
+app-owned local file path or implying that static metadata is interactive.
+
+#### Scenario: Present selected model on Home
+
+- **GIVEN** a model is selected
+- **WHEN** the user views Home
+- **THEN** the `Model Manager` card shows the selected model name
+- **AND** text, voice, image, unified reasoning, and CPU/GPU capabilities are
+  presented as non-interactive badges
+- **AND** the local model file path is not presented.
+
+#### Scenario: Present configured model details
+
+- **WHEN** the user views model management
+- **THEN** every model shows non-interactive badges for runtime, acceleration,
+  and supported capabilities
+- **AND** reasoning request or output support is represented by one `Reasoning`
+  badge
+- **AND** a missing model shows its configured approximate download size
+- **AND** an available model shows the current local file size
+- **AND** the configured recommended free RAM is shown
+- **AND** the local model file path is not presented.
 
 ### Requirement: Model Resolution State
 
@@ -789,14 +825,16 @@ spacing/action hierarchy.
 
 ### Requirement: Chat-Centered Home
 
-Home SHALL present Chat as the primary daily-use action while keeping model
-management visible and diagnostics secondary.
+Home SHALL present Chat and Voice Chat as daily-use conversation actions while
+keeping model management visible and diagnostics secondary.
 
 #### Scenario: Home action hierarchy
 
 - **WHEN** the user opens the app Home screen
-- **THEN** the primary action opens Chat
-- **AND** model management is available from Home
+- **THEN** Chat and Voice Chat use visually consistent, fully clickable cards
+- **AND** model management, diagnostics, and settings use a consistent utility
+  card treatment
+- **AND** no Home destination requires a nested action button
 - **AND** benchmark access is presented as a secondary diagnostic action, not as
   a model-comparison or benchmark-history workflow.
 
@@ -2334,4 +2372,3 @@ lifecycle events.
 
 - **WHEN** Android invokes the service without a valid model command
 - **THEN** automated coverage verifies controlled non-sticky behavior without a crash.
-

@@ -1,7 +1,10 @@
 # voice-chat Specification
 
 ## Purpose
-TBD - created by archiving change add-voice-chat. Update Purpose after archive.
+Define the local, stateless, half-duplex Voice Chat experience, including audio
+capture, pause detection, incremental TTS playback, reading progress, settings,
+lifecycle cleanup, and physical-device validation boundaries.
+
 ## Requirements
 ### Requirement: Voice Chat destination
 
@@ -23,16 +26,6 @@ and Voice Chat as visually consistent, fully clickable conversation cards.
 - **THEN** Chat and Voice Chat use the same color scheme
 - **AND** Models, Diagnostics, and Settings use the Model Management color scheme
 - **AND** every destination card is clickable without an internal action button.
-
-#### Scenario: Present selected-model capabilities
-
-- **GIVEN** a model is selected
-- **WHEN** the user views the Home or Models screen
-- **THEN** the model's supported text, voice, image, unified reasoning, and acceleration capabilities are presented as non-interactive badges
-- **AND** the local model file path is not presented
-- **AND** model management shows the configured approximate download size, or the current installed size when available
-- **AND** model management shows the catalog's recommended free RAM for the model
-- **AND** the Home identifies model management as `Model Manager`.
 
 #### Scenario: Selected model cannot accept audio
 
