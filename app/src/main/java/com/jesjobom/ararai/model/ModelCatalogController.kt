@@ -76,7 +76,9 @@ class ModelCatalogController(
     }
 
     fun select(modelId: String) {
-        require(catalog.models.any { it.id == modelId }) { "Unknown model: $modelId" }
+        val config = catalog.models.firstOrNull { it.id == modelId }
+            ?: throw IllegalArgumentException("Unknown model: $modelId")
+        require(config.supportsPurpose(ModelPurpose.Chat)) { "Model $modelId is not selectable for Chat" }
         selectionStore.saveSelectedModelId(modelId)
         _state.update { it.copy(selectedModelId = modelId) }
     }
@@ -116,7 +118,10 @@ class ModelCatalogController(
 
     private fun ensureBootstrapModelDownload() {
         val current = state.value
-        if (current.models.any { it.state is ModelStartupState.Available }) return
+        val hasAvailableChatModel = current.models.any {
+            it.config.supportsPurpose(ModelPurpose.Chat) && it.state is ModelStartupState.Available
+        }
+        if (hasAvailableChatModel) return
 
         val defaultModel = current.models.first { it.config.id == catalog.defaultModelId }
         if (defaultModel.state is ModelStartupState.Missing || defaultModel.state is ModelStartupState.Invalid) {
@@ -128,9 +133,13 @@ class ModelCatalogController(
         val stored =
             selectionStore
                 .selectedModelId()
-                ?.takeIf { modelId -> models.any { it.config.id == modelId } }
+                ?.takeIf { modelId ->
+                    models.any { it.config.id == modelId && it.config.supportsPurpose(ModelPurpose.Chat) }
+                }
         return stored
-            ?: models.firstOrNull { it.state is ModelStartupState.Available }?.config?.id
+            ?: models.firstOrNull {
+                it.config.supportsPurpose(ModelPurpose.Chat) && it.state is ModelStartupState.Available
+            }?.config?.id
             ?: catalog.defaultModelId
     }
 

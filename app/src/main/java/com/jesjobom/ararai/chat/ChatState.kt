@@ -11,6 +11,7 @@ data class ChatUiState(
     val canShowReasoning: Boolean = false,
     val reasoningEnabled: Boolean = false,
     val showReasoning: Boolean = false,
+    val showAudioTranscriptions: Boolean = true,
     val sessions: List<ChatSessionUiState> = emptyList(),
     val selectedSessionId: String? = null,
     val messages: List<ChatMessage> = emptyList(),
@@ -74,7 +75,26 @@ sealed interface MessageContent {
 
     data class AudioPromptContent(
         val audio: AudioPrompt,
+        val transcript: String? = null,
+        val transcriptionStatus: AudioTranscriptionStatus = AudioTranscriptionStatus.NotRequested,
+        val transcriptionError: String? = null,
+        val transcriptionFailureKind: AudioTranscriptionFailureKind? = null,
+        val transcriptionDiagnostic: String? = null,
+        val transcriptionMayBeIncomplete: Boolean = false,
+        val transcriptionIncompleteReason: String? = null,
     ) : MessageContent
+}
+
+enum class AudioTranscriptionStatus { NotRequested, Pending, Completed, Failed }
+
+enum class AudioTranscriptionFailureKind {
+    EmptyResults,
+    RecognizerError,
+    InvalidAudio,
+    PipeWriteFailure,
+    Unavailable,
+    Timeout,
+    Unknown,
 }
 
 data class ImageAttachment(
@@ -96,7 +116,11 @@ val MessageContent.displayText: String
     get() =
         when (this) {
             is MessageContent.TextPrompt -> text
-            is MessageContent.AudioPromptContent -> audio.displayName ?: "Audio prompt"
+            is MessageContent.AudioPromptContent ->
+                transcript
+                    ?.takeIf {
+                        transcriptionStatus == AudioTranscriptionStatus.Completed && it.isNotBlank()
+                    }.orEmpty()
         }
 
 enum class ChatRole {

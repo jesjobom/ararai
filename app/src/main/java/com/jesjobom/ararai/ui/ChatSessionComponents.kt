@@ -214,13 +214,16 @@ internal fun SessionListItem(
 }
 
 @Composable
+@Suppress("LongParameterList")
 internal fun ChatSettingsDialog(
     reasoningEnabled: Boolean,
     showReasoning: Boolean,
     canEnableReasoning: Boolean,
     canShowReasoning: Boolean,
+    showAudioTranscriptions: Boolean,
     onReasoningEnabledChange: (Boolean) -> Unit,
     onShowReasoningChange: (Boolean) -> Unit,
+    onShowAudioTranscriptionsChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -234,6 +237,13 @@ internal fun ChatSettingsDialog(
                     checked = reasoningEnabled,
                     enabled = canEnableReasoning,
                     onCheckedChange = onReasoningEnabledChange,
+                )
+                ChatSettingSwitch(
+                    title = "Show audio transcriptions",
+                    status = "Transcriptions remain available to conversation context",
+                    checked = showAudioTranscriptions,
+                    enabled = true,
+                    onCheckedChange = onShowAudioTranscriptionsChange,
                 )
                 ChatSettingSwitch(
                     title = "Show reasoning",

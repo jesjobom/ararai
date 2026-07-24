@@ -22,8 +22,11 @@ backend, or external database.
   sources, and optional native noise suppression, then speaks streamed answers
   in ordered segments. Voice turns, audio, responses, and diagnostics are not
   persisted and no context is carried between turns.
-- Capability-gated image and audio prompts. Imported images are normalized and
-  recordings are stored as app-owned Chat media.
+- Capability-gated image and recorded-audio prompts. Chat uses a downloaded,
+  integrity-validated whisper.cpp model for local transcription. Audio-capable
+  models receive the original audio while transcription runs asynchronously;
+  text-only models receive the transcript after synchronous recognition.
+  Imported images are normalized and recordings remain app-owned Chat media.
 - Diagnostics for model/runtime identity and local inference performance.
 - Resumable model downloads continue under an Android foreground service with
   progress and cancellation in a persistent notification.
@@ -118,6 +121,18 @@ device therefore does not restore conversations, media, models, or settings.
 Model downloads still require network access to their configured artifact URLs.
 Once a valid model is present, core inference and Chat do not call a hosted
 inference service.
+
+Chat audio transcription uses only the bundled whisper.cpp runtime with an
+explicitly downloaded local model; there is no hosted or Android
+speech-recognizer fallback. The Model Manager offers Base Q5_1 (256 MB free RAM
+recommended) and Small Q5_1 (512 MB recommended). Base is preferred when both
+are installed, while Small is used when it is the only valid Whisper model.
+Completed transcripts remain persisted and available to conversation context
+even when the Chat preference hides them from message presentation. Older
+audio messages remain playable but are not transcribed retroactively. Failed
+transcriptions offer a copyable, sanitized in-app diagnostic report with model,
+timing, thread and failure metadata; reports exclude audio bytes and recognized
+speech.
 
 Voice Chat v0 keeps only bounded timing/configuration diagnostics in memory.
 Its temporary WAV is deleted after each exchange, cancellation, or failure and

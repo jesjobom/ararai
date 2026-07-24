@@ -25,6 +25,7 @@ class ConfiguredLocalLlmEngine(
             when (model.runtime) {
                 ModelRuntime.LlamaCpp -> llamaCppEngine
                 ModelRuntime.LiteRtLm -> liteRtLmEngine
+                ModelRuntime.WhisperCpp -> error("Whisper utility models cannot be loaded as LLMs")
             }
         if (activeEngine !== targetEngine) {
             activeEngine?.unload()

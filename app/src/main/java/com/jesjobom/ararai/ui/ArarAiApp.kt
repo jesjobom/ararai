@@ -59,7 +59,9 @@ import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.benchmark.BenchmarkResult
 import com.jesjobom.ararai.benchmark.BenchmarkUiState
 import com.jesjobom.ararai.benchmark.BenchmarkViewModel
+import com.jesjobom.ararai.chat.AudioTranscriber
 import com.jesjobom.ararai.chat.ChatMediaRepository
+import com.jesjobom.ararai.chat.ChatPreferences
 import com.jesjobom.ararai.chat.ChatSessionStore
 import com.jesjobom.ararai.chat.ChatViewModel
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
@@ -67,7 +69,12 @@ import com.jesjobom.ararai.engine.ConfiguredLocalLlmEngine
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelCatalogController
+import com.jesjobom.ararai.model.ModelPurpose
 import com.jesjobom.ararai.model.ModelStartupState
+import com.jesjobom.ararai.model.ModelTask
+import com.jesjobom.ararai.model.requireInference
+import com.jesjobom.ararai.model.supportsPurpose
+import com.jesjobom.ararai.model.supportsTask
 import com.jesjobom.ararai.settings.ThemeMode
 import com.jesjobom.ararai.voice.AndroidVoiceTurnCapture
 import com.jesjobom.ararai.voice.SequentialVoiceSpeechQueue
@@ -82,6 +89,7 @@ private enum class AppDestination {
     VoiceChat,
     Diagnostics,
     ModelStatus,
+    WhisperBenchmark,
     Settings,
 }
 
@@ -92,6 +100,8 @@ internal fun ArarAiApp(
     chatSessionStore: ChatSessionStore,
     chatMediaRepository: ChatMediaRepository,
     chatMediaServices: ChatMediaServices,
+    chatPreferences: ChatPreferences,
+    audioTranscriber: AudioTranscriber,
     chatTextToSpeechServiceFactory: () -> ChatTextToSpeechService,
     chatLanguageIdentifierFactory: () -> ChatLanguageIdentifier,
     systemPrompt: String,
@@ -111,6 +121,7 @@ internal fun ArarAiApp(
     val startupState = modelCatalogState.selectedStartupState
     val modelConfig = modelCatalogState.selectedConfig
     var destination by remember { mutableStateOf(AppDestination.Home) }
+    var whisperBenchmarkModelId by remember { mutableStateOf<String?>(null) }
     val localLlmRuntime = remember(localLlmEngineFactory) {
         AppLocalLlmRuntime(localLlmEngineFactory)
     }
@@ -119,10 +130,12 @@ internal fun ArarAiApp(
         ChatViewModel(
             engine = localLlmRuntime.engine,
             initialModel = availableState?.model,
-            inferenceConfig = availableState?.inference ?: modelConfig.inference,
+            inferenceConfig = availableState?.inference ?: modelConfig.requireInference(),
             systemPrompt = systemPrompt,
             sessionStore = chatSessionStore,
             mediaRepository = chatMediaRepository,
+            preferences = chatPreferences,
+            audioTranscriber = audioTranscriber,
         )
     }
     val benchmarkViewModel = remember {
@@ -156,13 +169,21 @@ internal fun ArarAiApp(
             AppDestination.Chat -> chatViewModel.onLeavingChat()
             AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
             AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
-            AppDestination.Home, AppDestination.ModelStatus, AppDestination.Settings -> Unit
+            AppDestination.Home,
+            AppDestination.ModelStatus,
+            AppDestination.WhisperBenchmark,
+            AppDestination.Settings,
+            -> Unit
         }
         destination = AppDestination.Home
     }
 
     BackHandler(enabled = destination != AppDestination.Home) {
-        returnHome()
+        if (destination == AppDestination.WhisperBenchmark) {
+            destination = AppDestination.ModelStatus
+        } else {
+            returnHome()
+        }
     }
 
     LaunchedEffect(openModelManagementRequest) {
@@ -171,7 +192,11 @@ internal fun ArarAiApp(
                 AppDestination.Chat -> chatViewModel.onLeavingChat()
                 AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
                 AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
-                AppDestination.Home, AppDestination.ModelStatus, AppDestination.Settings -> Unit
+                AppDestination.Home,
+                AppDestination.ModelStatus,
+                AppDestination.WhisperBenchmark,
+                AppDestination.Settings,
+                -> Unit
             }
             destination = AppDestination.ModelStatus
         }
@@ -234,7 +259,23 @@ internal fun ArarAiApp(
             onDelete = modelController::delete,
             onRedownload = modelController::redownload,
             onRetry = modelController::retry,
+            onTestTranscription = { modelId ->
+                whisperBenchmarkModelId = modelId
+                destination = AppDestination.WhisperBenchmark
+            },
         )
+        AppDestination.WhisperBenchmark -> {
+            val item = modelCatalogState.models.firstOrNull { it.config.id == whisperBenchmarkModelId }
+            if (item == null) {
+                LaunchedEffect(Unit) { destination = AppDestination.ModelStatus }
+            } else {
+                WhisperCandidateBenchmarkScreen(
+                    item = item,
+                    temporaryDirectory = File(appContext.cacheDir, "whisper-benchmark"),
+                    onBack = { destination = AppDestination.ModelStatus },
+                )
+            }
+        }
         AppDestination.Settings -> SettingsScreen(
             themeMode = themeMode,
             onThemeModeChange = onThemeModeChange,
@@ -245,7 +286,7 @@ internal fun ArarAiApp(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ArarAiScaffold(
+internal fun ArarAiScaffold(
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
@@ -661,6 +702,7 @@ private fun BenchmarkResultCard(result: BenchmarkResult) {
 }
 
 @Composable
+@Suppress("LongParameterList")
 internal fun ModelStatusScreen(
     models: List<ManagedModelItem>,
     selectedModelId: String,
@@ -671,6 +713,7 @@ internal fun ModelStatusScreen(
     onDelete: (String) -> Unit,
     onRedownload: (String) -> Unit,
     onRetry: (String) -> Unit,
+    onTestTranscription: (String) -> Unit = {},
 ) {
     ArarAiScaffold(
         title = "Models",
@@ -693,6 +736,7 @@ internal fun ModelStatusScreen(
                     onDelete = { onDelete(item.config.id) },
                     onRedownload = { onRedownload(item.config.id) },
                     onRetry = { onRetry(item.config.id) },
+                    onTestTranscription = { onTestTranscription(item.config.id) },
                 )
             }
         }
@@ -700,7 +744,7 @@ internal fun ModelStatusScreen(
 }
 
 @Composable
-@Suppress("CyclomaticComplexMethod", "LongMethod")
+@Suppress("CyclomaticComplexMethod", "LongMethod", "LongParameterList")
 private fun ModelCard(
     item: ManagedModelItem,
     isSelected: Boolean,
@@ -710,9 +754,12 @@ private fun ModelCard(
     onDelete: () -> Unit,
     onRedownload: () -> Unit,
     onRetry: () -> Unit,
+    onTestTranscription: () -> Unit,
 ) {
     val status = ModelStatusUiState.from(item.config, item.state)
     val isAvailable = item.state is ModelStartupState.Available
+    val isChatModel = item.config.supportsPurpose(ModelPurpose.Chat)
+    val isTranscriptionModel = item.config.supportsTask(ModelTask.Transcription)
     val isMissing = item.state is ModelStartupState.Missing
     val isDownloading = item.state is ModelStartupState.Downloading
     val isFailed = item.state is ModelStartupState.Failed
@@ -799,7 +846,7 @@ private fun ModelCard(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                if (!isSelected && isAvailable) {
+                if (isChatModel && !isSelected && isAvailable) {
                     Button(onClick = onSelect, enabled = !isDownloading) {
                         Text("Use this model")
                     }
@@ -820,6 +867,11 @@ private fun ModelCard(
                     }
                 }
                 if (isAvailable) {
+                    if (isTranscriptionModel) {
+                        Button(onClick = onTestTranscription) {
+                            Text("Test transcription model")
+                        }
+                    }
                     OutlinedButton(onClick = onRedownload) {
                         Text("Download again")
                     }

@@ -1,5 +1,6 @@
 package com.jesjobom.ararai.ui
 
+import android.content.ClipData
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,15 +10,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -26,25 +30,31 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.R
 import com.jesjobom.ararai.chat.AudioPrompt
+import com.jesjobom.ararai.chat.AudioTranscriptionStatus
 import com.jesjobom.ararai.chat.ChatMessage
 import com.jesjobom.ararai.chat.ChatRole
 import com.jesjobom.ararai.chat.MessageContent
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun AttachmentRow(
@@ -154,9 +164,11 @@ internal fun AudioPlaybackRow(
 }
 
 @Composable
+@Suppress("LongParameterList", "LongMethod")
 internal fun MessageRow(
     message: ChatMessage,
     showReasoning: Boolean,
+    showAudioTranscriptions: Boolean,
     mediaServices: ChatMediaServices,
     isStreaming: Boolean = false,
     isSpeaking: Boolean = false,
@@ -214,6 +226,7 @@ internal fun MessageRow(
                         MessageContentView(
                             message.content,
                             showReasoning = showReasoning,
+                            showAudioTranscriptions = showAudioTranscriptions,
                             mediaServices = mediaServices,
                         )
                     }
@@ -243,6 +256,7 @@ internal fun MessageRow(
 internal fun MessageContentView(
     content: MessageContent,
     showReasoning: Boolean,
+    showAudioTranscriptions: Boolean,
     mediaServices: ChatMediaServices,
 ) {
     when (content) {
@@ -279,8 +293,116 @@ internal fun MessageContentView(
                 MarkdownText(text = content.text.ifBlank { "..." })
             }
         }
-        is MessageContent.AudioPromptContent -> {
-            AudioPlaybackRow(audio = content.audio, mediaServices = mediaServices)
+        is MessageContent.AudioPromptContent -> AudioPromptContentView(
+            content = content,
+            showAudioTranscriptions = showAudioTranscriptions,
+            mediaServices = mediaServices,
+        )
+    }
+}
+
+@Composable
+private fun AudioPromptContentView(
+    content: MessageContent.AudioPromptContent,
+    showAudioTranscriptions: Boolean,
+    mediaServices: ChatMediaServices,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        AudioPlaybackRow(audio = content.audio, mediaServices = mediaServices)
+        when (content.transcriptionStatus) {
+            AudioTranscriptionStatus.Pending -> Text(
+                "Transcribing…",
+                style = MaterialTheme.typography.labelMedium,
+            )
+            AudioTranscriptionStatus.Completed -> CompletedTranscriptionView(content, showAudioTranscriptions)
+            AudioTranscriptionStatus.Failed -> TranscriptionFailureView(content)
+            AudioTranscriptionStatus.NotRequested -> Unit
+        }
+    }
+}
+
+@Composable
+private fun CompletedTranscriptionView(
+    content: MessageContent.AudioPromptContent,
+    showAudioTranscriptions: Boolean,
+) {
+    if (showAudioTranscriptions) MarkdownText(content.transcript.orEmpty())
+    if (content.transcriptionMayBeIncomplete) {
+        Text(
+            "Transcription may be incomplete",
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
+    TranscriptionDetailsButton(
+        diagnostic = content.transcriptionDiagnostic,
+        reportPrefix = buildString {
+            appendLine("status=Completed")
+            appendLine("potentially_partial=${content.transcriptionMayBeIncomplete}")
+            appendLine("partial_reason=${content.transcriptionIncompleteReason.orEmpty()}")
+        },
+    )
+}
+
+@Composable
+private fun TranscriptionFailureView(content: MessageContent.AudioPromptContent) {
+    Text(
+        content.transcriptionError ?: "Audio transcription failed",
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.labelMedium,
+    )
+    TranscriptionDetailsButton(
+        diagnostic = content.transcriptionDiagnostic,
+        reportPrefix = buildString {
+            appendLine("failure_kind=${content.transcriptionFailureKind?.name ?: "Unknown"}")
+            appendLine("message=${content.transcriptionError.orEmpty()}")
+        },
+    )
+}
+
+@Composable
+private fun TranscriptionDetailsButton(diagnostic: String?, reportPrefix: String) {
+    var showDetails by remember(diagnostic) { mutableStateOf(false) }
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    diagnostic?.takeIf { it.isNotBlank() }?.let {
+        TextButton(onClick = { showDetails = true }) {
+            Text("Transcription details")
+        }
+        if (showDetails) {
+            val report = reportPrefix + diagnostic
+            AlertDialog(
+                onDismissRequest = { showDetails = false },
+                title = { Text("Transcription diagnostics") },
+                text = {
+                    SelectionContainer {
+                        Text(
+                            report,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.verticalScroll(rememberScrollState()),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                clipboard.setClipEntry(
+                                    ClipEntry(ClipData.newPlainText("Transcription diagnostics", report)),
+                                )
+                            }
+                            showDetails = false
+                        },
+                    ) {
+                        Text("Copy")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDetails = false }) {
+                        Text("Close")
+                    }
+                },
+            )
         }
     }
 }

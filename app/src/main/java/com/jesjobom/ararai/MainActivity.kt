@@ -18,7 +18,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.jesjobom.ararai.chat.FileChatMediaRepository
+import com.jesjobom.ararai.chat.SharedPreferencesChatPreferences
 import com.jesjobom.ararai.chat.SqliteChatSessionStore
+import com.jesjobom.ararai.chat.WhisperCppAudioTranscriber
 import com.jesjobom.ararai.engine.prepareLiteRtLmCacheDir
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.settings.SharedPreferencesThemePreferenceStore
@@ -45,6 +47,10 @@ class MainActivity : ComponentActivity() {
         val chatSessionStore = SqliteChatSessionStore(this)
         val chatMediaRepository = FileChatMediaRepository(java.io.File(filesDir, "chat_media"))
         val chatMediaServices = androidChatMediaServices(chatMediaRepository)
+        val chatPreferences = SharedPreferencesChatPreferences(this)
+        val audioTranscriber = WhisperCppAudioTranscriber(
+            models = { modelController.state.value.models },
+        )
         val themePreferenceStore = SharedPreferencesThemePreferenceStore(this)
         val voiceChatPreferences = SharedPreferencesVoiceChatPreferences(this)
         val voiceTemporaryDirectory = java.io.File(cacheDir, "voice_chat")
@@ -79,6 +85,8 @@ class MainActivity : ComponentActivity() {
                         chatSessionStore = chatSessionStore,
                         chatMediaRepository = chatMediaRepository,
                         chatMediaServices = chatMediaServices,
+                        chatPreferences = chatPreferences,
+                        audioTranscriber = audioTranscriber,
                         chatTextToSpeechServiceFactory = { AndroidChatTextToSpeechService(this) },
                         chatLanguageIdentifierFactory = { MlKitChatLanguageIdentifier() },
                         systemPrompt = modelCatalog.chat.systemPrompt,

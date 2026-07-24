@@ -3,6 +3,7 @@ package com.jesjobom.ararai.model
 import java.io.StringReader
 import java.util.Properties
 
+@Suppress("TooManyFunctions")
 object ModelConfigParser {
     fun parse(raw: String): ModelConfig {
         val properties = Properties().apply { load(StringReader(raw)) }
@@ -75,16 +76,13 @@ object ModelConfigParser {
         sha256 = required("${modelPrefix}sha256").lowercase(),
         expectedBytes = getProperty("${modelPrefix}expectedBytes")?.toLong(),
         recommendedFreeRamBytes = getProperty("${modelPrefix}recommendedFreeRamBytes")?.toLong(),
-        inference =
-        InferenceConfig(
-            contextTokens = required("${inferencePrefix}contextTokens").toInt(),
-            maxTokens = required("${inferencePrefix}maxTokens").toInt(),
-            temperature = required("${inferencePrefix}temperature").toFloat(),
-            topP = required("${inferencePrefix}topP").toFloat(),
-            topK = optional("${inferencePrefix}topK", "40").toInt(),
-            minP = optional("${inferencePrefix}minP", "0.05").toFloat(),
-            repeatPenalty = optional("${inferencePrefix}repeatPenalty", "1.10").toFloat(),
+        purposes = optionalEnumSet("${modelPrefix}purposes", setOf(ModelPurpose.Chat), ModelPurpose::fromConfigValue),
+        tasks = optionalEnumSet("${modelPrefix}tasks", setOf(ModelTask.Chat), ModelTask::fromConfigValue),
+        maturity = ModelMaturity.fromConfigValue(
+            optional("${modelPrefix}maturity", ModelMaturity.Stable.configValue),
         ),
+        variant = getProperty("${modelPrefix}variant")?.trim()?.takeIf(String::isNotEmpty),
+        inference = parseInference(inferencePrefix),
         inputCapabilities =
         ModelInputCapabilities(
             text = optionalBoolean("${modelPrefix}capabilities.input.text", defaultValue = true),
@@ -97,6 +95,19 @@ object ModelConfigParser {
             output = optionalBoolean("${modelPrefix}capabilities.reasoning.output", defaultValue = false),
         ),
     ).also { it.validate() }
+
+    private fun Properties.parseInference(prefix: String): InferenceConfig? {
+        if (getProperty("${prefix}contextTokens").isNullOrBlank()) return null
+        return InferenceConfig(
+            contextTokens = required("${prefix}contextTokens").toInt(),
+            maxTokens = required("${prefix}maxTokens").toInt(),
+            temperature = required("${prefix}temperature").toFloat(),
+            topP = required("${prefix}topP").toFloat(),
+            topK = optional("${prefix}topK", "40").toInt(),
+            minP = optional("${prefix}minP", "0.05").toFloat(),
+            repeatPenalty = optional("${prefix}repeatPenalty", "1.10").toFloat(),
+        )
+    }
 
     private fun Properties.required(key: String): String = getProperty(key)?.trim()?.takeIf { it.isNotEmpty() }
         ?: throw IllegalArgumentException("Missing required model config field: $key")
@@ -124,6 +135,16 @@ object ModelConfigParser {
         ?.filter { it.isNotEmpty() }
         ?: emptyList()
 
+    private fun <T> Properties.optionalEnumSet(
+        key: String,
+        defaultValue: Set<T>,
+        parser: (String) -> T,
+    ): Set<T> {
+        val values = optionalList(key)
+        return if (values.isEmpty()) defaultValue else values.map { parser(it.lowercase()) }.toSet()
+    }
+
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
     private fun ModelConfig.validate() {
         require(relativePath.startsWith("models/")) {
             "model.relativePath must be under models/"
@@ -135,7 +156,8 @@ object ModelConfigParser {
         }
         require(
             (runtime == ModelRuntime.LlamaCpp && artifactFormat == ModelArtifactFormat.Gguf) ||
-                (runtime == ModelRuntime.LiteRtLm && artifactFormat == ModelArtifactFormat.LiteRtLmBundle),
+                (runtime == ModelRuntime.LiteRtLm && artifactFormat == ModelArtifactFormat.LiteRtLmBundle) ||
+                (runtime == ModelRuntime.WhisperCpp && artifactFormat == ModelArtifactFormat.WhisperGgml),
         ) {
             "model.runtime and model.artifactFormat must be compatible"
         }
@@ -151,6 +173,21 @@ object ModelConfigParser {
         require((listOf(url) + fallbackUrls).all { it.startsWith("https://") }) {
             "model download URLs must use https"
         }
+        require(purposes.isNotEmpty()) { "model.purposes must not be empty" }
+        require(tasks.isNotEmpty()) { "model.tasks must not be empty" }
+        require(ModelPurpose.Utility in purposes || ModelTask.Transcription !in tasks) {
+            "transcription task requires utility purpose"
+        }
+        require(ModelPurpose.Utility !in purposes || ModelTask.Transcription in tasks) {
+            "utility purpose requires a supported utility task"
+        }
+        require(ModelPurpose.Chat !in purposes || ModelTask.Chat in tasks) {
+            "chat purpose requires chat task"
+        }
+        require(ModelPurpose.Chat !in purposes || inference != null) {
+            "chat models require inference settings"
+        }
+        if (inference == null) return
         require(inference.contextTokens > 0) {
             "inference.contextTokens must be positive"
         }
@@ -172,7 +209,8 @@ object ModelConfigParser {
         require(inference.repeatPenalty >= 0f) {
             "inference.repeatPenalty must be non-negative"
         }
-        require(inputCapabilities.text || inputCapabilities.image || inputCapabilities.audio) {
+        val hasSupportedInput = inputCapabilities.text || inputCapabilities.image || inputCapabilities.audio
+        require(ModelPurpose.Chat !in purposes || hasSupportedInput) {
             "model capabilities must enable at least one input modality"
         }
         require(!inputCapabilities.image || inputCapabilities.text) {

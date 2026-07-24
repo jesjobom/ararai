@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+@Suppress("LongParameterList")
 class ChatViewModel(
     private val engine: LocalLlmEngine,
     initialModel: LocalModel?,
@@ -28,6 +29,8 @@ class ChatViewModel(
     private val sessionStore: ChatSessionStore = InMemoryChatSessionStore(),
     private val mediaRepository: ChatMediaRepository = NoOpChatMediaRepository,
     private val promptContextBuilder: PromptContextBuilder = PromptContextBuilder(),
+    private val audioTranscriber: AudioTranscriber = UnavailableAudioTranscriber,
+    private val preferences: ChatPreferences = InMemoryChatPreferences(),
     initialModelStatus: String =
         if (initialModel == null) {
             "Model unavailable"
@@ -61,12 +64,13 @@ class ChatViewModel(
             ChatUiState(
                 modelStatus = initialModelStatus,
                 canAttachImage = initialModel?.inputCapabilities?.image == true,
-                canUseAudioPrompt = initialModel?.inputCapabilities?.audio == true,
+                canUseAudioPrompt = initialModel.canUseRecordedAudio(),
                 canEnableReasoning = initialModel?.reasoningCapabilities?.request == true,
                 canShowReasoning = initialModel?.reasoningCapabilities?.output == true,
                 sessions = sessionStore.listSessions().toUiState(),
                 selectedSessionId = initialSession.id,
                 messages = sessionStore.getMessages(initialSession.id).toChatMessages(),
+                showAudioTranscriptions = preferences.showAudioTranscriptions.value,
             ),
         )
 
@@ -148,6 +152,11 @@ class ChatViewModel(
                 it.copy(showReasoning = show && it.canShowReasoning, error = null)
             }
         }
+    }
+
+    fun setShowAudioTranscriptions(show: Boolean) {
+        preferences.setShowAudioTranscriptions(show)
+        _uiState.update { it.copy(showAudioTranscriptions = show) }
     }
 
     fun createSession() {
@@ -262,7 +271,7 @@ class ChatViewModel(
             val discardedUris =
                 buildList {
                     if (!state.model.inputCapabilities.image) addAll(current.imageAttachments.map { it.uri })
-                    if (!state.model.inputCapabilities.audio) current.audioPrompt?.uri?.let(::add)
+                    if (!state.model.canUseRecordedAudio()) current.audioPrompt?.uri?.let(::add)
                 }
             deleteDraftMedia(discardedUris)
         } else {
@@ -334,20 +343,22 @@ class ChatViewModel(
             }
             is ModelStartupState.Available -> {
                 model = state.model
-                inferenceConfig = state.inference
+                inferenceConfig = requireNotNull(state.inference) {
+                    "Selected Chat model does not define inference settings"
+                }
                 _uiState.update {
                     it.copy(
                         modelStatus = ChatUiState.MODEL_AVAILABLE,
                         isLoadingModel = false,
                         canRetryModelDownload = false,
                         canAttachImage = state.model.inputCapabilities.image,
-                        canUseAudioPrompt = state.model.inputCapabilities.audio,
+                        canUseAudioPrompt = state.model.canUseRecordedAudio(),
                         canEnableReasoning = state.model.reasoningCapabilities.request,
                         canShowReasoning = state.model.reasoningCapabilities.output,
                         reasoningEnabled = it.reasoningEnabled && state.model.reasoningCapabilities.request,
                         showReasoning = it.showReasoning && state.model.reasoningCapabilities.output,
                         imageAttachments = if (state.model.inputCapabilities.image) it.imageAttachments else emptyList(),
-                        audioPrompt = if (state.model.inputCapabilities.audio) it.audioPrompt else null,
+                        audioPrompt = if (state.model.canUseRecordedAudio()) it.audioPrompt else null,
                         error = null,
                     )
                 }
@@ -386,6 +397,7 @@ class ChatViewModel(
         return "Downloading configured model: $percent%"
     }
 
+    @Suppress("CyclomaticComplexMethod", "LongMethod", "ReturnCount")
     fun submitPrompt() {
         val current = _uiState.value
         if (!current.canSubmit) return
@@ -394,23 +406,14 @@ class ChatViewModel(
         val sessionId = current.selectedSessionId ?: return
         val modelForRequest = model
         val inferenceForRequest = inferenceConfig
-        val submittedContent = current.toSubmittedContent()
+        val submittedContent = current.toSubmittedContent(audioTranscriber.isAvailable)
         val submittedTitle = submittedContent.displayText
-        maybeTitleSession(sessionId, submittedTitle)
+        if (submittedContent !is MessageContent.AudioPromptContent) maybeTitleSession(sessionId, submittedTitle)
         val history = sessionStore.getMessages(sessionId).toChatMessages()
-        val requestMessages =
-            submittedContent.toRequestMessages(
-                systemPrompt = systemPrompt,
-                history = history,
-                inferenceConfig = inferenceForRequest,
-            )
-        val requestContent = submittedContent.toRequestContent(requestMessages)
-        sessionStore.appendMessage(sessionId, ChatRole.User, submittedContent)
-        val assistantMessage = sessionStore.appendMessage(sessionId, ChatRole.Assistant, "").toChatMessage()
-        activeAssistantMessageId = assistantMessage.id
-        synchronized(assistantBufferLock) {
-            assistantBuffer = AssistantMessageBuffer(assistantMessage.id)
-        }
+        val userMessage = sessionStore.appendMessage(sessionId, ChatRole.User, submittedContent)
+        val requiresTranscriptionBeforeGeneration =
+            submittedContent is MessageContent.AudioPromptContent && modelForRequest?.inputCapabilities?.audio != true
+        if (!requiresTranscriptionBeforeGeneration) prepareAssistantMessage(sessionId, refresh = false)
 
         _uiState.update {
             it.copy(
@@ -438,6 +441,34 @@ class ChatViewModel(
                 }
 
                 try {
+                    val effectiveContent =
+                        if (submittedContent is MessageContent.AudioPromptContent) {
+                            if (modelForRequest.inputCapabilities.audio) {
+                                startAsyncTranscription(sessionId, userMessage.id, submittedContent)
+                                submittedContent
+                            } else {
+                                transcribeAndPersist(sessionId, userMessage.id, submittedContent)
+                                    ?: return@launch
+                            }
+                        } else {
+                            submittedContent
+                        }
+                    val requestMessages =
+                        effectiveContent.toRequestMessages(
+                            systemPrompt = systemPrompt,
+                            history = history,
+                            inferenceConfig = inferenceForRequest,
+                        )
+                    val requestContent =
+                        if (
+                            effectiveContent is MessageContent.AudioPromptContent &&
+                            !modelForRequest.inputCapabilities.audio
+                        ) {
+                            MessageContent.TextPrompt(effectiveContent.transcript.orEmpty())
+                        } else {
+                            effectiveContent.toRequestContent(requestMessages)
+                        }
+                    if (activeAssistantMessageId == null) prepareAssistantMessage(sessionId)
                     engine.load(modelForRequest, inferenceForRequest)
                     _uiState.update { it.copy(isLoadingModel = false) }
 
@@ -497,6 +528,88 @@ class ChatViewModel(
                     finalizeAssistantMessage()
                 }
             }
+    }
+
+    private fun prepareAssistantMessage(sessionId: String, refresh: Boolean = true) {
+        val assistantMessage = sessionStore.appendMessage(sessionId, ChatRole.Assistant, "").toChatMessage()
+        activeAssistantMessageId = assistantMessage.id
+        synchronized(assistantBufferLock) {
+            assistantBuffer = AssistantMessageBuffer(assistantMessage.id)
+        }
+        if (refresh) refreshSession(sessionId)
+    }
+
+    private fun startAsyncTranscription(
+        sessionId: String,
+        messageId: String,
+        content: MessageContent.AudioPromptContent,
+    ) {
+        if (!audioTranscriber.isAvailable) return
+        scope.launch { transcribeAndPersist(sessionId, messageId, content) }
+    }
+
+    private suspend fun transcribeAndPersist(
+        sessionId: String,
+        messageId: String,
+        content: MessageContent.AudioPromptContent,
+    ): MessageContent.AudioPromptContent? = try {
+        val result = audioTranscriber.transcribe(content.audio)
+        val transcript = result.transcript.trim()
+        check(transcript.isNotBlank()) { "No speech was recognized" }
+        val completed = content.copy(
+            transcript = transcript,
+            transcriptionStatus = AudioTranscriptionStatus.Completed,
+            transcriptionError = null,
+            transcriptionFailureKind = null,
+            transcriptionDiagnostic = result.diagnosticReport,
+            transcriptionMayBeIncomplete = result.mayBeIncomplete,
+            transcriptionIncompleteReason = result.incompleteReason,
+        )
+        sessionStore.updateMessage(messageId, completed)
+        maybeTitleSessionFromTranscript(sessionId, transcript)
+        refreshSession(sessionId)
+        completed
+    } catch (error: Throwable) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        val typedFailure = (error as? AudioTranscriptionException)?.failure
+        val message = typedFailure?.userMessage ?: error.message ?: "Audio transcription failed"
+        sessionStore.updateMessage(
+            messageId,
+            content.copy(
+                transcriptionStatus = AudioTranscriptionStatus.Failed,
+                transcriptionError = message,
+                transcriptionFailureKind = typedFailure?.kind ?: AudioTranscriptionFailureKind.Unknown,
+                transcriptionDiagnostic = typedFailure?.diagnosticReport,
+                transcriptionMayBeIncomplete = false,
+                transcriptionIncompleteReason = null,
+            ),
+        )
+        refreshSession(sessionId)
+        if (model?.inputCapabilities?.audio != true) {
+            _uiState.update { it.copy(isLoadingModel = false, isGenerating = false, error = message) }
+        }
+        null
+    }
+
+    private fun refreshSession(sessionId: String) {
+        _uiState.update { state ->
+            if (state.selectedSessionId != sessionId) {
+                state
+            } else {
+                state.copy(
+                    sessions = sessionStore.listSessions().toUiState(),
+                    messages = sessionStore.getMessages(sessionId).toChatMessages(),
+                    messageDisplayRevision = state.messageDisplayRevision + 1,
+                )
+            }
+        }
+    }
+
+    private fun maybeTitleSessionFromTranscript(sessionId: String, transcript: String) {
+        val session = sessionStore.listSessions().firstOrNull { it.id == sessionId } ?: return
+        if (session.title == "New chat" && sessionStore.getMessages(sessionId).firstOrNull()?.id != null) {
+            sessionStore.renameSession(sessionId, transcript.take(42))
+        }
     }
 
     private fun deleteCurrentDraftMedia() {
@@ -640,7 +753,13 @@ class ChatViewModel(
         sessionStore.renameSession(sessionId, submittedPrompt.take(42))
     }
 
-    private fun ChatUiState.toSubmittedContent(): MessageContent = audioPrompt?.let { MessageContent.AudioPromptContent(it) }
+    private fun ChatUiState.toSubmittedContent(transcriptionAvailable: Boolean): MessageContent = audioPrompt?.let {
+        MessageContent.AudioPromptContent(
+            audio = it,
+            transcriptionStatus =
+            if (transcriptionAvailable) AudioTranscriptionStatus.Pending else AudioTranscriptionStatus.NotRequested,
+        )
+    }
         ?: MessageContent.TextPrompt(
             text = prompt.trim(),
             imageAttachments = imageAttachments,
@@ -650,30 +769,40 @@ class ChatViewModel(
         systemPrompt: String,
         history: List<ChatMessage>,
         inferenceConfig: InferenceConfig,
-    ): List<PromptChatMessage> = when (this) {
-        is MessageContent.TextPrompt ->
-            promptContextBuilder.build(
-                systemPrompt = systemPrompt,
-                history = history,
-                userPrompt =
-                text.ifBlank {
-                    if (imageAttachments.isNotEmpty()) "Describe this image." else text
-                },
-                inferenceConfig = inferenceConfig,
-            )
-        is MessageContent.AudioPromptContent ->
-            promptContextBuilder.build(
-                systemPrompt = systemPrompt,
-                history = history,
-                userPrompt = "",
-                inferenceConfig = inferenceConfig,
-            )
+    ): List<PromptChatMessage> {
+        val reconstructibleHistory = history.filter { message ->
+            val audio = message.content as? MessageContent.AudioPromptContent
+            audio == null || audio.transcriptionStatus == AudioTranscriptionStatus.Completed
+        }
+        return when (this) {
+            is MessageContent.TextPrompt ->
+                promptContextBuilder.build(
+                    systemPrompt = systemPrompt,
+                    history = reconstructibleHistory,
+                    userPrompt =
+                    text.ifBlank {
+                        if (imageAttachments.isNotEmpty()) "Describe this image." else text
+                    },
+                    inferenceConfig = inferenceConfig,
+                )
+            is MessageContent.AudioPromptContent ->
+                promptContextBuilder.build(
+                    systemPrompt = systemPrompt,
+                    history = reconstructibleHistory,
+                    userPrompt = "",
+                    inferenceConfig = inferenceConfig,
+                )
+        }
     }
 
     private fun MessageContent.toRequestContent(messages: List<PromptChatMessage>): MessageContent = when (this) {
         is MessageContent.TextPrompt -> copy(text = messages.toPlainChatPrompt())
         is MessageContent.AudioPromptContent -> this
     }
+
+    private fun LocalModel?.canUseRecordedAudio(): Boolean = this?.let {
+        it.inputCapabilities.audio || (it.inputCapabilities.text && audioTranscriber.isAvailable)
+    } == true
 
     private fun List<ChatSession>.toUiState(): List<ChatSessionUiState> = map { ChatSessionUiState(id = it.id, title = it.title) }
 

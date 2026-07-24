@@ -26,7 +26,7 @@ sealed interface ModelStartupState {
 
     data class Available(
         val model: LocalModel,
-        val inference: InferenceConfig,
+        val inference: InferenceConfig?,
     ) : ModelStartupState
 
     data class Failed(
@@ -62,7 +62,7 @@ class ModelStartupController(
     private fun resolveAndMaybeDownload() {
         when (val resolution = resolver.resolve(config)) {
             is ModelResolutionState.Available -> {
-                _state.value = ModelStartupState.Available(resolution.model, config.inference)
+                _state.value = ModelStartupState.Available(resolution.model, config.requireInference())
             }
             is ModelResolutionState.Missing -> {
                 _state.value = ModelStartupState.Missing
@@ -88,11 +88,12 @@ class ModelStartupController(
                                     totalBytes = progress.totalBytes,
                                 )
                         }
-                    _state.value = ModelStartupState.Available(available.model, config.inference)
+                    _state.value = ModelStartupState.Available(available.model, config.requireInference())
                 } catch (_: CancellationException) {
                     _state.value =
                         when (val resolution = resolver.resolve(config)) {
-                            is ModelResolutionState.Available -> ModelStartupState.Available(resolution.model, config.inference)
+                            is ModelResolutionState.Available ->
+                                ModelStartupState.Available(resolution.model, config.requireInference())
                             is ModelResolutionState.Missing -> ModelStartupState.Missing
                             is ModelResolutionState.IntegrityFailed -> ModelStartupState.Invalid(resolution.reason)
                         }

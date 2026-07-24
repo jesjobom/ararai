@@ -116,7 +116,7 @@ class ModelStatusUiStateTest {
         val state = ModelStatusUiState.from(config, ModelStartupState.Missing)
 
         assertEquals(
-            listOf("Text", "Voice", "Image", "Reasoning", "GPU"),
+            listOf("Stable", "Chat", "Text", "Voice", "Image", "Reasoning", "GPU"),
             state.capabilities,
         )
     }

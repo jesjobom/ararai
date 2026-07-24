@@ -83,6 +83,10 @@ data class ModelStatusUiState(
 }
 
 internal fun ModelConfig.capabilityLabels(): List<String> = buildList {
+    add(maturity.displayName)
+    variant?.let(::add)
+    purposes.forEach { add(it.displayName) }
+    tasks.filterNot { task -> task.displayName in this }.forEach { add(it.displayName) }
     if (inputCapabilities.text) add("Text")
     if (inputCapabilities.audio) add("Voice")
     if (inputCapabilities.image) add("Image")

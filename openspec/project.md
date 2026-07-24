@@ -23,8 +23,11 @@ inference remains device-, driver-, model-, and workload-dependent.
   renameable sessions, bounded context, selectable Markdown and local LaTeX math output, settings, and
   capability-gated reasoning, plus language-aware native speech playback for
   completed assistant responses.
-- Structured prompts can contain text, normalized images, or recorded audio
-  when the selected model declares the corresponding input capability.
+- Structured prompts can contain text, normalized images, or recorded audio.
+  Audio-capable models receive recordings directly. With a valid downloaded
+  Whisper model, text-only models receive a locally produced transcript
+  instead, and new audio messages persist transcript state for reconstructible
+  context.
 - Experimental Voice Chat v0 runs stateless, half-duplex direct-audio turns for
   audio-capable models, compares offline WebRTC/Silero VAD and Android capture
   preprocessing, speaks streamed answers incrementally, and retains neither
@@ -70,7 +73,8 @@ The principal boundaries are:
   foreground data-sync service so activity recreation does not own transfers;
 - `engine/`: runtime-neutral contracts plus llama.cpp and LiteRT-LM adapters;
 - `chat/`: session state, context construction, SQLite persistence, streaming
-  durability, and media ownership;
+  durability, media ownership, replaceable local audio transcription and
+  direct-audio/transcript routing;
 - `voice/`: stateless voice-loop coordination, PCM capture/VAD, experimental
   preprocessing and diagnostics, response segmentation, and sequential TTS;
 - `ui/`: navigation and Compose presentation, with injectable adapters around

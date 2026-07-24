@@ -140,6 +140,38 @@ class ChatSessionStoreTest {
     }
 
     @Test
+    fun `sqlite store round trips audio transcription state`() {
+        val store = store()
+        val session = store.createSession("Transcribed")
+        store.appendMessage(
+            session.id,
+            ChatRole.User,
+            MessageContent.AudioPromptContent(
+                audio = AudioPrompt("file:///spoken.wav", "audio/wav", durationMillis = 900),
+                transcript = "hello locally",
+                transcriptionStatus = AudioTranscriptionStatus.Completed,
+                transcriptionFailureKind = AudioTranscriptionFailureKind.EmptyResults,
+                transcriptionDiagnostic = "events=results:hypotheses=0",
+                transcriptionMayBeIncomplete = true,
+                transcriptionIncompleteReason = "unexpected_completion_source:standard_results",
+            ),
+        )
+
+        val content = store.getMessages(session.id).single().content as MessageContent.AudioPromptContent
+
+        assertEquals("hello locally", content.transcript)
+        assertEquals(AudioTranscriptionStatus.Completed, content.transcriptionStatus)
+        assertEquals(AudioTranscriptionFailureKind.EmptyResults, content.transcriptionFailureKind)
+        assertEquals("events=results:hypotheses=0", content.transcriptionDiagnostic)
+        assertTrue(content.transcriptionMayBeIncomplete)
+        assertEquals(
+            "unexpected_completion_source:standard_results",
+            content.transcriptionIncompleteReason,
+        )
+        assertEquals("hello locally", content.displayText)
+    }
+
+    @Test
     fun `failed reference replacement rolls back message and its old references`() {
         val store = store()
         val session = store.createSession("Media")

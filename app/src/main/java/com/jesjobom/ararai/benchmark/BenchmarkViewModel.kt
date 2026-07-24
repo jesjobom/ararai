@@ -8,6 +8,7 @@ import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelConfig
 import com.jesjobom.ararai.model.ModelStartupState
+import com.jesjobom.ararai.model.requireInference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,7 +28,7 @@ class BenchmarkViewModel(
 ) {
     private var selectedConfig = initialConfig
     private var selectedModel = (initialState as? ModelStartupState.Available)?.model
-    private var selectedInference = stableBenchmarkConfig(initialConfig.inference)
+    private var selectedInference = stableBenchmarkConfig(initialConfig.requireInference())
     private var benchmarkJob: Job? = null
 
     private val _uiState = MutableStateFlow(createState())
@@ -39,7 +40,7 @@ class BenchmarkViewModel(
     ) {
         selectedConfig = config
         selectedModel = (state as? ModelStartupState.Available)?.model
-        selectedInference = stableBenchmarkConfig(config.inference)
+        selectedInference = stableBenchmarkConfig(config.requireInference())
 
         if (selectedModel == null) {
             benchmarkJob?.cancel()

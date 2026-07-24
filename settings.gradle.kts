@@ -19,3 +19,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "ArarAI"
 include(":app")
+include(":whisper-runtime")

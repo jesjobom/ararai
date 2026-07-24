@@ -3,6 +3,8 @@ build/
 local.properties
 app/build/
 app/.cxx/
+whisper-runtime/build/
+whisper-runtime/.cxx/
 
 # Android Studio
 .idea/

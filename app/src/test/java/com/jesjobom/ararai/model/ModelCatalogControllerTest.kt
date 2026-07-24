@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
@@ -113,6 +114,28 @@ class ModelCatalogControllerTest {
     }
 
     @Test
+    fun `utility model is managed but cannot be selected for Chat`() = runTest {
+        val root = Files.createTempDirectory("ararai-catalog").toFile()
+        val utility = utilityConfig()
+        val controller =
+            ModelCatalogController(
+                catalog = ModelCatalog(defaultModelId = "default", models = listOf(defaultConfig(), utility)),
+                appFilesRoot = root,
+                downloader = SuspendedDownloader(),
+                selectionStore = InMemoryModelSelectionStore("whisper-base"),
+                scope = this,
+            )
+
+        assertEquals("default", controller.state.value.selectedModelId)
+        assertEquals(2, controller.state.value.models.size)
+        assertThrows(IllegalArgumentException::class.java) {
+            controller.select("whisper-base")
+        }
+        controller.cancelDownload("default")
+        runCurrent()
+    }
+
+    @Test
     fun `delete removes an available model file and marks it missing`() = runTest {
         val root = Files.createTempDirectory("ararai-catalog").toFile()
         val controller =
@@ -213,6 +236,21 @@ class ModelCatalogControllerTest {
         sha256 = "ec91fdd9256cb75ae611249b50cb7eb16533f0fa91b86239ec1d439a1ea033b8",
         expectedBytes = 8,
         inference = InferenceConfig(contextTokens = 128, maxTokens = 32, temperature = 0.7f, topP = 0.9f),
+    )
+
+    private fun utilityConfig(): ModelConfig = ModelConfig(
+        id = "whisper-base",
+        name = "Whisper Base",
+        runtime = ModelRuntime.WhisperCpp,
+        artifactFormat = ModelArtifactFormat.WhisperGgml,
+        acceleration = ModelAccelerationPolicy.CpuOnly,
+        purposes = setOf(ModelPurpose.Utility),
+        tasks = setOf(ModelTask.Transcription),
+        url = "https://example.com/ggml-base.bin",
+        fileName = "ggml-base.bin",
+        relativePath = "models/utility/whisper/ggml-base.bin",
+        sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        expectedBytes = 1234,
     )
 }
 

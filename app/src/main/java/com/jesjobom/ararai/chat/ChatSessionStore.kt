@@ -586,6 +586,13 @@ private object MessageContentCodec {
                     content.audio.durationMillis
                         ?.toString()
                         .orEmpty(),
+                    content.transcript.orEmpty(),
+                    content.transcriptionStatus.name,
+                    content.transcriptionError.orEmpty(),
+                    content.transcriptionFailureKind?.name.orEmpty(),
+                    content.transcriptionDiagnostic.orEmpty(),
+                    content.transcriptionMayBeIncomplete.toString(),
+                    content.transcriptionIncompleteReason.orEmpty(),
                 ).joinToString(separator = "\t") { it.encodeField() },
             )
     }
@@ -598,13 +605,25 @@ private object MessageContentCodec {
         "audio" ->
             payload?.split('\t')?.map { it.decodeField() }?.let { fields ->
                 MessageContent.AudioPromptContent(
-                    AudioPrompt(
+                    audio = AudioPrompt(
                         uri = fields.getOrElse(0) { "" },
                         mimeType = fields.getOrElse(1) { "audio/*" },
                         displayName = fields.getOrNull(2)?.takeIf { it.isNotBlank() },
                         byteSize = fields.getOrNull(3)?.toLongOrNull(),
                         durationMillis = fields.getOrNull(4)?.toLongOrNull(),
                     ),
+                    transcript = fields.getOrNull(5)?.takeIf { it.isNotBlank() },
+                    transcriptionStatus =
+                    fields.getOrNull(6)
+                        ?.let { runCatching { AudioTranscriptionStatus.valueOf(it) }.getOrNull() }
+                        ?: AudioTranscriptionStatus.NotRequested,
+                    transcriptionError = fields.getOrNull(7)?.takeIf { it.isNotBlank() },
+                    transcriptionFailureKind =
+                    fields.getOrNull(8)
+                        ?.let { runCatching { AudioTranscriptionFailureKind.valueOf(it) }.getOrNull() },
+                    transcriptionDiagnostic = fields.getOrNull(9)?.takeIf { it.isNotBlank() },
+                    transcriptionMayBeIncomplete = fields.getOrNull(10)?.toBooleanStrictOrNull() ?: false,
+                    transcriptionIncompleteReason = fields.getOrNull(11)?.takeIf { it.isNotBlank() },
                 )
             } ?: MessageContent.TextPrompt(legacyText)
         else -> {

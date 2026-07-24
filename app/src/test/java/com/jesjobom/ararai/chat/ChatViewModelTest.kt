@@ -622,6 +622,123 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `transcribes before sending audio to text only model`() = runTest {
+        val engine = CapturingEngine()
+        val store = InMemoryChatSessionStore()
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                audioTranscriber = FakeAudioTranscriber("spoken question"),
+                scope = this,
+            )
+
+        assertTrue(viewModel.uiState.value.canUseAudioPrompt)
+        viewModel.submitAudioPrompt(AudioPrompt("/tmp/question.wav", "audio/wav"))
+        runCurrent()
+
+        assertEquals("spoken question", engine.lastRequest!!.textPrompt)
+        val content = viewModel.uiState.value.messages.first().content as MessageContent.AudioPromptContent
+        assertEquals("spoken question", content.transcript)
+        assertEquals(AudioTranscriptionStatus.Completed, content.transcriptionStatus)
+        assertEquals("spoken question", viewModel.uiState.value.sessions.first().title)
+    }
+
+    @Test
+    fun `persists successful transcription diagnostics and partial warning`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val viewModel = ChatViewModel(
+            engine = CapturingEngine(),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            sessionStore = store,
+            audioTranscriber = FakeAudioTranscriber(
+                transcript = "partial speech",
+                diagnostic = "outcome=success\ncompletion_source=standard_results",
+                mayBeIncomplete = true,
+                incompleteReason = "unexpected_completion_source:standard_results",
+            ),
+            scope = this,
+        )
+
+        viewModel.submitAudioPrompt(AudioPrompt("/tmp/question.wav", "audio/wav"))
+        runCurrent()
+
+        val content = viewModel.uiState.value.messages.first().content as MessageContent.AudioPromptContent
+        assertEquals("outcome=success\ncompletion_source=standard_results", content.transcriptionDiagnostic)
+        assertTrue(content.transcriptionMayBeIncomplete)
+        assertEquals("unexpected_completion_source:standard_results", content.transcriptionIncompleteReason)
+    }
+
+    @Test
+    fun `keeps direct audio generation when asynchronous transcription fails`() = runTest {
+        val engine = CapturingEngine()
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model.copy(inputCapabilities = ModelInputCapabilities(audio = true)),
+                inferenceConfig = inferenceConfig,
+                audioTranscriber = FakeAudioTranscriber(
+                    failure = AudioTranscriptionFailure(
+                        AudioTranscriptionFailureKind.EmptyResults,
+                        "not understood",
+                        "events=results:hypotheses=0",
+                    ),
+                ),
+                scope = this,
+            )
+
+        viewModel.submitAudioPrompt(AudioPrompt("/tmp/question.wav", "audio/wav"))
+        runCurrent()
+
+        assertTrue(engine.lastRequest!!.content is MessageContent.AudioPromptContent)
+        val content = viewModel.uiState.value.messages.first().content as MessageContent.AudioPromptContent
+        assertEquals(AudioTranscriptionStatus.Failed, content.transcriptionStatus)
+        assertEquals(AudioTranscriptionFailureKind.EmptyResults, content.transcriptionFailureKind)
+        assertEquals("events=results:hypotheses=0", content.transcriptionDiagnostic)
+    }
+
+    @Test
+    fun `blocks text only generation when required transcription fails`() = runTest {
+        val engine = CapturingEngine()
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                audioTranscriber = FakeAudioTranscriber(error = "not understood"),
+                scope = this,
+            )
+
+        viewModel.submitAudioPrompt(AudioPrompt("/tmp/question.wav", "audio/wav"))
+        runCurrent()
+
+        assertEquals(null, engine.lastRequest)
+        assertEquals("not understood", viewModel.uiState.value.error)
+        assertFalse(viewModel.uiState.value.isGenerating)
+        assertEquals(1, viewModel.uiState.value.messages.size)
+    }
+
+    @Test
+    fun `persists transcript visibility preference independently from content`() {
+        val preferences = InMemoryChatPreferences()
+        val viewModel =
+            ChatViewModel(
+                engine = CapturingEngine(),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                preferences = preferences,
+            )
+
+        viewModel.setShowAudioTranscriptions(false)
+
+        assertFalse(viewModel.uiState.value.showAudioTranscriptions)
+        assertFalse(preferences.showAudioTranscriptions.value)
+    }
+
+    @Test
     fun `gates reasoning settings by selected model capabilities`() = runTest {
         val engine = CapturingEngine()
         val reasoningModel =
@@ -998,6 +1115,22 @@ class ChatViewModelTest {
         }
 
         override suspend fun unload() = Unit
+    }
+
+    private class FakeAudioTranscriber(
+        private val transcript: String = "",
+        private val error: String? = null,
+        private val failure: AudioTranscriptionFailure? = null,
+        private val diagnostic: String = "outcome=success",
+        private val mayBeIncomplete: Boolean = false,
+        private val incompleteReason: String? = null,
+    ) : AudioTranscriber {
+        override val isAvailable = true
+        override suspend fun transcribe(audio: AudioPrompt): AudioTranscriptionResult {
+            failure?.let { throw AudioTranscriptionException(it) }
+            error?.let { throw IllegalStateException(it) }
+            return AudioTranscriptionResult(transcript, diagnostic, mayBeIncomplete, incompleteReason)
+        }
     }
 
     private class ReasoningEngine : LocalLlmEngine {

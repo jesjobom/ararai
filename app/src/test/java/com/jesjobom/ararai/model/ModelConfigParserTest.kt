@@ -41,13 +41,14 @@ class ModelConfigParserTest {
         assertEquals("models/smollm2-135m-q4.gguf", config.relativePath)
         assertEquals(1234L, config.expectedBytes)
         assertEquals(4294967296L, config.recommendedFreeRamBytes)
-        assertEquals(2048, config.inference.contextTokens)
-        assertEquals(512, config.inference.maxTokens)
-        assertEquals(0.7f, config.inference.temperature)
-        assertEquals(0.9f, config.inference.topP)
-        assertEquals(40, config.inference.topK)
-        assertEquals(0.05f, config.inference.minP)
-        assertEquals(1.10f, config.inference.repeatPenalty)
+        val inference = config.requireInference()
+        assertEquals(2048, inference.contextTokens)
+        assertEquals(512, inference.maxTokens)
+        assertEquals(0.7f, inference.temperature)
+        assertEquals(0.9f, inference.topP)
+        assertEquals(40, inference.topK)
+        assertEquals(0.05f, inference.minP)
+        assertEquals(1.10f, inference.repeatPenalty)
     }
 
     @Test
@@ -132,6 +133,33 @@ class ModelConfigParserTest {
     }
 
     @Test
+    fun `parses utility transcription model without LLM inference settings`() {
+        val config =
+            ModelConfigParser.parse(
+                """
+                model.id=whisper-base
+                model.name=Whisper Base
+                model.runtime=whisper_cpp
+                model.artifactFormat=whisper_ggml
+                model.acceleration=cpu_only
+                model.purposes=utility
+                model.tasks=transcription
+                model.url=https://example.com/ggml-base.bin
+                model.fileName=ggml-base.bin
+                model.relativePath=models/utility/whisper/ggml-base.bin
+                model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                model.expectedBytes=1234
+                """.trimIndent(),
+            )
+
+        assertEquals(ModelRuntime.WhisperCpp, config.runtime)
+        assertEquals(ModelArtifactFormat.WhisperGgml, config.artifactFormat)
+        assertEquals(setOf(ModelPurpose.Utility), config.purposes)
+        assertEquals(setOf(ModelTask.Transcription), config.tasks)
+        assertEquals(null, config.inference)
+    }
+
+    @Test
     fun `parses catalog with multiple configured models`() {
         val catalog =
             ModelConfigParser.parseCatalog(
@@ -169,7 +197,7 @@ class ModelConfigParserTest {
         assertEquals(2, catalog.models.size)
         assertEquals("Tiny Model", catalog.models[0].name)
         assertEquals("Small Model", catalog.models[1].name)
-        assertEquals(256, catalog.models[1].inference.maxTokens)
+        assertEquals(256, catalog.models[1].requireInference().maxTokens)
     }
 
     @Test
@@ -179,15 +207,31 @@ class ModelConfigParserTest {
         val catalog = ModelConfigParser.parseCatalog(raw)
 
         assertEquals("smollm2-135m-instruct-q4-k-m", catalog.defaultModelId)
-        assertEquals(4, catalog.models.size)
+        assertEquals(6, catalog.models.size)
         assertEquals("Gemma 4 E2B IT LiteRT-LM", catalog.models[3].name)
         assertEquals(4294967296L, catalog.models[3].recommendedFreeRamBytes)
         assertFalse(catalog.models.any { it.id.contains("qwen", ignoreCase = true) })
         assertFalse(catalog.models[0].reasoningCapabilities.request)
         assertFalse(catalog.models[0].reasoningCapabilities.output)
         catalog.models.drop(1).forEach { model ->
+            if (model.supportsPurpose(ModelPurpose.Utility)) return@forEach
             assertEquals("${model.name} reasoning request", true, model.reasoningCapabilities.request)
             assertEquals("${model.name} reasoning output", true, model.reasoningCapabilities.output)
+        }
+        val candidates = catalog.models.filter { it.supportsTask(ModelTask.Transcription) }
+        assertEquals(2, candidates.size)
+        assertEquals(
+            268435456L,
+            candidates.single { it.id == "whisper-base-q5-1" }.recommendedFreeRamBytes,
+        )
+        assertEquals(
+            536870912L,
+            candidates.single { it.id == "whisper-small-q5-1" }.recommendedFreeRamBytes,
+        )
+        candidates.forEach { candidate ->
+            assertEquals(ModelMaturity.Experimental, candidate.maturity)
+            assertEquals(setOf(ModelPurpose.Utility), candidate.purposes)
+            assertEquals(null, candidate.inference)
         }
     }
 

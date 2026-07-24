@@ -228,6 +228,7 @@ internal fun ChatScreen(
                         MessageRow(
                             message = message,
                             showReasoning = state.showReasoning,
+                            showAudioTranscriptions = state.showAudioTranscriptions,
                             mediaServices = mediaServices,
                             isStreaming = isStreaming,
                             isSpeaking = textToSpeechState.activeMessageId == message.id,
@@ -296,8 +297,10 @@ internal fun ChatScreen(
             showReasoning = state.showReasoning,
             canEnableReasoning = state.canEnableReasoning,
             canShowReasoning = state.canShowReasoning,
+            showAudioTranscriptions = state.showAudioTranscriptions,
             onReasoningEnabledChange = viewModel::setReasoningEnabled,
             onShowReasoningChange = viewModel::setShowReasoning,
+            onShowAudioTranscriptionsChange = viewModel::setShowAudioTranscriptions,
             onDismiss = { settingsOpen = false },
         )
     }
