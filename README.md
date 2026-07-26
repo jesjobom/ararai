@@ -7,8 +7,10 @@ backend, or external database.
 
 ## Current capabilities
 
-- Checked-in model catalog with download, integrity validation, selection,
-  update, deletion, and persisted active-model choice.
+- Checked-in model catalog organized into Chat and Transcription tabs,
+  with family-preserving light-to-heavy ordering, available-memory
+  recommendations, download, integrity validation, selection, update, deletion,
+  and persisted active-model choice.
 - Runtime selection through a shared `LocalLlmEngine` boundary:
   - llama.cpp/JNI for GGUF models;
   - LiteRT-LM for configured `.litertlm` bundles.
@@ -33,11 +35,12 @@ backend, or external database.
   models receive the original audio while transcription runs asynchronously;
   text-only models receive the transcript after synchronous recognition.
   Imported images are normalized and recordings remain app-owned Chat media.
-- Diagnostics for model/runtime identity and local inference performance.
+- Per-downloaded-model diagnostics for runtime identity and local inference or
+  transcription performance.
 - Resumable model downloads continue under an Android foreground service with
   progress and cancellation in a persistent notification.
-- Home, Chat, Voice Chat, Models, Diagnostics, and Settings destinations implemented with
-  Jetpack Compose.
+- Home, Chat, Voice Chat, Models, and Settings destinations implemented with
+  Jetpack Compose; model benchmarks are opened from downloaded model cards.
 - Persistent System, Light, and Dark appearance selection with Material dynamic
   colors on supported devices.
 

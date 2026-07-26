@@ -29,8 +29,10 @@ import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelAccelerationPolicy
 import com.jesjobom.ararai.model.ModelArtifactFormat
 import com.jesjobom.ararai.model.ModelConfig
+import com.jesjobom.ararai.model.ModelPurpose
 import com.jesjobom.ararai.model.ModelRuntime
 import com.jesjobom.ararai.model.ModelStartupState
+import com.jesjobom.ararai.model.ModelTask
 import com.jesjobom.ararai.settings.ThemeMode
 import com.jesjobom.ararai.ui.ChatAudioPlayerFactory
 import com.jesjobom.ararai.ui.ChatAudioRecorderFactory
@@ -95,7 +97,6 @@ class CriticalComposeJourneysTest {
                         appVersionLabel = "test",
                         onOpenChat = { chatOpen = true },
                         onOpenVoiceChat = {},
-                        onOpenDiagnostics = {},
                         onOpenModelStatus = {},
                         onOpenSettings = {},
                     )
@@ -168,6 +169,56 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithText("Retry").performClick()
         composeRule.runOnIdle { assertEquals(listOf(config.id), retryCommands) }
         composeRule.onNodeWithText("Cancel download").assertIsDisplayed()
+    }
+
+    @Test
+    fun modelTabsAndAvailableBenchmarkRouteTheExactModel() {
+        val reasoning = modelConfig().copy(id = "reasoning", name = "Reasoning model")
+        val transcription = modelConfig().copy(
+            id = "transcription",
+            name = "Transcription model",
+            family = "whisper",
+            purposes = setOf(ModelPurpose.Utility),
+            tasks = setOf(ModelTask.Transcription),
+            inference = null,
+        )
+        val benchmarkCommands = mutableListOf<String>()
+        composeRule.setContent {
+            MaterialTheme {
+                ModelStatusScreen(
+                    models = listOf(
+                        ManagedModelItem(reasoning, ModelStartupState.Missing),
+                        ManagedModelItem(
+                            transcription,
+                            ModelStartupState.Available(
+                                LocalModel(
+                                    id = transcription.id,
+                                    name = transcription.name,
+                                    filePath = "/tmp/transcription.bin",
+                                ),
+                                inference = null,
+                            ),
+                        ),
+                    ),
+                    selectedModelId = reasoning.id,
+                    availableMemoryBytes = Long.MAX_VALUE,
+                    onBack = {},
+                    onSelect = {},
+                    onDownload = {},
+                    onCancelDownload = {},
+                    onDelete = {},
+                    onRedownload = {},
+                    onRetry = {},
+                    onBenchmark = { benchmarkCommands += it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Reasoning model").assertIsDisplayed()
+        composeRule.onNodeWithText("Transcription").performClick()
+        composeRule.onNodeWithText("Transcription model").assertIsDisplayed()
+        composeRule.onNodeWithText("Run benchmark").performClick()
+        composeRule.runOnIdle { assertEquals(listOf("transcription"), benchmarkCommands) }
     }
 
     @Test

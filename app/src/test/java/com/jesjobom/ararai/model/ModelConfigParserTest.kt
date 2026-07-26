@@ -29,6 +29,7 @@ class ModelConfigParserTest {
 
         assertEquals("smollm2-135m-q4", config.id)
         assertEquals("SmolLM2 135M Q4", config.name)
+        assertEquals("smollm2-135m-q4", config.family)
         assertEquals(ModelRuntime.LlamaCpp, config.runtime)
         assertEquals(ModelArtifactFormat.Gguf, config.artifactFormat)
         assertEquals(ModelAccelerationPolicy.GpuPreferred, config.acceleration)
@@ -50,6 +51,19 @@ class ModelConfigParserTest {
         assertEquals(40, inference.topK)
         assertEquals(0.05f, inference.minP)
         assertEquals(1.10f, inference.repeatPenalty)
+    }
+
+    @Test
+    fun `parses explicit model family`() {
+        val config = ModelConfigParser.parse(
+            validRawConfig() +
+                """
+
+                model.family=gemma-4
+                """.trimIndent(),
+        )
+
+        assertEquals("gemma-4", config.family)
     }
 
     @Test

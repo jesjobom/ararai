@@ -57,6 +57,8 @@ object ModelConfigParser {
     ): ModelConfig = ModelConfig(
         id = required("${modelPrefix}id"),
         name = required("${modelPrefix}name"),
+        family = getProperty("${modelPrefix}family")?.trim()?.takeIf(String::isNotEmpty)
+            ?: required("${modelPrefix}id"),
         runtime =
         ModelRuntime.fromConfigValue(
             optional("${modelPrefix}runtime", ModelRuntime.LlamaCpp.configValue),
@@ -150,6 +152,7 @@ object ModelConfigParser {
         require(relativePath.startsWith("models/")) {
             "model.relativePath must be under models/"
         }
+        require(family.isNotBlank()) { "model.family must not be blank" }
         if (artifactFormat == ModelArtifactFormat.Gguf) {
             require(relativePath == "models/$fileName") {
                 "model.relativePath must match models/<model.fileName>"

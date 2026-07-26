@@ -10,15 +10,19 @@ inference remains device-, driver-, model-, and workload-dependent.
 
 ## Current product
 
-- The application starts at a Compose home hub with Chat, Models, Diagnostics,
-  and Settings destinations. Appearance can follow the system or use an
+- The application starts at a Compose home hub with Chat, Models, and Settings
+  destinations. Appearance can follow the system or use an
   explicitly selected light or dark theme.
 - A checked-in static catalog defines every manageable model, artifact URL and
   hash, runtime, acceleration policy, bounded llama.cpp GPU-layer budget where
   applicable, input/reasoning capabilities, and default inference settings.
-- Users can download, retry, cancel, update, delete, and select configured
-  models. Downloads are resumable foreground data transfers with notification
-  progress, and the selected model persists locally.
+- Users can browse configured models in Chat and Transcription tabs,
+  grouped by family and ordered from lighter to heavier artifacts. They can
+  download, retry, cancel, update, delete, and select configured models.
+  Downloaded model cards open workload-specific benchmarks, and models whose
+  declared RAM requirement fits currently available device memory are marked as
+  recommended. Downloads are resumable foreground data transfers with
+  notification progress, and the selected model persists locally.
 - The Chat supports streamed generation, cancellation, persistent and
   renameable sessions, bounded context, selectable Markdown and local LaTeX math output, settings, and
   capability-gated reasoning, plus language-aware native speech playback for
@@ -32,7 +36,8 @@ inference remains device-, driver-, model-, and workload-dependent.
   models or text models backed by local Whisper transcription, compares offline
   WebRTC/Silero VAD and Android capture preprocessing, speaks streamed answers
   incrementally, and shares persisted conversations with normal Chat.
-- Diagnostics expose model/runtime metadata and local benchmark measurements.
+- Per-model diagnostics expose model/runtime metadata and local benchmark
+  measurements.
 - Conversations, preferences, models, runtime caches, and Chat media are local.
   Android backup and device transfer are disabled for the application.
 

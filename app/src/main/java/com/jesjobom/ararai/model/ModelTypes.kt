@@ -116,6 +116,7 @@ enum class ModelAccelerationPolicy(
 data class ModelConfig(
     val id: String,
     val name: String,
+    val family: String = id,
     val runtime: ModelRuntime = ModelRuntime.LlamaCpp,
     val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.Gguf,
     val acceleration: ModelAccelerationPolicy = ModelAccelerationPolicy.GpuPreferred,

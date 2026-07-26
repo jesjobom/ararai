@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jesjobom.ararai.chat.DEFAULT_TRANSCRIPTION_THREADS
 import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.voice.AndroidVoiceTurnCapture
@@ -53,7 +54,7 @@ internal fun WhisperCandidateBenchmarkScreen(
     var status by remember { mutableStateOf("Ready to record") }
     var report by remember { mutableStateOf<String?>(null) }
     var isBusy by remember { mutableStateOf(false) }
-    var benchmarkThreads by remember { mutableStateOf(DEFAULT_BENCHMARK_THREADS) }
+    var benchmarkThreads by remember { mutableStateOf(DEFAULT_TRANSCRIPTION_THREADS) }
     val available = item.state as? ModelStartupState.Available
     val sampleFile = remember(temporaryDirectory) { File(temporaryDirectory, "comparison-sample.wav") }
     var hasSavedSample by remember { mutableStateOf(sampleFile.isFile) }
@@ -273,6 +274,5 @@ private suspend fun runCandidateBenchmark(
 
 private fun currentPssKb(): Int = Debug.MemoryInfo().also(Debug::getMemoryInfo).totalPss
 
-private const val DEFAULT_BENCHMARK_THREADS = 4
 private val BENCHMARK_THREAD_OPTIONS = listOf(2, 4, 6, 8)
 private const val MEMORY_SAMPLE_MILLIS = 50L

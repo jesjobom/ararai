@@ -1,5 +1,7 @@
 package com.jesjobom.ararai.ui
 
+import android.app.ActivityManager
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,7 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Error
@@ -36,9 +37,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -196,7 +199,8 @@ internal fun ArarAiApp(
     }
 
     BackHandler(enabled = destination != AppDestination.Home) {
-        if (destination == AppDestination.WhisperBenchmark) {
+        if (destination == AppDestination.WhisperBenchmark || destination == AppDestination.Diagnostics) {
+            benchmarkViewModel.onLeavingBenchmark()
             destination = AppDestination.ModelStatus
         } else {
             returnHome()
@@ -237,7 +241,6 @@ internal fun ArarAiApp(
                 destination = AppDestination.Chat
             },
             onOpenVoiceChat = { destination = AppDestination.VoiceChat },
-            onOpenDiagnostics = { destination = AppDestination.Diagnostics },
             onOpenModelStatus = { destination = AppDestination.ModelStatus },
             onOpenSettings = { destination = AppDestination.Settings },
         )
@@ -272,11 +275,18 @@ internal fun ArarAiApp(
         }
         AppDestination.Diagnostics -> BenchmarkScreen(
             viewModel = benchmarkViewModel,
-            onBack = { returnHome() },
+            onBack = {
+                benchmarkViewModel.onLeavingBenchmark()
+                destination = AppDestination.ModelStatus
+            },
         )
         AppDestination.ModelStatus -> ModelStatusScreen(
             models = modelCatalogState.models,
             selectedModelId = modelCatalogState.selectedModelId,
+            availableMemoryBytes = remember(appContext) {
+                val manager = appContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                ActivityManager.MemoryInfo().also(manager::getMemoryInfo).availMem
+            },
             onBack = { returnHome() },
             onSelect = modelController::select,
             onDownload = modelController::download,
@@ -284,9 +294,15 @@ internal fun ArarAiApp(
             onDelete = modelController::delete,
             onRedownload = modelController::redownload,
             onRetry = modelController::retry,
-            onTestTranscription = { modelId ->
-                whisperBenchmarkModelId = modelId
-                destination = AppDestination.WhisperBenchmark
+            onBenchmark = { modelId ->
+                val item = modelCatalogState.models.first { it.config.id == modelId }
+                if (item.config.supportsTask(ModelTask.Transcription)) {
+                    whisperBenchmarkModelId = modelId
+                    destination = AppDestination.WhisperBenchmark
+                } else {
+                    benchmarkViewModel.onSelectedModelState(item.config, item.state)
+                    destination = AppDestination.Diagnostics
+                }
             },
         )
         AppDestination.WhisperBenchmark -> {
@@ -367,7 +383,6 @@ internal fun HomeScreen(
     appVersionLabel: String,
     onOpenChat: () -> Unit,
     onOpenVoiceChat: () -> Unit,
-    onOpenDiagnostics: () -> Unit,
     onOpenModelStatus: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -418,14 +433,6 @@ internal fun HomeScreen(
                     else -> Icons.Filled.Storage
                 },
                 onAction = onOpenModelStatus,
-            )
-
-            StatusCard(
-                title = "Diagnostics",
-                value = "Selected model runtime check",
-                detail = "Run a single benchmark when you need troubleshooting data.",
-                icon = Icons.Filled.Build,
-                onAction = onOpenDiagnostics,
             )
 
             StatusCard(
@@ -731,6 +738,7 @@ private fun BenchmarkResultCard(result: BenchmarkResult) {
 internal fun ModelStatusScreen(
     models: List<ManagedModelItem>,
     selectedModelId: String,
+    availableMemoryBytes: Long? = null,
     onBack: () -> Unit,
     onSelect: (String) -> Unit,
     onDownload: (String) -> Unit,
@@ -738,8 +746,9 @@ internal fun ModelStatusScreen(
     onDelete: (String) -> Unit,
     onRedownload: (String) -> Unit,
     onRetry: (String) -> Unit,
-    onTestTranscription: (String) -> Unit = {},
+    onBenchmark: (String) -> Unit = {},
 ) {
+    var selectedTab by remember { mutableStateOf(ModelCatalogTab.Chat) }
     ArarAiScaffold(
         title = "Models",
         subtitle = "Local catalog",
@@ -751,7 +760,24 @@ internal fun ModelStatusScreen(
                 .padding(vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            models.forEach { item ->
+            PrimaryTabRow(selectedTabIndex = selectedTab.ordinal) {
+                ModelCatalogTab.entries.forEach { tab ->
+                    Tab(
+                        selected = selectedTab == tab,
+                        onClick = { selectedTab = tab },
+                        text = { Text(tab.label) },
+                        modifier = Modifier.testTag("models-tab-${tab.name.lowercase(Locale.ROOT)}"),
+                    )
+                }
+            }
+            availableMemoryBytes?.let {
+                Text(
+                    text = "Recommended models fit the ${it.toStorageSize()} currently available memory.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            models.forTab(selectedTab).forEach { item ->
                 ModelCard(
                     item = item,
                     isSelected = item.config.id == selectedModelId,
@@ -761,7 +787,8 @@ internal fun ModelStatusScreen(
                     onDelete = { onDelete(item.config.id) },
                     onRedownload = { onRedownload(item.config.id) },
                     onRetry = { onRetry(item.config.id) },
-                    onTestTranscription = { onTestTranscription(item.config.id) },
+                    isRecommended = item.isRecommendedFor(availableMemoryBytes),
+                    onBenchmark = { onBenchmark(item.config.id) },
                 )
             }
         }
@@ -779,12 +806,12 @@ private fun ModelCard(
     onDelete: () -> Unit,
     onRedownload: () -> Unit,
     onRetry: () -> Unit,
-    onTestTranscription: () -> Unit,
+    isRecommended: Boolean,
+    onBenchmark: () -> Unit,
 ) {
     val status = ModelStatusUiState.from(item.config, item.state)
     val isAvailable = item.state is ModelStartupState.Available
     val isChatModel = item.config.supportsPurpose(ModelPurpose.Chat)
-    val isTranscriptionModel = item.config.supportsTask(ModelTask.Transcription)
     val isMissing = item.state is ModelStartupState.Missing
     val isDownloading = item.state is ModelStartupState.Downloading
     val isFailed = item.state is ModelStartupState.Failed
@@ -831,6 +858,9 @@ private fun ModelCard(
             ) {
                 MetadataBadge(item.config.runtime.displayName)
                 MetadataBadge(item.config.acceleration.displayName)
+                if (isRecommended) {
+                    MetadataBadge("Recommended")
+                }
                 item.config.capabilityLabels().forEach { capability ->
                     MetadataBadge(capability)
                 }
@@ -892,10 +922,8 @@ private fun ModelCard(
                     }
                 }
                 if (isAvailable) {
-                    if (isTranscriptionModel) {
-                        Button(onClick = onTestTranscription) {
-                            Text("Test transcription model")
-                        }
+                    Button(onClick = onBenchmark) {
+                        Text("Run benchmark")
                     }
                     OutlinedButton(onClick = onRedownload) {
                         Text("Download again")

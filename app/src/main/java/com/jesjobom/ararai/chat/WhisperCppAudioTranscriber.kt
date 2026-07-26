@@ -41,7 +41,7 @@ class WhisperCppAudioTranscriber(
                     available.model.filePath,
                     audioFile.absolutePath,
                     AUTO_DETECT_LANGUAGE,
-                    TRANSCRIPTION_THREADS,
+                    DEFAULT_TRANSCRIPTION_THREADS,
                 )
             }
         } catch (error: RuntimeException) {
@@ -102,6 +102,7 @@ class WhisperCppAudioTranscriber(
 
     private companion object {
         const val AUTO_DETECT_LANGUAGE = "auto"
-        const val TRANSCRIPTION_THREADS = 6
     }
 }
+
+internal const val DEFAULT_TRANSCRIPTION_THREADS = 6
