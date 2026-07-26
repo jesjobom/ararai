@@ -75,12 +75,24 @@ internal fun VoiceChatScreen(
     onStop: () -> Unit,
     onDismissError: () -> Unit,
     onSettings: (VoiceChatSettings) -> Unit,
+    onCreateSession: () -> Unit = {},
+    onSelectSession: (String) -> Unit = {},
+    onRenameSession: (String, String) -> Unit = { _, _ -> },
+    onDeleteSession: (String) -> Unit = {},
+    onClearAllSessions: () -> Unit = {},
     onOpenModels: () -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     var showSettings by remember { mutableStateOf(false) }
     var showFullResponse by remember { mutableStateOf(false) }
+    var sessionListOpen by remember { mutableStateOf(false) }
+    var clearSessionsConfirmationOpen by remember { mutableStateOf(false) }
+    var renameDialogOpen by remember { mutableStateOf(false) }
+    var renameText by remember { mutableStateOf("") }
+    var renameSessionId by remember { mutableStateOf<String?>(null) }
+    val currentSessionTitle =
+        state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title ?: "New chat"
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) onStart()
     }
@@ -119,11 +131,16 @@ internal fun VoiceChatScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
+            SessionListButton(
+                title = currentSessionTitle,
+                isBusy = state.isActive || state.isLoadingModel,
+                onClick = { sessionListOpen = true },
+            )
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(phaseLabel(state.phase), style = MaterialTheme.typography.headlineSmall)
                 if (state.isLoadingModel) Text("Loading model…")
-                if (!state.modelSupportsAudio) {
-                    Text("Select and download an audio-capable model.")
+                if (!state.modelSupportsAudio && !state.transcriptionAvailable) {
+                    Text("Install a transcription model or select an audio-capable model.")
                     OutlinedButton(onClick = onOpenModels) { Text("Manage models") }
                 }
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -174,6 +191,58 @@ internal fun VoiceChatScreen(
             spokenRange = state.spokenRange,
             readingAnchor = state.readingAnchor,
             onDismiss = { showFullResponse = false },
+        )
+    }
+    if (sessionListOpen) {
+        SessionListDialog(
+            sessions = state.sessions,
+            selectedSessionId = state.selectedSessionId,
+            canDelete = state.canDeleteCurrentSession,
+            onDismiss = { sessionListOpen = false },
+            onCreate = {
+                onCreateSession()
+                sessionListOpen = false
+            },
+            onSelect = {
+                onSelectSession(it)
+                sessionListOpen = false
+            },
+            onRename = { session ->
+                renameSessionId = session.id
+                renameText = session.title
+                renameDialogOpen = true
+                sessionListOpen = false
+            },
+            onDelete = onDeleteSession,
+            onClearAll = {
+                sessionListOpen = false
+                clearSessionsConfirmationOpen = true
+            },
+        )
+    }
+    if (clearSessionsConfirmationOpen) {
+        ClearSessionsConfirmationDialog(
+            sessionCount = state.sessions.size,
+            onDismiss = { clearSessionsConfirmationOpen = false },
+            onConfirm = {
+                onClearAllSessions()
+                clearSessionsConfirmationOpen = false
+            },
+        )
+    }
+    if (renameDialogOpen) {
+        RenameSessionDialog(
+            title = renameText,
+            onTitleChange = { renameText = it },
+            onDismiss = {
+                renameSessionId = null
+                renameDialogOpen = false
+            },
+            onConfirm = {
+                renameSessionId?.let { onRenameSession(it, renameText) }
+                renameSessionId = null
+                renameDialogOpen = false
+            },
         )
     }
 }

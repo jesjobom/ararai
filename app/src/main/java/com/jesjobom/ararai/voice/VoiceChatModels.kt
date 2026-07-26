@@ -1,5 +1,7 @@
 package com.jesjobom.ararai.voice
 
+import com.jesjobom.ararai.chat.ChatSessionUiState
+
 enum class VoiceChatPhase { Idle, Listening, Processing, Speaking, Error }
 
 enum class VadProvider { WebRtc, Silero }
@@ -60,6 +62,7 @@ data class VoiceChatUiState(
     val phase: VoiceChatPhase = VoiceChatPhase.Idle,
     val modelAvailable: Boolean = false,
     val modelSupportsAudio: Boolean = false,
+    val transcriptionAvailable: Boolean = false,
     val isLoadingModel: Boolean = false,
     val isModelLoaded: Boolean = false,
     val settings: VoiceChatSettings = VoiceChatSettings(),
@@ -68,8 +71,14 @@ data class VoiceChatUiState(
     val spokenRange: IntRange? = null,
     val readingAnchor: Int = 0,
     val error: String? = null,
+    val sessions: List<ChatSessionUiState> = emptyList(),
+    val selectedSessionId: String? = null,
 ) {
     val canStart: Boolean get() =
-        modelAvailable && modelSupportsAudio && isModelLoaded && phase == VoiceChatPhase.Idle
+        modelAvailable &&
+            (modelSupportsAudio || transcriptionAvailable) &&
+            isModelLoaded &&
+            phase == VoiceChatPhase.Idle
     val isActive: Boolean get() = phase != VoiceChatPhase.Idle && phase != VoiceChatPhase.Error
+    val canDeleteCurrentSession: Boolean get() = selectedSessionId != null && sessions.size > 1
 }

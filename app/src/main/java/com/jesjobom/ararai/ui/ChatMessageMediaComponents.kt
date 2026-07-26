@@ -1,6 +1,5 @@
 package com.jesjobom.ararai.ui
 
-import android.content.ClipData
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,18 +9,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.selection.TextSelectionColors
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -30,21 +26,17 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -54,7 +46,6 @@ import com.jesjobom.ararai.chat.AudioTranscriptionStatus
 import com.jesjobom.ararai.chat.ChatMessage
 import com.jesjobom.ararai.chat.ChatRole
 import com.jesjobom.ararai.chat.MessageContent
-import kotlinx.coroutines.launch
 
 @Composable
 internal fun AttachmentRow(
@@ -334,14 +325,6 @@ private fun CompletedTranscriptionView(
             style = MaterialTheme.typography.labelMedium,
         )
     }
-    TranscriptionDetailsButton(
-        diagnostic = content.transcriptionDiagnostic,
-        reportPrefix = buildString {
-            appendLine("status=Completed")
-            appendLine("potentially_partial=${content.transcriptionMayBeIncomplete}")
-            appendLine("partial_reason=${content.transcriptionIncompleteReason.orEmpty()}")
-        },
-    )
 }
 
 @Composable
@@ -351,60 +334,6 @@ private fun TranscriptionFailureView(content: MessageContent.AudioPromptContent)
         color = MaterialTheme.colorScheme.error,
         style = MaterialTheme.typography.labelMedium,
     )
-    TranscriptionDetailsButton(
-        diagnostic = content.transcriptionDiagnostic,
-        reportPrefix = buildString {
-            appendLine("failure_kind=${content.transcriptionFailureKind?.name ?: "Unknown"}")
-            appendLine("message=${content.transcriptionError.orEmpty()}")
-        },
-    )
-}
-
-@Composable
-private fun TranscriptionDetailsButton(diagnostic: String?, reportPrefix: String) {
-    var showDetails by remember(diagnostic) { mutableStateOf(false) }
-    val clipboard = LocalClipboard.current
-    val scope = rememberCoroutineScope()
-    diagnostic?.takeIf { it.isNotBlank() }?.let {
-        TextButton(onClick = { showDetails = true }) {
-            Text("Transcription details")
-        }
-        if (showDetails) {
-            val report = reportPrefix + diagnostic
-            AlertDialog(
-                onDismissRequest = { showDetails = false },
-                title = { Text("Transcription diagnostics") },
-                text = {
-                    SelectionContainer {
-                        Text(
-                            report,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.verticalScroll(rememberScrollState()),
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                clipboard.setClipEntry(
-                                    ClipEntry(ClipData.newPlainText("Transcription diagnostics", report)),
-                                )
-                            }
-                            showDetails = false
-                        },
-                    ) {
-                        Text("Copy")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showDetails = false }) {
-                        Text("Close")
-                    }
-                },
-            )
-        }
-    }
 }
 
 @Composable

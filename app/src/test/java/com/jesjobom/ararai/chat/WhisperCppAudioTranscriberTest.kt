@@ -36,8 +36,9 @@ class WhisperCppAudioTranscriberTest {
 
         assertTrue(transcriber.isAvailable)
         assertEquals("Olá mundo.", result.transcript)
-        assertEquals(listOf("/models/base.bin", audio.absolutePath, "pt", 6), calls.single())
+        assertEquals(listOf("/models/base.bin", audio.absolutePath, "auto", 6), calls.single())
         assertTrue(result.diagnosticReport.contains("model_id=base"))
+        assertTrue(result.diagnosticReport.contains("language=auto"))
     }
 
     @Test

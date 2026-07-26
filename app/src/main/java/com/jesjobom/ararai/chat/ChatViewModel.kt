@@ -2,9 +2,7 @@ package com.jesjobom.ararai.chat
 
 import com.jesjobom.ararai.engine.GenerationEvent
 import com.jesjobom.ararai.engine.LocalLlmEngine
-import com.jesjobom.ararai.engine.PromptChatMessage
 import com.jesjobom.ararai.engine.PromptRequest
-import com.jesjobom.ararai.engine.toPlainChatPrompt
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelCatalog
@@ -28,9 +26,15 @@ class ChatViewModel(
     private val systemPrompt: String = ModelCatalog.DEFAULT_SYSTEM_PROMPT,
     private val sessionStore: ChatSessionStore = InMemoryChatSessionStore(),
     private val mediaRepository: ChatMediaRepository = NoOpChatMediaRepository,
-    private val promptContextBuilder: PromptContextBuilder = PromptContextBuilder(),
+    promptContextBuilder: PromptContextBuilder = PromptContextBuilder(),
     private val audioTranscriber: AudioTranscriber = UnavailableAudioTranscriber,
     private val preferences: ChatPreferences = InMemoryChatPreferences(),
+    private val conversationSelection: ConversationSelection = ConversationSelection(),
+    private val conversationCoordinator: ConversationCoordinator =
+        ConversationCoordinator(
+            sessionStore = sessionStore,
+            contextProjector = ConversationContextProjector(systemPrompt, promptContextBuilder),
+        ),
     initialModelStatus: String =
         if (initialModel == null) {
             "Model unavailable"
@@ -58,7 +62,10 @@ class ChatViewModel(
     private var assistantPresentationJob: Job? = null
     private var assistantBuffer: AssistantMessageBuffer? = null
     private val assistantBufferLock = Any()
-    private val initialSession = sessionStore.ensureSession()
+    private val initialSession =
+        conversationSelection.currentSessionId
+            ?.let { selected -> sessionStore.listSessions().firstOrNull { it.id == selected } }
+            ?: sessionStore.ensureSession().also { conversationSelection.select(it.id) }
     private val _uiState =
         MutableStateFlow(
             ChatUiState(
@@ -163,6 +170,7 @@ class ChatViewModel(
         if (generationJob?.isActive == true) return
         deleteCurrentDraftMedia()
         val session = sessionStore.createSession("New chat")
+        conversationSelection.select(session.id)
         _uiState.update {
             it.copy(
                 sessions = sessionStore.listSessions().toUiState(),
@@ -180,6 +188,7 @@ class ChatViewModel(
         if (generationJob?.isActive == true) return
         if (sessionStore.listSessions().none { it.id == sessionId }) return
         deleteCurrentDraftMedia()
+        conversationSelection.select(sessionId)
         _uiState.update {
             it.copy(
                 selectedSessionId = sessionId,
@@ -223,6 +232,7 @@ class ChatViewModel(
                 .getMessages(sessionId)
                 .flatMapTo(linkedSetOf()) { it.content.mediaUris() }
         sessionStore.deleteSession(sessionId)
+        conversationSelection.clear(sessionId)
         mediaRepository.deleteUnreferenced(deletedMedia, sessionStore.referencedMediaUris())
         val next =
             if (current.selectedSessionId == sessionId) {
@@ -230,6 +240,7 @@ class ChatViewModel(
             } else {
                 sessionStore.listSessions().first { it.id == current.selectedSessionId }
             }
+        conversationSelection.select(next.id)
         _uiState.update {
             it.copy(
                 sessions = sessionStore.listSessions().toUiState(),
@@ -251,6 +262,7 @@ class ChatViewModel(
         sessionStore.clearSessions()
         mediaRepository.deleteUnreferenced(deletedMedia, emptySet())
         val replacement = sessionStore.ensureSession()
+        conversationSelection.select(replacement.id)
         activeAssistantMessageId = null
         _uiState.update {
             it.copy(
@@ -409,8 +421,9 @@ class ChatViewModel(
         val submittedContent = current.toSubmittedContent(audioTranscriber.isAvailable)
         val submittedTitle = submittedContent.displayText
         if (submittedContent !is MessageContent.AudioPromptContent) maybeTitleSession(sessionId, submittedTitle)
-        val history = sessionStore.getMessages(sessionId).toChatMessages()
-        val userMessage = sessionStore.appendMessage(sessionId, ChatRole.User, submittedContent)
+        val begunTurn = conversationCoordinator.beginUserTurn(sessionId, submittedContent)
+        val history = begunTurn.history
+        val userMessage = begunTurn.userMessage
         val requiresTranscriptionBeforeGeneration =
             submittedContent is MessageContent.AudioPromptContent && modelForRequest?.inputCapabilities?.audio != true
         if (!requiresTranscriptionBeforeGeneration) prepareAssistantMessage(sessionId, refresh = false)
@@ -453,10 +466,10 @@ class ChatViewModel(
                         } else {
                             submittedContent
                         }
-                    val requestMessages =
-                        effectiveContent.toRequestMessages(
-                            systemPrompt = systemPrompt,
+                    val projected =
+                        conversationCoordinator.project(
                             history = history,
+                            current = effectiveContent,
                             inferenceConfig = inferenceForRequest,
                         )
                     val requestContent =
@@ -466,17 +479,18 @@ class ChatViewModel(
                         ) {
                             MessageContent.TextPrompt(effectiveContent.transcript.orEmpty())
                         } else {
-                            effectiveContent.toRequestContent(requestMessages)
+                            projected.requestContent
                         }
                     if (activeAssistantMessageId == null) prepareAssistantMessage(sessionId)
                     engine.load(modelForRequest, inferenceForRequest)
                     _uiState.update { it.copy(isLoadingModel = false) }
 
-                    engine
+                    conversationCoordinator
                         .generate(
+                            engine,
                             PromptRequest(
                                 content = requestContent,
-                                chatMessages = requestMessages,
+                                chatMessages = projected.messages,
                                 reasoningEnabled = current.reasoningEnabled && modelForRequest.reasoningCapabilities.request,
                                 chatSessionId = sessionId,
                             ),
@@ -531,7 +545,10 @@ class ChatViewModel(
     }
 
     private fun prepareAssistantMessage(sessionId: String, refresh: Boolean = true) {
-        val assistantMessage = sessionStore.appendMessage(sessionId, ChatRole.Assistant, "").toChatMessage()
+        val assistantMessage =
+            conversationCoordinator
+                .appendAssistant(sessionId, MessageContent.TextPrompt(""))
+                .toChatMessage()
         activeAssistantMessageId = assistantMessage.id
         synchronized(assistantBufferLock) {
             assistantBuffer = AssistantMessageBuffer(assistantMessage.id)
@@ -632,6 +649,22 @@ class ChatViewModel(
         }
     }
 
+    fun onEnteringChat() {
+        if (generationJob?.isActive == true) return
+        val session =
+            conversationSelection.currentSessionId
+                ?.let { selected -> sessionStore.listSessions().firstOrNull { it.id == selected } }
+                ?: sessionStore.ensureSession().also { conversationSelection.select(it.id) }
+        _uiState.update {
+            it.copy(
+                sessions = sessionStore.listSessions().toUiState(),
+                selectedSessionId = session.id,
+                messages = sessionStore.getMessages(session.id).toChatMessages(),
+                messageDisplayRevision = it.messageDisplayRevision + 1,
+            )
+        }
+    }
+
     fun cancelGeneration() {
         stopActiveGeneration()
         unloadEngine()
@@ -728,7 +761,7 @@ class ChatViewModel(
                 buffer.persistenceDirty = false
                 buffer.messageId to buffer.snapshot()
             }
-        sessionStore.updateMessage(pending.first, pending.second)
+        conversationCoordinator.updateMessage(pending.first, pending.second)
     }
 
     private fun finalizeAssistantMessage() {
@@ -764,41 +797,6 @@ class ChatViewModel(
             text = prompt.trim(),
             imageAttachments = imageAttachments,
         )
-
-    private fun MessageContent.toRequestMessages(
-        systemPrompt: String,
-        history: List<ChatMessage>,
-        inferenceConfig: InferenceConfig,
-    ): List<PromptChatMessage> {
-        val reconstructibleHistory = history.filter { message ->
-            val audio = message.content as? MessageContent.AudioPromptContent
-            audio == null || audio.transcriptionStatus == AudioTranscriptionStatus.Completed
-        }
-        return when (this) {
-            is MessageContent.TextPrompt ->
-                promptContextBuilder.build(
-                    systemPrompt = systemPrompt,
-                    history = reconstructibleHistory,
-                    userPrompt =
-                    text.ifBlank {
-                        if (imageAttachments.isNotEmpty()) "Describe this image." else text
-                    },
-                    inferenceConfig = inferenceConfig,
-                )
-            is MessageContent.AudioPromptContent ->
-                promptContextBuilder.build(
-                    systemPrompt = systemPrompt,
-                    history = reconstructibleHistory,
-                    userPrompt = "",
-                    inferenceConfig = inferenceConfig,
-                )
-        }
-    }
-
-    private fun MessageContent.toRequestContent(messages: List<PromptChatMessage>): MessageContent = when (this) {
-        is MessageContent.TextPrompt -> copy(text = messages.toPlainChatPrompt())
-        is MessageContent.AudioPromptContent -> this
-    }
 
     private fun LocalModel?.canUseRecordedAudio(): Boolean = this?.let {
         it.inputCapabilities.audio || (it.inputCapabilities.text && audioTranscriber.isAvailable)

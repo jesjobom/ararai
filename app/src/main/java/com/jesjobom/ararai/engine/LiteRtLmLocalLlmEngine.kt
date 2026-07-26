@@ -13,6 +13,7 @@ import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelAccelerationPolicy
@@ -33,6 +34,7 @@ class LiteRtLmLocalLlmEngine(
     private val bridge: LiteRtLmBridge = AndroidLiteRtLmBridge(),
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : LocalLlmEngine {
+    override val supportsIncrementalConversation: Boolean = true
     private val lock = Any()
     private var loadedSession: LiteRtLmSession? = null
     private var loadedModelId: String? = null
@@ -605,8 +607,14 @@ private fun PromptRequest.historyBeforeCurrent(): List<PromptChatMessage> {
     }
 }
 
-private fun PromptRequest.transcriptAfter(assistantText: String): List<PromptChatMessage> = chatMessages.filter { it.role != PromptChatRole.System } +
-    PromptChatMessage(PromptChatRole.Assistant, assistantText)
+internal fun PromptRequest.transcriptAfter(assistantText: String): List<PromptChatMessage> = buildList {
+    addAll(chatMessages.filter { it.role != PromptChatRole.System })
+    (content as? MessageContent.AudioPromptContent)
+        ?.transcript
+        ?.takeIf(String::isNotBlank)
+        ?.let { add(PromptChatMessage(PromptChatRole.User, it)) }
+    add(PromptChatMessage(PromptChatRole.Assistant, assistantText))
+}
 
 private fun List<PromptChatMessage>.toLiteRtMessages(): List<Message> = map { message ->
     when (message.role) {

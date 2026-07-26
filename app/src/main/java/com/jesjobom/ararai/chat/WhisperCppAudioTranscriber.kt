@@ -40,7 +40,7 @@ class WhisperCppAudioTranscriber(
                 transcribeWithRuntime(
                     available.model.filePath,
                     audioFile.absolutePath,
-                    TRANSCRIPTION_LANGUAGE,
+                    AUTO_DETECT_LANGUAGE,
                     TRANSCRIPTION_THREADS,
                 )
             }
@@ -92,7 +92,7 @@ class WhisperCppAudioTranscriber(
     private fun diagnostic(modelId: String, result: WhisperRuntimeResult): String = buildString {
         appendLine("transcriber=WhisperCpp")
         appendLine("model_id=$modelId")
-        appendLine("language=$TRANSCRIPTION_LANGUAGE")
+        appendLine("language=$AUTO_DETECT_LANGUAGE")
         appendLine("threads=${result.threads}")
         appendLine("audio_duration_ms=${result.audioMillis}")
         appendLine("load_duration_ms=${result.loadMillis}")
@@ -101,7 +101,7 @@ class WhisperCppAudioTranscriber(
     }
 
     private companion object {
-        const val TRANSCRIPTION_LANGUAGE = "pt"
+        const val AUTO_DETECT_LANGUAGE = "auto"
         const val TRANSCRIPTION_THREADS = 6
     }
 }

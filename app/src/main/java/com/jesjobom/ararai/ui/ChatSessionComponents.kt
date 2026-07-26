@@ -239,18 +239,18 @@ internal fun ChatSettingsDialog(
                     onCheckedChange = onReasoningEnabledChange,
                 )
                 ChatSettingSwitch(
-                    title = "Show audio transcriptions",
-                    status = "Transcriptions remain available to conversation context",
-                    checked = showAudioTranscriptions,
-                    enabled = true,
-                    onCheckedChange = onShowAudioTranscriptionsChange,
-                )
-                ChatSettingSwitch(
                     title = "Show reasoning",
                     status = if (canShowReasoning) null else "Unavailable for this model",
                     checked = showReasoning,
                     enabled = canShowReasoning,
                     onCheckedChange = onShowReasoningChange,
+                )
+                ChatSettingSwitch(
+                    title = "Show audio transcriptions",
+                    status = "Transcriptions remain available to conversation context",
+                    checked = showAudioTranscriptions,
+                    enabled = true,
+                    onCheckedChange = onShowAudioTranscriptionsChange,
                 )
             }
         },

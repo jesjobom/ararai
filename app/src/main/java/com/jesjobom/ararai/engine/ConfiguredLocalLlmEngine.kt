@@ -16,6 +16,8 @@ class ConfiguredLocalLlmEngine(
             bridge = AndroidLiteRtLmBridge(cacheDir = liteRtLmCacheDir),
         )
     private var activeEngine: LocalLlmEngine? = null
+    override val supportsIncrementalConversation: Boolean
+        get() = activeEngine?.supportsIncrementalConversation == true
 
     override suspend fun load(
         model: LocalModel,

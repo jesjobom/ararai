@@ -210,6 +210,7 @@ class ModelConfigParserTest {
         assertEquals(6, catalog.models.size)
         assertEquals("Gemma 4 E2B IT LiteRT-LM", catalog.models[3].name)
         assertEquals(4294967296L, catalog.models[3].recommendedFreeRamBytes)
+        assertEquals(ModelAccelerationPolicy.GpuPreferred, catalog.models[1].acceleration)
         assertFalse(catalog.models.any { it.id.contains("qwen", ignoreCase = true) })
         assertFalse(catalog.models[0].reasoningCapabilities.request)
         assertFalse(catalog.models[0].reasoningCapabilities.output)

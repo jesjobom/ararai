@@ -17,11 +17,12 @@ backend, or external database.
   controls when declared by the selected model.
 - Offline response-language detection and language-aware native Android
   text-to-speech playback for completed assistant responses.
-- Experimental stateless Voice Chat v0 for audio-capable LiteRT-LM models. It
+- Experimental contextual Voice Chat for audio-capable models or text models
+  backed by local Whisper transcription. It
   compares offline WebRTC/Silero voice-activity detection, Android capture
   sources, and optional native noise suppression, then speaks streamed answers
-  in ordered segments. Voice turns, audio, responses, and diagnostics are not
-  persisted and no context is carried between turns.
+  in ordered segments. Voice turns, app-owned audio, completed transcripts, and
+  responses use the same persisted conversation history as normal Chat.
 - Capability-gated image and recorded-audio prompts. Chat uses a downloaded,
   integrity-validated whisper.cpp model for local transcription. Audio-capable
   models receive the original audio while transcription runs asynchronously;
@@ -30,7 +31,7 @@ backend, or external database.
 - Diagnostics for model/runtime identity and local inference performance.
 - Resumable model downloads continue under an Android foreground service with
   progress and cancellation in a persistent notification.
-- Home, Chat, Voice Chat v0, Models, Diagnostics, and Settings destinations implemented with
+- Home, Chat, Voice Chat, Models, Diagnostics, and Settings destinations implemented with
   Jetpack Compose.
 - Persistent System, Light, and Dark appearance selection with Material dynamic
   colors on supported devices.
@@ -130,14 +131,23 @@ are installed, while Small is used when it is the only valid Whisper model.
 Completed transcripts remain persisted and available to conversation context
 even when the Chat preference hides them from message presentation. Older
 audio messages remain playable but are not transcribed retroactively. Failed
-transcriptions offer a copyable, sanitized in-app diagnostic report with model,
-timing, thread and failure metadata; reports exclude audio bytes and recognized
-speech.
+transcriptions show a concise error without exposing internal runtime
+diagnostics in Chat.
 
-Voice Chat v0 keeps only bounded timing/configuration diagnostics in memory.
-Its temporary WAV is deleted after each exchange, cancellation, or failure and
-stale Voice Chat temporary files are reconciled on startup. It does not write
-voice messages or generated text to the Chat database.
+Normal Chat and Voice Chat share one current persisted conversation. A
+compatible LiteRT-LM native conversation is reused incrementally, so subsequent
+turns send only new user content. Persisted history remains the recoverable
+source of truth: after runtime recreation or process restart, the app initializes
+a fresh native conversation once from bounded reconstructible history. Runtimes
+without incremental conversation support receive the bounded reconstructed
+prompt on each turn.
+
+Voice Chat keeps only bounded timing/configuration diagnostics in memory.
+Temporary capture WAV files are deleted after each exchange, cancellation, or
+failure, while the app-owned conversation copy remains available for replay.
+Stale Voice Chat temporary files are reconciled on startup. A completed
+transcript reconstructs an audio turn after native-state loss; the app omits
+rather than fabricates content for legacy or failed audio without a transcript.
 
 ## Planning and sources of truth
 

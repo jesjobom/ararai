@@ -64,6 +64,9 @@ import com.jesjobom.ararai.chat.ChatMediaRepository
 import com.jesjobom.ararai.chat.ChatPreferences
 import com.jesjobom.ararai.chat.ChatSessionStore
 import com.jesjobom.ararai.chat.ChatViewModel
+import com.jesjobom.ararai.chat.ConversationContextProjector
+import com.jesjobom.ararai.chat.ConversationCoordinator
+import com.jesjobom.ararai.chat.ConversationSelection
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.ConfiguredLocalLlmEngine
 import com.jesjobom.ararai.engine.LocalLlmEngine
@@ -125,6 +128,13 @@ internal fun ArarAiApp(
     val localLlmRuntime = remember(localLlmEngineFactory) {
         AppLocalLlmRuntime(localLlmEngineFactory)
     }
+    val conversationSelection = remember { ConversationSelection() }
+    val conversationCoordinator = remember(chatSessionStore, systemPrompt) {
+        ConversationCoordinator(
+            sessionStore = chatSessionStore,
+            contextProjector = ConversationContextProjector(systemPrompt),
+        )
+    }
     val chatViewModel = remember {
         val availableState = startupState as? ModelStartupState.Available
         ChatViewModel(
@@ -136,6 +146,8 @@ internal fun ArarAiApp(
             mediaRepository = chatMediaRepository,
             preferences = chatPreferences,
             audioTranscriber = audioTranscriber,
+            conversationSelection = conversationSelection,
+            conversationCoordinator = conversationCoordinator,
         )
     }
     val benchmarkViewModel = remember {
@@ -162,6 +174,11 @@ internal fun ArarAiApp(
                     onError = onError,
                 )
             },
+            sessionStore = chatSessionStore,
+            mediaRepository = chatMediaRepository,
+            audioTranscriber = audioTranscriber,
+            conversationSelection = conversationSelection,
+            conversationCoordinator = conversationCoordinator,
         )
     }
     fun returnHome() {
@@ -215,7 +232,10 @@ internal fun ArarAiApp(
         AppDestination.Home -> HomeScreen(
             modelStatus = ModelStatusUiState.from(modelConfig, startupState),
             appVersionLabel = appVersionLabel,
-            onOpenChat = { destination = AppDestination.Chat },
+            onOpenChat = {
+                chatViewModel.onEnteringChat()
+                destination = AppDestination.Chat
+            },
             onOpenVoiceChat = { destination = AppDestination.VoiceChat },
             onOpenDiagnostics = { destination = AppDestination.Diagnostics },
             onOpenModelStatus = { destination = AppDestination.ModelStatus },
@@ -238,6 +258,11 @@ internal fun ArarAiApp(
                 onStop = voiceChatViewModel::stop,
                 onDismissError = voiceChatViewModel::dismissError,
                 onSettings = voiceChatViewModel::updateSettings,
+                onCreateSession = voiceChatViewModel::createSession,
+                onSelectSession = voiceChatViewModel::selectSession,
+                onRenameSession = voiceChatViewModel::renameSession,
+                onDeleteSession = voiceChatViewModel::deleteSession,
+                onClearAllSessions = voiceChatViewModel::clearAllSessions,
                 onOpenModels = {
                     voiceChatViewModel.onLeavingVoiceChat()
                     destination = AppDestination.ModelStatus

@@ -38,6 +38,41 @@ class LiteRtLmLocalLlmEngineTest {
         )
 
     @Test
+    fun `declares incremental conversation capability`() {
+        assertTrue(LiteRtLmLocalLlmEngine(bridge = RecordingBridge()).supportsIncrementalConversation)
+    }
+
+    @Test
+    fun `retained audio transcript includes reconstructible user turn`() {
+        val request =
+            PromptRequest(
+                content =
+                MessageContent.AudioPromptContent(
+                    audio = AudioPrompt("/tmp/voice.wav", "audio/wav"),
+                    transcript = "Pergunta transcrita",
+                    transcriptionStatus = com.jesjobom.ararai.chat.AudioTranscriptionStatus.Completed,
+                ),
+                chatMessages =
+                listOf(
+                    PromptChatMessage(PromptChatRole.System, "System"),
+                    PromptChatMessage(PromptChatRole.User, "Earlier"),
+                    PromptChatMessage(PromptChatRole.Assistant, "Previous answer"),
+                ),
+                chatSessionId = "shared-session",
+            )
+
+        assertEquals(
+            listOf(
+                PromptChatMessage(PromptChatRole.User, "Earlier"),
+                PromptChatMessage(PromptChatRole.Assistant, "Previous answer"),
+                PromptChatMessage(PromptChatRole.User, "Pergunta transcrita"),
+                PromptChatMessage(PromptChatRole.Assistant, "Nova resposta"),
+            ),
+            request.transcriptAfter("Nova resposta"),
+        )
+    }
+
+    @Test
     fun `loads litert lm model with gpu preference and streams chunks`() = runTest {
         val bridge = RecordingBridge(chunks = listOf(LiteRtLmChunk(text = "ola"), LiteRtLmChunk(text = " mundo")))
         val engine =

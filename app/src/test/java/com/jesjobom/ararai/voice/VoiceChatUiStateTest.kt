@@ -40,4 +40,17 @@ class VoiceChatUiStateTest {
 
         assertFalse(state.canStart)
     }
+
+    @Test
+    fun `loaded text model can start when local transcription is available`() {
+        val state =
+            VoiceChatUiState(
+                modelAvailable = true,
+                modelSupportsAudio = false,
+                transcriptionAvailable = true,
+                isModelLoaded = true,
+            )
+
+        assertTrue(state.canStart)
+    }
 }

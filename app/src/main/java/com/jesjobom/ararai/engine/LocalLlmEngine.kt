@@ -8,6 +8,9 @@ import com.jesjobom.ararai.model.LocalModel
 import kotlinx.coroutines.flow.Flow
 
 interface LocalLlmEngine {
+    val supportsIncrementalConversation: Boolean
+        get() = false
+
     suspend fun load(
         model: LocalModel,
         config: InferenceConfig,
