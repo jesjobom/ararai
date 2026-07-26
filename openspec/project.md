@@ -14,8 +14,8 @@ inference remains device-, driver-, model-, and workload-dependent.
   and Settings destinations. Appearance can follow the system or use an
   explicitly selected light or dark theme.
 - A checked-in static catalog defines every manageable model, artifact URL and
-  hash, runtime, acceleration policy, input/reasoning capabilities, and default
-  inference settings.
+  hash, runtime, acceleration policy, bounded llama.cpp GPU-layer budget where
+  applicable, input/reasoning capabilities, and default inference settings.
 - Users can download, retry, cancel, update, delete, and select configured
   models. Downloads are resumable foreground data transfers with notification
   progress, and the selected model persists locally.
@@ -28,10 +28,10 @@ inference remains device-, driver-, model-, and workload-dependent.
   Whisper model, text-only models receive a locally produced transcript
   instead, and new audio messages persist transcript state for reconstructible
   context.
-- Experimental Voice Chat v0 runs stateless, half-duplex direct-audio turns for
-  audio-capable models, compares offline WebRTC/Silero VAD and Android capture
-  preprocessing, speaks streamed answers incrementally, and retains neither
-  conversational context nor Voice Chat history.
+- Experimental Voice Chat runs contextual half-duplex turns for direct-audio
+  models or text models backed by local Whisper transcription, compares offline
+  WebRTC/Silero VAD and Android capture preprocessing, speaks streamed answers
+  incrementally, and shares persisted conversations with normal Chat.
 - Diagnostics expose model/runtime metadata and local benchmark measurements.
 - Conversations, preferences, models, runtime caches, and Chat media are local.
   Android backup and device transfer are disabled for the application.
@@ -56,8 +56,12 @@ local model is sufficient for the core Chat inference flow.
 - Debug builds/signing only
 
 Exact dependency versions and Android settings come from the checked-in Gradle
-configuration. Exact model support comes from
-`app/src/main/res/raw/fixed_model.properties`.
+configuration. Exact model support and llama.cpp GPU-layer budgets come from
+`app/src/main/res/raw/fixed_model.properties`. GPU-preferred legacy GGUF entries
+without an explicit budget use eight layers; increasing a checked-in budget
+requires physical multi-turn memory, responsiveness, ANR, and thermal evidence.
+The Llama 3.2, LFM2.5, and Ministral 3 GGUF profiles are experimental CPU-only
+entries on the target device; Ministral vision weights are not configured.
 
 ## Architecture
 
@@ -75,7 +79,7 @@ The principal boundaries are:
 - `chat/`: session state, context construction, SQLite persistence, streaming
   durability, media ownership, replaceable local audio transcription and
   direct-audio/transcript routing;
-- `voice/`: stateless voice-loop coordination, PCM capture/VAD, experimental
+- `voice/`: contextual voice-loop coordination, PCM capture/VAD, experimental
   preprocessing and diagnostics, response segmentation, and sequential TTS;
 - `ui/`: navigation and Compose presentation, with injectable adapters around
   image import, audio recording/playback, response language identification,

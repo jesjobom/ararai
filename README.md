@@ -12,6 +12,11 @@ backend, or external database.
 - Runtime selection through a shared `LocalLlmEngine` boundary:
   - llama.cpp/JNI for GGUF models;
   - LiteRT-LM for configured `.litertlm` bundles.
+- Bounded llama.cpp Vulkan offload: GPU-preferred GGUF models use a finite
+  per-model layer budget and legacy entries default to eight layers. The
+  checked-in Llama 3.2, LFM2.5, and Ministral 3 test profiles are CPU-only
+  because physical testing on the target Adreno device rejected even partial
+  Llama offload. CPU-only loading and fallback remain available.
 - Streamed local Chat with persistent and renameable sessions, cancellation,
   bounded context construction, selectable Markdown and local LaTeX math rendering, and optional reasoning
   controls when declared by the selected model.
@@ -54,8 +59,13 @@ memory, thermal, and multimodal behavior require physical-device validation.
   transitively for the experimental Silero comparison
 - Debug signing/builds only; release signing is not configured
 
-Model definitions and their runtime, artifact, capability, integrity, and
-inference metadata live in `app/src/main/res/raw/fixed_model.properties`.
+Model definitions and their runtime, artifact, acceleration/layer budget,
+capability, integrity, and inference metadata live in
+`app/src/main/res/raw/fixed_model.properties`. Increasing a llama.cpp
+`gpuLayerCount` requires physical multi-turn memory, responsiveness, ANR, and
+thermal validation; a successful build does not establish a safe device value.
+LFM2.5 1.2B and Ministral 3 3B are experimental text-only CPU profiles; the
+Ministral vision projector is intentionally not part of the catalog.
 
 ## Build and verification
 

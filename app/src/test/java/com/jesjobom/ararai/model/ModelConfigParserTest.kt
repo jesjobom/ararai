@@ -32,6 +32,7 @@ class ModelConfigParserTest {
         assertEquals(ModelRuntime.LlamaCpp, config.runtime)
         assertEquals(ModelArtifactFormat.Gguf, config.artifactFormat)
         assertEquals(ModelAccelerationPolicy.GpuPreferred, config.acceleration)
+        assertEquals(null, config.gpuLayerCount)
         assertEquals(emptyList<String>(), config.fallbackUrls)
         assertEquals(true, config.inputCapabilities.text)
         assertEquals(false, config.inputCapabilities.image)
@@ -133,6 +134,56 @@ class ModelConfigParserTest {
     }
 
     @Test
+    fun `parses explicit llama gpu layer budget`() {
+        val config =
+            ModelConfigParser.parse(
+                validRawConfig() +
+                    """
+
+                    model.gpuLayerCount=8
+                    """.trimIndent(),
+            )
+
+        assertEquals(8, config.gpuLayerCount)
+    }
+
+    @Test
+    fun `rejects llama gpu layer budget for cpu only model`() {
+        try {
+            ModelConfigParser.parse(
+                validRawConfig() +
+                    """
+
+                    model.acceleration=cpu_only
+                    model.gpuLayerCount=8
+                    """.trimIndent(),
+            )
+            fail("Expected incompatible GPU layer budget to throw")
+        } catch (error: IllegalArgumentException) {
+            assertEquals(
+                "model.gpuLayerCount requires llama_cpp with gpu_preferred acceleration",
+                error.message,
+            )
+        }
+    }
+
+    @Test
+    fun `rejects non positive llama gpu layer budget`() {
+        try {
+            ModelConfigParser.parse(
+                validRawConfig() +
+                    """
+
+                    model.gpuLayerCount=0
+                    """.trimIndent(),
+            )
+            fail("Expected non-positive GPU layer budget to throw")
+        } catch (error: IllegalArgumentException) {
+            assertEquals("model.gpuLayerCount must be positive when present", error.message)
+        }
+    }
+
+    @Test
     fun `parses utility transcription model without LLM inference settings`() {
         val config =
             ModelConfigParser.parse(
@@ -207,18 +258,41 @@ class ModelConfigParserTest {
         val catalog = ModelConfigParser.parseCatalog(raw)
 
         assertEquals("smollm2-135m-instruct-q4-k-m", catalog.defaultModelId)
-        assertEquals(6, catalog.models.size)
+        assertEquals(8, catalog.models.size)
         assertEquals("Gemma 4 E2B IT LiteRT-LM", catalog.models[3].name)
         assertEquals(4294967296L, catalog.models[3].recommendedFreeRamBytes)
-        assertEquals(ModelAccelerationPolicy.GpuPreferred, catalog.models[1].acceleration)
+        assertEquals(ModelAccelerationPolicy.CpuOnly, catalog.models[1].acceleration)
+        assertEquals(null, catalog.models[1].gpuLayerCount)
+        assertEquals(ModelMaturity.Experimental, catalog.models[1].maturity)
         assertFalse(catalog.models.any { it.id.contains("qwen", ignoreCase = true) })
         assertFalse(catalog.models[0].reasoningCapabilities.request)
         assertFalse(catalog.models[0].reasoningCapabilities.output)
-        catalog.models.drop(1).forEach { model ->
-            if (model.supportsPurpose(ModelPurpose.Utility)) return@forEach
+        catalog.models.filter { it.supportsPurpose(ModelPurpose.Reasoning) }.forEach { model ->
             assertEquals("${model.name} reasoning request", true, model.reasoningCapabilities.request)
             assertEquals("${model.name} reasoning output", true, model.reasoningCapabilities.output)
         }
+        val experimentalTextModels =
+            catalog.models.filter {
+                it.id == "lfm2.5-1.2b-instruct-q4-k-m" ||
+                    it.id == "ministral-3-3b-instruct-2512-q4-k-m"
+            }
+        assertEquals(2, experimentalTextModels.size)
+        experimentalTextModels.forEach { model ->
+            assertEquals(ModelRuntime.LlamaCpp, model.runtime)
+            assertEquals(ModelArtifactFormat.Gguf, model.artifactFormat)
+            assertEquals(ModelAccelerationPolicy.CpuOnly, model.acceleration)
+            assertEquals(ModelMaturity.Experimental, model.maturity)
+            assertEquals(setOf(ModelPurpose.Chat), model.purposes)
+            assertFalse(model.inputCapabilities.audio)
+            assertFalse(model.reasoningCapabilities.request)
+            assertFalse(model.reasoningCapabilities.output)
+        }
+        val lfm = experimentalTextModels.single { it.id.startsWith("lfm2.5") }
+        assertEquals(730895168L, lfm.expectedBytes)
+        assertEquals(50, lfm.requireInference().topK)
+        assertEquals(1.05f, lfm.requireInference().repeatPenalty)
+        val ministral = experimentalTextModels.single { it.id.startsWith("ministral") }
+        assertEquals(2147023008L, ministral.expectedBytes)
         val candidates = catalog.models.filter { it.supportsTask(ModelTask.Transcription) }
         assertEquals(2, candidates.size)
         assertEquals(

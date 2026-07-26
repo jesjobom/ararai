@@ -119,6 +119,7 @@ data class ModelConfig(
     val runtime: ModelRuntime = ModelRuntime.LlamaCpp,
     val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.Gguf,
     val acceleration: ModelAccelerationPolicy = ModelAccelerationPolicy.GpuPreferred,
+    val gpuLayerCount: Int? = null,
     val url: String,
     val fallbackUrls: List<String> = emptyList(),
     val fileName: String,
@@ -174,6 +175,7 @@ data class LocalModel(
     val runtime: ModelRuntime = ModelRuntime.LlamaCpp,
     val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.Gguf,
     val acceleration: ModelAccelerationPolicy = ModelAccelerationPolicy.GpuPreferred,
+    val gpuLayerCount: Int? = null,
     val inputCapabilities: ModelInputCapabilities = ModelInputCapabilities(),
     val reasoningCapabilities: ModelReasoningCapabilities = ModelReasoningCapabilities(),
 )

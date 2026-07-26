@@ -44,13 +44,23 @@ class LlamaCppLocalLlmEngineTest {
     }
 
     @Test
-    fun `requests gpu layer offload by default`() = runTest {
+    fun `requests conservative gpu layer offload by default`() = runTest {
         val bridge = RecordingBridge()
         val engine = LlamaCppLocalLlmEngine(bridge = bridge)
 
         engine.load(model, config)
 
-        assertEquals(999, bridge.loadedGpuLayerCount)
+        assertEquals(8, bridge.loadedGpuLayerCount)
+    }
+
+    @Test
+    fun `requests configured gpu layer offload`() = runTest {
+        val bridge = RecordingBridge()
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+
+        engine.load(model.copy(gpuLayerCount = 16), config)
+
+        assertEquals(16, bridge.loadedGpuLayerCount)
     }
 
     @Test
@@ -190,7 +200,20 @@ class LlamaCppLocalLlmEngineTest {
         engine.load(model.copy(acceleration = ModelAccelerationPolicy.CpuOnly), config)
 
         assertEquals(2, bridge.loadCount)
-        assertEquals(listOf(999, 0), bridge.loadedGpuLayerCounts)
+        assertEquals(listOf(8, 0), bridge.loadedGpuLayerCounts)
+        assertEquals(listOf(42L), bridge.unloadedHandles)
+    }
+
+    @Test
+    fun `reloads same model when gpu layer budget changes`() = runTest {
+        val bridge = RecordingBridge()
+        val engine = LlamaCppLocalLlmEngine(bridge = bridge)
+
+        engine.load(model.copy(gpuLayerCount = 8), config)
+        engine.load(model.copy(gpuLayerCount = 16), config)
+
+        assertEquals(2, bridge.loadCount)
+        assertEquals(listOf(8, 16), bridge.loadedGpuLayerCounts)
         assertEquals(listOf(42L), bridge.unloadedHandles)
     }
 
@@ -287,7 +310,7 @@ class LlamaCppLocalLlmEngineTest {
             awaitComplete()
         }
 
-        assertEquals(listOf(999, 0), bridge.loadedGpuLayerCounts)
+        assertEquals(listOf(8, 0), bridge.loadedGpuLayerCounts)
         assertEquals(listOf(42L), bridge.unloadedHandles)
         assertEquals(listOf(42L, 43L), bridge.generatedHandles)
     }
@@ -315,7 +338,7 @@ class LlamaCppLocalLlmEngineTest {
             awaitComplete()
         }
 
-        assertEquals(listOf(999, 0), bridge.loadedGpuLayerCounts)
+        assertEquals(listOf(8, 0), bridge.loadedGpuLayerCounts)
     }
 
     @Test
@@ -334,7 +357,7 @@ class LlamaCppLocalLlmEngineTest {
             awaitComplete()
         }
 
-        assertEquals(listOf(999), bridge.loadedGpuLayerCounts)
+        assertEquals(listOf(8), bridge.loadedGpuLayerCounts)
         assertEquals(1, bridge.loadCount)
     }
 

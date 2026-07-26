@@ -37,7 +37,7 @@ class LlamaCppLocalLlmEngine(
             "Unsupported local model runtime: ${model.runtime.displayName}"
         }
 
-        val requestedGpuLayerCount = gpuLayerCountFor(model.acceleration)
+        val requestedGpuLayerCount = gpuLayerCountFor(model)
         val alreadyLoaded =
             synchronized(lock) {
                 val isCompatible =
@@ -325,14 +325,14 @@ class LlamaCppLocalLlmEngine(
                 state.gpuLayerCount > CPU_ONLY_LAYER_COUNT
     }
 
-    private fun gpuLayerCountFor(acceleration: ModelAccelerationPolicy): Int = when (acceleration) {
+    private fun gpuLayerCountFor(model: LocalModel): Int = when (model.acceleration) {
         ModelAccelerationPolicy.CpuOnly -> CPU_ONLY_LAYER_COUNT
-        ModelAccelerationPolicy.GpuPreferred -> DEFAULT_GPU_LAYER_COUNT
+        ModelAccelerationPolicy.GpuPreferred -> model.gpuLayerCount ?: DEFAULT_GPU_LAYER_COUNT
     }
 
     private companion object {
         const val DEFAULT_MAX_TOKENS = 128
-        const val DEFAULT_GPU_LAYER_COUNT = 999
+        const val DEFAULT_GPU_LAYER_COUNT = 8
         const val CPU_ONLY_LAYER_COUNT = 0
         const val INVALID_LOGITS_ERROR = "Native sampler received invalid logits"
     }

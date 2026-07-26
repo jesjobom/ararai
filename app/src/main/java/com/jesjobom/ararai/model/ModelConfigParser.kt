@@ -69,6 +69,7 @@ object ModelConfigParser {
         ModelAccelerationPolicy.fromConfigValue(
             optional("${modelPrefix}acceleration", ModelAccelerationPolicy.GpuPreferred.configValue),
         ),
+        gpuLayerCount = getProperty("${modelPrefix}gpuLayerCount")?.trim()?.toInt(),
         url = required("${modelPrefix}url"),
         fallbackUrls = optionalList("${modelPrefix}fallbackUrls"),
         fileName = required("${modelPrefix}fileName"),
@@ -169,6 +170,15 @@ object ModelConfigParser {
         }
         require(recommendedFreeRamBytes == null || recommendedFreeRamBytes > 0) {
             "model.recommendedFreeRamBytes must be positive when present"
+        }
+        require(gpuLayerCount == null || gpuLayerCount > 0) {
+            "model.gpuLayerCount must be positive when present"
+        }
+        require(
+            gpuLayerCount == null ||
+                (runtime == ModelRuntime.LlamaCpp && acceleration == ModelAccelerationPolicy.GpuPreferred),
+        ) {
+            "model.gpuLayerCount requires llama_cpp with gpu_preferred acceleration"
         }
         require((listOf(url) + fallbackUrls).all { it.startsWith("https://") }) {
             "model download URLs must use https"
