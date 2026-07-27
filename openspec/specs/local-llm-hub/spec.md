@@ -51,13 +51,12 @@ The application SHALL run LLM inference on the Android device for the MVP.
 
 ### Requirement: Configured Model Startup Resolution
 
-The app SHALL support a configured GGUF model catalog. The existing single-model
-configuration format SHALL remain valid and SHALL be interpreted as a catalog
-with one default model.
+The app SHALL support a configured Gemma 4 LiteRT-LM chat model catalog with one
+default model.
 
 #### Scenario: Load existing selected configured model
 
-- **GIVEN** the selected configured GGUF model exists at its configured
+- **GIVEN** the selected configured Gemma model exists at its configured
   app-owned path
 - **AND** the file passes the configured integrity check
 - **WHEN** model resolution runs
@@ -66,18 +65,17 @@ with one default model.
 
 #### Scenario: Download missing selected configured model
 
-- **GIVEN** the selected configured GGUF model is missing or fails integrity
+- **GIVEN** the selected configured Gemma model is missing or fails integrity
   validation
-- **AND** no other configured model is available locally
+- **AND** no other configured chat model is available locally
 - **WHEN** the app starts with network access
-- **THEN** the app automatically downloads the configured default model to its
-  app-owned location
+- **THEN** the app automatically downloads Gemma 4 E2B as the configured default
 - **AND** validates the downloaded file before loading it.
 
 #### Scenario: Skip default download when another model is available
 
-- **GIVEN** the configured default model is missing
-- **AND** another configured model is already available locally
+- **GIVEN** Gemma 4 E2B is missing
+- **AND** another configured Gemma chat model is already available locally
 - **WHEN** the app starts
 - **THEN** the app does not automatically download the default model
 - **AND** the available model is selected for chat.
@@ -95,9 +93,8 @@ hosted API to perform its core chat flow.
 
 ### Requirement: Runtime Boundary
 
-The application SHALL isolate local model execution behind an inference engine
-boundary while allowing the app runtime to use a real native local inference
-implementation.
+The application SHALL isolate Gemma 4 execution behind an inference engine
+boundary backed by LiteRT-LM.
 
 #### Scenario: Runtime replacement
 
@@ -107,13 +104,10 @@ implementation.
 
 #### Scenario: Real runtime behind boundary
 
-- **GIVEN** the configured GGUF model is available at the standard app-owned
-  path
+- **GIVEN** a configured Gemma 4 LiteRT-LM model is available
 - **WHEN** the chat flow requests generation
-- **THEN** the app uses a real `LocalLlmEngine` implementation behind the engine
-  boundary
-- **AND** the chat UI does not depend directly on JNI, native handles, or
-  runtime-specific types.
+- **THEN** the app uses LiteRT-LM behind `LocalLlmEngine`
+- **AND** the chat UI does not depend directly on LiteRT-LM types.
 
 ### Requirement: First Vertical Slice
 
@@ -164,23 +158,22 @@ Phase 1 SHALL create a buildable Android application scaffold for ArarAI.
 
 ### Requirement: Fixed Model Configuration
 
-Phase 1 SHALL include checked-in configuration for at least one GGUF model and
-its default inference limits.
+The checked-in configuration SHALL include Gemma 4 E2B and E4B LiteRT-LM chat
+models and supported Whisper transcription models, with Gemma 4 E2B as default.
 
 #### Scenario: Parse configured model catalog
 
 - **WHEN** the app starts
-- **THEN** it can parse a configured model catalog
-- **AND** each entry defines the model ID, source URL, expected local path,
-  integrity metadata, expected download size, recommended free RAM, and default
-  inference parameters
-- **AND** the default inference parameters include context size, sampling
-  values, and maximum generated tokens.
+- **THEN** it parses only supported LiteRT-LM chat and Whisper utility entries
+- **AND** each entry defines its ID, source URL, expected local path, integrity
+  metadata, expected download size, recommended free RAM, runtime, artifact
+  format, acceleration, capabilities, and applicable inference parameters.
 
 #### Scenario: Keep configured model list static
 
-- **WHEN** the user opens the model management screen
+- **WHEN** the user opens model management
 - **THEN** the app shows only models declared by checked-in configuration
+- **AND** it shows no GGUF or llama.cpp chat model
 - **AND** the UI does not allow arbitrary model entries to be added.
 
 #### Scenario: Validate model resource metadata
@@ -188,9 +181,7 @@ its default inference limits.
 - **GIVEN** a catalog entry declares expected download size or recommended free
   RAM
 - **WHEN** the app parses the catalog
-- **THEN** each declared value is a positive byte count
-- **AND** the values remain part of the same model configuration as runtime,
-  acceleration, capabilities, and inference parameters.
+- **THEN** each declared value is a positive byte count.
 
 ### Requirement: Model Management Metadata Presentation
 
@@ -421,26 +412,24 @@ validating the user experience before native inference exists.
 
 ### Requirement: Real Local LLM Runtime
 
-The app SHALL provide a real local inference engine for the configured GGUF
-model that is already present and valid on the device.
+The app SHALL provide LiteRT-LM local inference for configured Gemma 4 bundles
+that are present and valid on the device.
 
 #### Scenario: Load available configured model
 
-- **GIVEN** model startup reports the configured model as available
-- **AND** the configured model file exists at the app-owned path
+- **GIVEN** model startup reports a configured Gemma model as available
 - **WHEN** chat starts real generation
-- **THEN** the app loads that exact file through the real local inference engine
+- **THEN** the app loads that exact `.litertlm` bundle through LiteRT-LM
 - **AND** applies the configured inference defaults
 - **AND** does not use a remote inference API.
 
 #### Scenario: Native load failure
 
-- **GIVEN** the configured model is reported available
-- **AND** the native runtime fails to load it
+- **GIVEN** the configured Gemma model is reported available
+- **AND** LiteRT-LM fails to load it
 - **WHEN** the user attempts generation
 - **THEN** the chat screen shows a load error
-- **AND** prompt submission becomes available again when the app is otherwise
-  ready
+- **AND** prompt submission becomes available again when otherwise ready
 - **AND** the app does not crash.
 
 ### Requirement: Real Chat Generation Flow
@@ -518,26 +507,6 @@ physical-device smoke test.
 - **THEN** the app produces assistant text from local inference
 - **AND** the app remains responsive
 - **AND** leaving chat does not crash the app.
-
-### Requirement: GGUF Chat Template Formatting
-
-The native local inference runtime SHALL format user prompts with the loaded
-GGUF model's chat template before generation when the model provides one.
-
-#### Scenario: Format single-turn chat prompt
-
-- **GIVEN** a loaded GGUF model exposes a chat template
-- **WHEN** the user sends a prompt
-- **THEN** the native runtime formats a single user message with assistant
-  generation enabled
-- **AND** tokenizes the formatted prompt instead of the raw user text.
-
-#### Scenario: Fallback when no template is available
-
-- **GIVEN** a loaded GGUF model does not expose a usable chat template
-- **WHEN** the user sends a prompt
-- **THEN** the native runtime falls back to the raw user prompt
-- **AND** generation still proceeds without crashing.
 
 ### Requirement: Configured Generation Token Limit
 
@@ -646,63 +615,6 @@ benchmark results are not confused with previous CPU-only measurements.
 - **WHEN** the user opens the benchmark screen
 - **THEN** the backend label identifies the llama.cpp Vulkan/GPU-default runtime.
 
-### Requirement: Configured Model Runtime Metadata
-
-The app SHALL allow each configured model catalog entry to declare its local
-inference runtime, artifact format, acceleration policy, and an optional
-llama.cpp GPU-layer count where applicable.
-
-#### Scenario: Parse runtime metadata from catalog
-
-- **GIVEN** a configured llama.cpp catalog entry includes runtime metadata and a
-  positive GPU-layer count
-- **WHEN** the app parses and resolves the catalog entry
-- **THEN** the model records the runtime, artifact format, acceleration policy,
-  and GPU-layer count.
-
-#### Scenario: Default legacy GGUF entries to llama.cpp
-
-- **GIVEN** a legacy configured model entry omits runtime and GPU-layer metadata
-- **WHEN** the app parses and loads the entry
-- **THEN** it defaults to the llama.cpp runtime
-- **AND** defaults to the GGUF artifact format
-- **AND** defaults to GPU-preferred acceleration
-- **AND** uses a conservative finite GPU-layer count.
-
-#### Scenario: Reject incompatible GPU-layer metadata
-
-- **GIVEN** a catalog entry declares a llama.cpp GPU-layer count
-- **WHEN** the count is not positive, the runtime is not llama.cpp, or the
-  acceleration policy is CPU-only
-- **THEN** catalog validation fails with a controlled configuration error.
-
-#### Scenario: Keep unvalidated test models off the Android GPU
-
-- **GIVEN** the checked-in Llama 3.2, LFM2.5, or Ministral 3 test profile is
-  selected
-- **WHEN** llama.cpp loads the model on the target Android device
-- **THEN** the profile requests CPU-only inference
-- **AND** LFM2.5 and Ministral are identified as experimental text-only models
-- **AND** the optional Ministral vision projector is not downloaded or loaded.
-
-### Requirement: Runtime-Driven Local Engine Selection
-
-The app SHALL choose local inference behavior from the selected model's
-configured runtime metadata rather than hardcoded model IDs.
-
-#### Scenario: Load llama.cpp model with configured acceleration
-
-- **GIVEN** a selected available model uses the llama.cpp runtime
-- **AND** its acceleration policy is CPU-only
-- **WHEN** the app loads the model for chat or benchmark
-- **THEN** it requests CPU-only llama.cpp inference.
-
-#### Scenario: Reject unsupported configured runtime
-
-- **GIVEN** a selected available model uses a runtime not implemented by the app
-- **WHEN** the app attempts to load the model
-- **THEN** generation or benchmark execution fails with a controlled error.
-
 ### Requirement: Runtime Metadata In Benchmark
 
 The benchmark screen SHALL display the selected model runtime so results can be
@@ -742,27 +654,6 @@ The app SHALL support configured Gemma 4 models using the LiteRT-LM runtime and
 - **WHEN** the user runs chat or benchmark
 - **THEN** the app reports a controlled generation failure
 - **AND** the app does not crash.
-
-### Requirement: Gemma Runtime Catalog Variant
-
-The checked-in model catalog SHALL include a Gemma 4 LiteRT-LM variant separate
-from the existing Gemma 4 GGUF fallback.
-
-#### Scenario: Download Gemma LiteRT-LM artifact
-
-- **GIVEN** the Gemma LiteRT-LM catalog entry is selected
-- **AND** its configured `.litertlm` file is missing
-- **WHEN** the download flow starts
-- **THEN** the app downloads the configured `.litertlm` artifact
-- **AND** validates size and SHA-256 before making it available.
-
-#### Scenario: Compare Gemma runtimes
-
-- **GIVEN** both Gemma catalog entries are present
-- **WHEN** the user views benchmark details
-- **THEN** the app shows whether the selected Gemma model uses llama.cpp or
-  LiteRT-LM
-- **AND** shows the selected acceleration policy.
 
 ### Requirement: Internal Back Navigation
 
@@ -2356,26 +2247,6 @@ limit SHALL bound cleanup candidates, not permanently shield later orphan files.
 - **WHEN** reconciliation encounters a content URI or path outside the Chat media directory
 - **THEN** it does not delete that resource.
 
-### Requirement: Configuration-aware llama.cpp runtime reuse
-
-The llama.cpp runtime SHALL reuse a loaded native model only when the requested
-model and every inference parameter bound during native loading are compatible
-with the retained handle.
-
-#### Scenario: Reuse an identical native configuration
-
-- **GIVEN** a llama.cpp model is loaded with a complete inference configuration
-- **WHEN** the same model and compatible configuration are requested again
-- **THEN** the app reuses the loaded native handle.
-
-#### Scenario: Reload after a load-bound parameter changes
-
-- **GIVEN** a llama.cpp model is already loaded
-- **WHEN** the same model is requested with a different load-bound context or
-  sampling parameter
-- **THEN** the app unloads the incompatible handle
-- **AND** loads the requested configuration before generation or benchmarking.
-
 ### Requirement: Kotlin formatting and static-analysis gate
 
 The shared automated quality gate SHALL run pinned, check-only Kotlin formatting
@@ -2652,3 +2523,58 @@ requirement fits as recommended without blocking other models.
 - **WHEN** the model card is displayed
 - **THEN** the model remains visible with its normal lifecycle actions
 - **AND** the app does not identify it as recommended.
+
+### Requirement: Legacy GGUF Artifact Cleanup
+
+The app SHALL remove only the known app-managed artifacts and partial downloads
+for chat models removed from the checked-in catalog.
+
+#### Scenario: Clean former managed GGUF downloads
+
+- **GIVEN** a former app-managed GGUF model or its partial download exists
+- **WHEN** the post-upgrade model-storage migration runs
+- **THEN** the known legacy file is deleted
+- **AND** current Gemma and Whisper artifacts remain unchanged.
+
+#### Scenario: Preserve unknown files
+
+- **GIVEN** an unknown file exists in app-owned model storage
+- **WHEN** the post-upgrade model-storage migration runs
+- **THEN** the unknown file is not deleted.
+
+### Requirement: Supported Model Runtime Metadata
+
+The app SHALL accept only LiteRT-LM chat bundles and Whisper transcription
+artifacts in checked-in model runtime metadata.
+
+#### Scenario: Parse supported runtime metadata
+
+- **GIVEN** a catalog entry declares LiteRT-LM or Whisper runtime metadata
+- **WHEN** the app parses and resolves the entry
+- **THEN** it records the runtime, artifact format, and acceleration policy.
+
+#### Scenario: Reject removed chat runtimes
+
+- **GIVEN** a catalog entry declares llama.cpp or GGUF
+- **WHEN** the app parses the entry
+- **THEN** catalog validation fails with a controlled unsupported-value error.
+
+### Requirement: Gemma-Only Chat Catalog
+
+The checked-in chat catalog SHALL contain Gemma 4 E2B and E4B LiteRT-LM bundles
+and SHALL use Gemma 4 E2B as its default model.
+
+#### Scenario: Download Gemma LiteRT-LM artifact
+
+- **GIVEN** a Gemma LiteRT-LM catalog entry is selected
+- **AND** its configured `.litertlm` file is missing
+- **WHEN** the download flow starts
+- **THEN** the app downloads the configured `.litertlm` artifact
+- **AND** validates size and SHA-256 before making it available.
+
+#### Scenario: Present Gemma choices
+
+- **WHEN** the user views configured chat models
+- **THEN** Gemma 4 E2B and E4B are available
+- **AND** no GGUF chat model is shown
+- **AND** their LiteRT-LM runtime and acceleration policy are shown.

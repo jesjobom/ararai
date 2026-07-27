@@ -180,7 +180,7 @@ class BenchmarkViewModelTest {
                 scope = this,
             )
 
-        assertEquals("llama.cpp GPU preferred", viewModel.uiState.value.backendLabel)
+        assertEquals("LiteRT-LM GPU preferred", viewModel.uiState.value.backendLabel)
     }
 
     @Test
@@ -194,7 +194,7 @@ class BenchmarkViewModelTest {
                 scope = this,
             )
 
-        assertEquals("llama.cpp CPU only", viewModel.uiState.value.backendLabel)
+        assertEquals("LiteRT-LM CPU only", viewModel.uiState.value.backendLabel)
     }
 
     @Test

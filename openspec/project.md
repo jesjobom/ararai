@@ -14,8 +14,8 @@ inference remains device-, driver-, model-, and workload-dependent.
   destinations. Appearance can follow the system or use an
   explicitly selected light or dark theme.
 - A checked-in static catalog defines every manageable model, artifact URL and
-  hash, runtime, acceleration policy, bounded llama.cpp GPU-layer budget where
-  applicable, input/reasoning capabilities, and default inference settings.
+  hash, runtime, acceleration policy, input/reasoning capabilities, and default
+  inference settings.
 - Users can browse configured models in Chat and Transcription tabs,
   grouped by family and ordered from lighter to heavier artifacts. They can
   download, retry, cancel, update, delete, and select configured models.
@@ -50,9 +50,9 @@ local model is sufficient for the core Chat inference flow.
 - Android min SDK 28; compile and target SDK 36; arm64-v8a
 - Kotlin 2.3.21; Jetpack Compose BOM 2026.06.00
 - JDK 17; Android Gradle Plugin 9.2.x; Gradle 9.4.1
-- Build Tools 36.0.0; NDK 28.2.13676358; CMake 3.22.1
-- llama.cpp through JNI/NDK for GGUF artifacts
-- LiteRT-LM 0.14.0 for configured LiteRT-LM bundles
+- Build Tools 36.0.0; Whisper uses NDK 28.2.13676358 and CMake 3.22.1
+- LiteRT-LM 0.14.0 for configured Gemma 4 LiteRT-LM bundles
+- whisper.cpp through JNI/NDK for transcription artifacts
 - Bundled ML Kit Language ID 17.0.6 for offline response-language detection
 - Android VAD 2.0.10 WebRTC/Silero adapters and ONNX Runtime Android 1.22.0 for
   experimental offline pause-detection comparison
@@ -61,18 +61,15 @@ local model is sufficient for the core Chat inference flow.
 - Debug builds/signing only
 
 Exact dependency versions and Android settings come from the checked-in Gradle
-configuration. Exact model support and llama.cpp GPU-layer budgets come from
-`app/src/main/res/raw/fixed_model.properties`. GPU-preferred legacy GGUF entries
-without an explicit budget use eight layers; increasing a checked-in budget
-requires physical multi-turn memory, responsiveness, ANR, and thermal evidence.
-The Llama 3.2, LFM2.5, and Ministral 3 GGUF profiles are experimental CPU-only
-entries on the target device; Ministral vision weights are not configured.
+configuration. Exact Gemma 4 and Whisper model support comes from
+`app/src/main/res/raw/fixed_model.properties`. Acceleration and real-model
+behavior require physical multi-turn memory, responsiveness, ANR, and thermal
+evidence.
 
 ## Architecture
 
-Local inference is isolated behind `LocalLlmEngine`. Runtime selection is driven
-by catalog metadata, with `ConfiguredLocalLlmEngine` dispatching to llama.cpp or
-LiteRT-LM implementations. UI and ViewModels consume runtime-neutral generation
+Local inference is isolated behind `LocalLlmEngine`, backed by LiteRT-LM for the
+configured Gemma 4 chat models. UI and ViewModels consume runtime-neutral generation
 events and structured message content rather than JNI or LiteRT-specific types.
 
 The principal boundaries are:
@@ -80,7 +77,7 @@ The principal boundaries are:
 - `model/`: catalog parsing, selection, resolution, integrity, and download;
 - application-scoped model download coordination is hosted by an Android
   foreground data-sync service so activity recreation does not own transfers;
-- `engine/`: runtime-neutral contracts plus llama.cpp and LiteRT-LM adapters;
+- `engine/`: runtime-neutral contracts plus the LiteRT-LM adapter;
 - `chat/`: session state, context construction, SQLite persistence, streaming
   durability, media ownership, replaceable local audio transcription and
   direct-audio/transcript routing;

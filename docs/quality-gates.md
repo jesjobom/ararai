@@ -7,9 +7,9 @@
   media ownership/import limits, LiteRT ownership, and backup policy.
 - Android instrumentation (`app/src/androidTest`): runtime permission/backup
   manifest configuration, real `ContentResolver` image import, MainActivity
-  stop/resume, and JNI library/symbol loading with safe null-handle operations.
-- Native build: `assembleDebug` compiles and packages the pinned llama.cpp JNI
-  library for arm64-v8a; the instrumentation JNI smoke verifies device loading.
+  stop/resume, and platform text-to-speech boundaries.
+- Native build: `assembleDebug` compiles and packages the pinned whisper.cpp JNI
+  library for arm64-v8a.
 - Physical device (`docs/device-validation.md`): real model inference, backend
   selection/fallback, cancellation, repeated runs, lifecycle, memory, thermal,
   permissions, storage cleanup, backup, and device transfer.
@@ -43,13 +43,13 @@ new code into the file.
 The workflow caches only pinned Android SDK 36, Build Tools 36.0.0, NDK
 28.2.13676358, CMake 3.22.1, and CMake `FetchContent` sources. Android toolchain
 keys contain every pinned version. The native-source key hashes the Gradle
-wrapper, Android build definition, root CMake definition, and host-toolchain
-inputs. There are no broad restore prefixes, so a changed version or defining
+wrapper and Whisper native build definitions. There are no broad restore
+prefixes, so a changed version or defining
 input cannot be accepted as a current exact cache hit.
 
 When changing a tool version, update both the install command and cache key.
-When changing native dependency declarations or CMake inputs, the hash changes
-automatically. Increment the explicit `v1` cache namespace to invalidate an
+When changing Whisper native dependency declarations or CMake inputs, the hash
+changes automatically. Increment the explicit `v1` cache namespace to invalidate an
 otherwise-compatible cache deliberately. CI must still run the full gate after
 any restore; a cache hit is an optimization, never validation evidence.
 
@@ -61,7 +61,7 @@ models, prompts, Chat databases, or media.
 
 Instrumentation execution requires a connected arm64 Android target and is not
 run on the generic x86 GitHub runner. GPU backend correctness, vendor drivers,
-production-model JNI/LiteRT inference, memory pressure, and thermal behavior are
+production-model Whisper JNI/LiteRT inference, memory pressure, and thermal behavior are
 physical-device gates. They must not be inferred from a successful CI build.
 
 When a device check is skipped, record the reason and exact app/device/model

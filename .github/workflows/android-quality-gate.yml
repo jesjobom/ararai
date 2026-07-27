@@ -54,8 +54,8 @@ jobs:
       - name: Restore compatible native sources
         uses: actions/cache@v4
         with:
-          path: build/fetch-content
-          key: native-fetchcontent-v1-${{ runner.os }}-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties', 'app/build.gradle.kts', 'app/src/main/cpp/CMakeLists.txt', 'app/src/main/cpp/cmake/**') }}
+          path: build/whisper-fetch-content
+          key: native-fetchcontent-v2-${{ runner.os }}-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties', 'whisper-runtime/build.gradle.kts', 'whisper-runtime/src/main/cpp/CMakeLists.txt', 'whisper-runtime/src/main/cpp/cmake/**') }}
 
       - name: Install pinned Android and OpenSpec tooling
         run: |

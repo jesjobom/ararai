@@ -70,8 +70,9 @@ import com.jesjobom.ararai.chat.ChatViewModel
 import com.jesjobom.ararai.chat.ConversationContextProjector
 import com.jesjobom.ararai.chat.ConversationCoordinator
 import com.jesjobom.ararai.chat.ConversationSelection
+import com.jesjobom.ararai.engine.AndroidLiteRtLmBridge
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
-import com.jesjobom.ararai.engine.ConfiguredLocalLlmEngine
+import com.jesjobom.ararai.engine.LiteRtLmLocalLlmEngine
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelCatalogController
@@ -119,7 +120,9 @@ internal fun ArarAiApp(
     openModelManagementRequest: Int = 0,
     liteRtLmCacheDir: String? = null,
     localLlmEngineFactory: () -> LocalLlmEngine = {
-        ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir)
+        LiteRtLmLocalLlmEngine(
+            bridge = AndroidLiteRtLmBridge(cacheDir = liteRtLmCacheDir),
+        )
     },
 ) {
     val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext

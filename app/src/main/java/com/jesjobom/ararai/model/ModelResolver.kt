@@ -47,7 +47,6 @@ class ModelResolver(
                 runtime = config.runtime,
                 artifactFormat = config.artifactFormat,
                 acceleration = config.acceleration,
-                gpuLayerCount = config.gpuLayerCount,
                 inputCapabilities = config.inputCapabilities,
                 reasoningCapabilities = config.reasoningCapabilities,
                 filePath = file.absolutePath,

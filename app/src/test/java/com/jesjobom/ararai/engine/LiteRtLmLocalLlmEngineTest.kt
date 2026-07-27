@@ -167,22 +167,6 @@ class LiteRtLmLocalLlmEngineTest {
     }
 
     @Test
-    fun `rejects non litert lm model`() = runTest {
-        val engine =
-            LiteRtLmLocalLlmEngine(
-                bridge = RecordingBridge(),
-                dispatcher = StandardTestDispatcher(testScheduler),
-            )
-
-        try {
-            engine.load(model.copy(runtime = ModelRuntime.LlamaCpp), config)
-            fail("Expected non LiteRT-LM runtime to fail")
-        } catch (error: IllegalStateException) {
-            assertEquals("Unsupported local model runtime: llama.cpp", error.message)
-        }
-    }
-
-    @Test
     fun `reports failure when generation throws`() = runTest {
         val engine =
             LiteRtLmLocalLlmEngine(

@@ -24,30 +24,15 @@ prompts and media; never attach private conversations, logs, or user files.
    contains no private device data.
 
 The instrumentation suite checks manifest permission/backup configuration, a
-real `ContentResolver` provider import, Activity stop/resume, and JNI library and
-symbol loading without downloading a production model.
-
-## llama.cpp / GGUF
-
-- Install the candidate cleanly and verify first launch without a model.
-- Download a configured GGUF; cancel once mid-download, retry, and verify no stale
-  `.part` file blocks completion.
-- Run a synthetic text prompt on CPU-only and record load time, TTFT, decode rate,
-  peak observed memory, and completion status.
-- Run the same prompt with GPU-preferred acceleration. Record actual backend from
-  logs and note fallback; do not infer GPU use from UI configuration alone.
-- Cancel during generation, immediately run again, and confirm no crash, stale
-  output, or retained busy state.
-- Run ten consecutive short generations and watch memory trend and failures.
-- Background/foreground during generation, rotate if supported, lock/unlock, and
-  return through Android recents. Verify partial output durability and controls.
+real `ContentResolver` provider import, and Activity stop/resume without
+downloading a production model.
 
 ## LiteRT-LM
 
 - Download and integrity-check each candidate LiteRT-LM model used by the release.
 - Run text, image, audio, and reasoning cases only where the model declares support.
 - Confirm the reported acceleration/backend and capture TTFT/decode metrics.
-- Cancel during active generation, run again, switch model/runtime, and unload.
+- Cancel during active generation, run again, switch Gemma variants, and unload.
   Confirm the prior conversation is not reused incompatibly and memory recovers.
 - Repeat ten short generations, then one context-heavy generation.
 - Background/foreground, lock/unlock, and return through recents during load and

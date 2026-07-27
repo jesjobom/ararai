@@ -11,14 +11,9 @@ backend, or external database.
   with family-preserving light-to-heavy ordering, available-memory
   recommendations, download, integrity validation, selection, update, deletion,
   and persisted active-model choice.
-- Runtime selection through a shared `LocalLlmEngine` boundary:
-  - llama.cpp/JNI for GGUF models;
-  - LiteRT-LM for configured `.litertlm` bundles.
-- Bounded llama.cpp Vulkan offload: GPU-preferred GGUF models use a finite
-  per-model layer budget and legacy entries default to eight layers. The
-  checked-in Llama 3.2, LFM2.5, and Ministral 3 test profiles are CPU-only
-  because physical testing on the target Adreno device rejected even partial
-  Llama offload. CPU-only loading and fallback remain available.
+- Gemma 4 E2B and E4B Chat inference through LiteRT-LM behind a shared
+  `LocalLlmEngine` boundary. E2B is the default lower-resource option; both
+  configured models support text, image, audio, and reasoning input.
 - Streamed local Chat with persistent and renameable sessions, cancellation,
   bounded context construction, selectable Markdown and local LaTeX math rendering, and optional reasoning
   controls when declared by the selected model.
@@ -55,20 +50,19 @@ memory, thermal, and multimodal behavior require physical-device validation.
 - Android: min SDK 28, compile/target SDK 36, arm64-v8a
 - Kotlin 2.3.21 and Compose BOM 2026.06.00
 - JDK 17, AGP 9.2.x, Gradle wrapper 9.4.1
-- Build Tools 36.0.0, NDK 28.2.13676358, CMake 3.22.1
-- Local runtimes: llama.cpp through JNI/NDK and LiteRT-LM 0.14.0
+- Build Tools 36.0.0; Whisper uses NDK 28.2.13676358 and CMake 3.22.1
+- LLM runtime: LiteRT-LM 0.14.0; transcription runtime: whisper.cpp
 - Bundled ML Kit Language ID 17.0.6
 - Android VAD 2.0.10 (WebRTC and Silero) plus ONNX Runtime Android 1.22.0
   transitively for the experimental Silero comparison
 - Debug signing/builds only; release signing is not configured
 
-Model definitions and their runtime, artifact, acceleration/layer budget,
-capability, integrity, and inference metadata live in
-`app/src/main/res/raw/fixed_model.properties`. Increasing a llama.cpp
-`gpuLayerCount` requires physical multi-turn memory, responsiveness, ANR, and
-thermal validation; a successful build does not establish a safe device value.
-LFM2.5 1.2B and Ministral 3 3B are experimental text-only CPU profiles; the
-Ministral vision projector is intentionally not part of the catalog.
+Model definitions and their runtime, artifact, acceleration, capability,
+integrity, and inference metadata live in
+`app/src/main/res/raw/fixed_model.properties`. The catalog supports Gemma 4
+LiteRT-LM for Chat and Whisper for transcription; it does not ship a GGUF chat
+runtime. Real acceleration, memory, responsiveness, ANR, and thermal behavior
+still require physical-device validation.
 
 ## Build and verification
 

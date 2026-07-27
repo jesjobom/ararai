@@ -7,7 +7,7 @@ package com.jesjobom.ararai.engine
  * multi-gigabyte native runtime tree can exist in the process.
  */
 class AppLocalLlmRuntime(
-    engineFactory: () -> LocalLlmEngine = { ConfiguredLocalLlmEngine() },
+    engineFactory: () -> LocalLlmEngine = { LiteRtLmLocalLlmEngine() },
 ) {
     val engine: LocalLlmEngine = engineFactory()
 }

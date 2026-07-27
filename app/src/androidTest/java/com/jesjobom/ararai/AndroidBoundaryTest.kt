@@ -12,11 +12,9 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.jesjobom.ararai.chat.FileChatMediaRepository
-import com.jesjobom.ararai.engine.JniLlamaNativeBridge
 import com.jesjobom.ararai.ui.chatImageImporter
 import com.jesjobom.ararai.ui.compatibleVoices
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -72,13 +70,6 @@ class AndroidBoundaryTest {
             scenario.moveToState(Lifecycle.State.RESUMED)
             assertEquals(Lifecycle.State.RESUMED, scenario.state)
         }
-    }
-
-    @Test
-    fun llamaJniLibraryLoadsAndNullHandleOperationsAreSafe() {
-        JniLlamaNativeBridge.cancel(0L)
-        JniLlamaNativeBridge.unloadModel(0L)
-        assertFalse(Thread.currentThread().isInterrupted)
     }
 
     @Test

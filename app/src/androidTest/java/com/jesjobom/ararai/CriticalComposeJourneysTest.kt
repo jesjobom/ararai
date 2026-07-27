@@ -349,8 +349,8 @@ class CriticalComposeJourneysTest {
     private fun modelConfig() = ModelConfig(
         id = "test-model",
         name = "Test model",
-        runtime = ModelRuntime.LlamaCpp,
-        artifactFormat = ModelArtifactFormat.Gguf,
+        runtime = ModelRuntime.LiteRtLm,
+        artifactFormat = ModelArtifactFormat.LiteRtLmBundle,
         acceleration = ModelAccelerationPolicy.CpuOnly,
         url = "https://example.invalid/model.gguf",
         fileName = "model.gguf",

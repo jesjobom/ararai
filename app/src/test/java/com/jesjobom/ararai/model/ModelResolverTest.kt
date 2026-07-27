@@ -22,17 +22,15 @@ class ModelResolverTest {
     @Test
     fun `reports available when configured file exists and passes integrity`() {
         val root = Files.createTempDirectory("ararai-model").toFile()
-        val configuredGpuModel = config.copy(gpuLayerCount = 8)
-        val modelFile = File(root, configuredGpuModel.relativePath)
+        val modelFile = File(root, config.relativePath)
         modelFile.parentFile.mkdirs()
         modelFile.writeText("hello")
 
-        val state = ModelResolver(root).resolve(configuredGpuModel)
+        val state = ModelResolver(root).resolve(config)
 
         assertTrue(state is ModelResolutionState.Available)
         state as ModelResolutionState.Available
         assertEquals(modelFile.absolutePath, state.file.absolutePath)
-        assertEquals(8, state.model.gpuLayerCount)
     }
 
     @Test

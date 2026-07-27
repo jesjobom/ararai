@@ -61,17 +61,16 @@ object ModelConfigParser {
             ?: required("${modelPrefix}id"),
         runtime =
         ModelRuntime.fromConfigValue(
-            optional("${modelPrefix}runtime", ModelRuntime.LlamaCpp.configValue),
+            optional("${modelPrefix}runtime", ModelRuntime.LiteRtLm.configValue),
         ),
         artifactFormat =
         ModelArtifactFormat.fromConfigValue(
-            optional("${modelPrefix}artifactFormat", ModelArtifactFormat.Gguf.configValue),
+            optional("${modelPrefix}artifactFormat", ModelArtifactFormat.LiteRtLmBundle.configValue),
         ),
         acceleration =
         ModelAccelerationPolicy.fromConfigValue(
             optional("${modelPrefix}acceleration", ModelAccelerationPolicy.GpuPreferred.configValue),
         ),
-        gpuLayerCount = getProperty("${modelPrefix}gpuLayerCount")?.trim()?.toInt(),
         url = required("${modelPrefix}url"),
         fallbackUrls = optionalList("${modelPrefix}fallbackUrls"),
         fileName = required("${modelPrefix}fileName"),
@@ -153,14 +152,8 @@ object ModelConfigParser {
             "model.relativePath must be under models/"
         }
         require(family.isNotBlank()) { "model.family must not be blank" }
-        if (artifactFormat == ModelArtifactFormat.Gguf) {
-            require(relativePath == "models/$fileName") {
-                "model.relativePath must match models/<model.fileName>"
-            }
-        }
         require(
-            (runtime == ModelRuntime.LlamaCpp && artifactFormat == ModelArtifactFormat.Gguf) ||
-                (runtime == ModelRuntime.LiteRtLm && artifactFormat == ModelArtifactFormat.LiteRtLmBundle) ||
+            (runtime == ModelRuntime.LiteRtLm && artifactFormat == ModelArtifactFormat.LiteRtLmBundle) ||
                 (runtime == ModelRuntime.WhisperCpp && artifactFormat == ModelArtifactFormat.WhisperGgml),
         ) {
             "model.runtime and model.artifactFormat must be compatible"
@@ -173,15 +166,6 @@ object ModelConfigParser {
         }
         require(recommendedFreeRamBytes == null || recommendedFreeRamBytes > 0) {
             "model.recommendedFreeRamBytes must be positive when present"
-        }
-        require(gpuLayerCount == null || gpuLayerCount > 0) {
-            "model.gpuLayerCount must be positive when present"
-        }
-        require(
-            gpuLayerCount == null ||
-                (runtime == ModelRuntime.LlamaCpp && acceleration == ModelAccelerationPolicy.GpuPreferred),
-        ) {
-            "model.gpuLayerCount requires llama_cpp with gpu_preferred acceleration"
         }
         require((listOf(url) + fallbackUrls).all { it.startsWith("https://") }) {
             "model download URLs must use https"

@@ -29,7 +29,6 @@ enum class ModelRuntime(
     val configValue: String,
     val displayName: String,
 ) {
-    LlamaCpp("llama_cpp", "llama.cpp"),
     LiteRtLm("litert_lm", "LiteRT-LM"),
     WhisperCpp("whisper_cpp", "whisper.cpp"),
     ;
@@ -44,7 +43,6 @@ enum class ModelArtifactFormat(
     val configValue: String,
     val displayName: String,
 ) {
-    Gguf("gguf", "GGUF"),
     LiteRtLmBundle("litert_lm_bundle", "LiteRT-LM bundle"),
     WhisperGgml("whisper_ggml", "Whisper GGML"),
     ;
@@ -117,10 +115,9 @@ data class ModelConfig(
     val id: String,
     val name: String,
     val family: String = id,
-    val runtime: ModelRuntime = ModelRuntime.LlamaCpp,
-    val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.Gguf,
+    val runtime: ModelRuntime = ModelRuntime.LiteRtLm,
+    val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.LiteRtLmBundle,
     val acceleration: ModelAccelerationPolicy = ModelAccelerationPolicy.GpuPreferred,
-    val gpuLayerCount: Int? = null,
     val url: String,
     val fallbackUrls: List<String> = emptyList(),
     val fileName: String,
@@ -173,10 +170,9 @@ data class LocalModel(
     val id: String,
     val name: String,
     val filePath: String,
-    val runtime: ModelRuntime = ModelRuntime.LlamaCpp,
-    val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.Gguf,
+    val runtime: ModelRuntime = ModelRuntime.LiteRtLm,
+    val artifactFormat: ModelArtifactFormat = ModelArtifactFormat.LiteRtLmBundle,
     val acceleration: ModelAccelerationPolicy = ModelAccelerationPolicy.GpuPreferred,
-    val gpuLayerCount: Int? = null,
     val inputCapabilities: ModelInputCapabilities = ModelInputCapabilities(),
     val reasoningCapabilities: ModelReasoningCapabilities = ModelReasoningCapabilities(),
 )
