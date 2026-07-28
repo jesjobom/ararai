@@ -24,6 +24,7 @@ class ChatViewModel(
     initialModel: LocalModel?,
     inferenceConfig: InferenceConfig,
     private val systemPrompt: String = ModelCatalog.DEFAULT_SYSTEM_PROMPT,
+    private val systemInstructionProvider: () -> String = { systemPrompt },
     private val sessionStore: ChatSessionStore = InMemoryChatSessionStore(),
     private val mediaRepository: ChatMediaRepository = NoOpChatMediaRepository,
     promptContextBuilder: PromptContextBuilder = PromptContextBuilder(),
@@ -471,6 +472,7 @@ class ChatViewModel(
                             history = history,
                             current = effectiveContent,
                             inferenceConfig = inferenceForRequest,
+                            effectiveSystemPrompt = systemInstructionProvider(),
                         )
                     val requestContent =
                         if (

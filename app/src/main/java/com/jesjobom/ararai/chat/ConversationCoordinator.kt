@@ -23,7 +23,12 @@ class ConversationCoordinator(
         history: List<StoredChatMessage>,
         current: MessageContent,
         inferenceConfig: InferenceConfig,
-    ): ProjectedConversationContext = contextProjector.project(history, current, inferenceConfig)
+        effectiveSystemPrompt: String? = null,
+    ): ProjectedConversationContext = if (effectiveSystemPrompt == null) {
+        contextProjector.project(history, current, inferenceConfig)
+    } else {
+        contextProjector.project(history, current, inferenceConfig, effectiveSystemPrompt)
+    }
 
     fun appendAssistant(
         sessionId: String,

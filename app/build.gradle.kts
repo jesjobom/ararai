@@ -21,6 +21,8 @@ val configuredDebugKeystore =
         ?.takeIf(String::isNotBlank)
         ?.let(::file)
 
+val liteRtLmVersion = "0.14.0"
+
 android {
     namespace = "com.jesjobom.ararai"
     compileSdk = 36
@@ -31,6 +33,7 @@ android {
         targetSdk = 36
         versionCode = 2
         versionName = buildTimestampVersion()
+        buildConfigField("String", "LITERT_LM_VERSION", "\"$liteRtLmVersion\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -98,7 +101,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.14.0")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:$liteRtLmVersion")
     implementation("com.google.mlkit:language-id:17.0.6")
     implementation("com.github.gkonovalov.android-vad:webrtc:2.0.10")
     implementation("com.github.gkonovalov.android-vad:silero:2.0.10")

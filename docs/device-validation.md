@@ -30,6 +30,34 @@ downloading a production model.
 ## LiteRT-LM
 
 - Download and integrity-check each candidate LiteRT-LM model used by the release.
+- For Gemma tool-calling candidates, open the model's **Diagnostics** screen and
+  run one isolated **Structured tool calling** case with one repetition. Start
+  with `english-search` while capturing Logcat. The harness uses an offline
+  deterministic `wikipedia_search` implementation; it must not make network
+  requests.
+- Before a characterization run, capture a complete terminal log:
+  `adb logcat -c`, then
+  `adb logcat -b all -v threadtime > ararai-tool-calling.log`.
+  Reproduce the issue, wait for the app to finish or exit, stop capture with
+  Ctrl+C, and inspect before sharing. Useful markers include
+  `ArarAI.ToolCalling`, `ArarAI.LiteRtLm`, `AndroidRuntime`, `libc`,
+  `DEBUG`, `FATAL`, `SIGSEGV`, `ANR`, and `lowmemorykiller`.
+- Each case runs in a dedicated `:tool_calling_diagnostic` process. After
+  saving or sharing the report, use **Close and release process** before
+  selecting another case. The process is killed intentionally so native/GPU
+  allocations are released even when `Conversation.close()` or engine unload
+  does not return. Treat `onDone`, tool execution, conversation cleanup, and
+  engine unload as separate diagnostic phases.
+- Share and retain the generated characterization report. Require all cases to
+  pass: direct answer without a call, English and Portuguese structured calls,
+  controlled tool failure, single-call behavior, protocol-leak prevention, and
+  cancellation. Successful tool cases use distinctive factual evidence in the
+  deterministic extract; the visible answer must incorporate that evidence but
+  must not expose the internal result ID or JSON protocol. The report evaluates
+  structured behavior and native conversation cleanup separately.
+- Run the same isolated cases independently for E2B and E4B. Record each bundle hash,
+  device/build details, and report verdict. Do not add tool capability metadata
+  to a catalog entry solely because another bundle in the same family passed.
 - Run text, image, audio, and reasoning cases only where the model declares support.
 - Confirm the reported acceleration/backend and capture TTFT/decode metrics.
 - Cancel during active generation, run again, switch Gemma variants, and unload.

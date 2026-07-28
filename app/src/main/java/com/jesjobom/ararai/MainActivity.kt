@@ -19,8 +19,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.jesjobom.ararai.chat.FileChatMediaRepository
 import com.jesjobom.ararai.chat.SharedPreferencesChatPreferences
+import com.jesjobom.ararai.chat.SharedPreferencesInstructionPreferences
 import com.jesjobom.ararai.chat.SqliteChatSessionStore
 import com.jesjobom.ararai.chat.WhisperCppAudioTranscriber
+import com.jesjobom.ararai.engine.ToolCallingLog
 import com.jesjobom.ararai.engine.prepareLiteRtLmCacheDir
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.settings.SharedPreferencesThemePreferenceStore
@@ -39,6 +41,10 @@ class MainActivity : ComponentActivity() {
     @Suppress("LongMethod")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ToolCallingLog.info(
+            "process started pid=${android.os.Process.myPid()} version=${BuildConfig.VERSION_NAME} " +
+                "device=${Build.MANUFACTURER}/${Build.MODEL} sdk=${Build.VERSION.SDK_INT}",
+        )
         handleNavigationIntent(intent)
 
         val app = application as ArarAiApplication
@@ -48,6 +54,7 @@ class MainActivity : ComponentActivity() {
         val chatMediaRepository = FileChatMediaRepository(java.io.File(filesDir, "chat_media"))
         val chatMediaServices = androidChatMediaServices(chatMediaRepository)
         val chatPreferences = SharedPreferencesChatPreferences(this)
+        val instructionPreferences = SharedPreferencesInstructionPreferences(this)
         val audioTranscriber = WhisperCppAudioTranscriber(
             models = { modelController.state.value.models },
         )
@@ -86,6 +93,7 @@ class MainActivity : ComponentActivity() {
                         chatMediaRepository = chatMediaRepository,
                         chatMediaServices = chatMediaServices,
                         chatPreferences = chatPreferences,
+                        instructionPreferences = instructionPreferences,
                         audioTranscriber = audioTranscriber,
                         chatTextToSpeechServiceFactory = { AndroidChatTextToSpeechService(this) },
                         chatLanguageIdentifierFactory = { MlKitChatLanguageIdentifier() },

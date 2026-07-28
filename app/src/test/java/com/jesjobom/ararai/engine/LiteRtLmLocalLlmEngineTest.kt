@@ -12,6 +12,7 @@ import com.jesjobom.ararai.model.ModelRuntime
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -280,6 +281,10 @@ class LiteRtLmLocalLlmEngineTest {
         )
         assertEquals(
             false,
+            canReuseLiteRtLmConversation(key, transcript, key.copy(systemInstruction = "Changed"), transcript),
+        )
+        assertEquals(
+            false,
             canReuseLiteRtLmConversation(key, transcript, key, transcript.dropLast(1)),
         )
     }
@@ -437,6 +442,25 @@ class LiteRtLmLocalLlmEngineTest {
 
         assertEquals(1, resource.cancelCalls)
         assertEquals(1, resource.closeCalls)
+    }
+
+    @Test
+    fun `deferred cleanup never executes while requested from terminal callback`() = runTest {
+        val cleanup = DeferredCleanup()
+        var callbackActive = true
+        var cleanupCalls = 0
+
+        cleanup.request {
+            assertEquals(false, callbackActive)
+            cleanupCalls += 1
+        }
+
+        assertEquals(0, cleanupCalls)
+        callbackActive = false
+        val cleanupJob = launch { cleanup.runAfterCallbackBoundary() }
+        cleanupJob.join()
+
+        assertEquals(1, cleanupCalls)
     }
 
     @Test

@@ -21,6 +21,22 @@ class ApplicationConfigurationTest {
     }
 
     @Test
+    fun `tool calling diagnostic uses a private disposable process`() {
+        val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(sourceManifest())
+        val activities = document.getElementsByTagName("activity")
+        val diagnosticActivity =
+            (0 until activities.length)
+                .map { activities.item(it) as org.w3c.dom.Element }
+                .first {
+                    it.getAttribute("android:name") ==
+                        ".benchmark.ToolCallingDiagnosticActivity"
+                }
+
+        assertEquals("false", diagnosticActivity.getAttribute("android:exported"))
+        assertEquals(":tool_calling_diagnostic", diagnosticActivity.getAttribute("android:process"))
+    }
+
+    @Test
     fun `model download service is a non-exported foreground data sync service`() {
         val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(sourceManifest())
         val services = document.getElementsByTagName("service")

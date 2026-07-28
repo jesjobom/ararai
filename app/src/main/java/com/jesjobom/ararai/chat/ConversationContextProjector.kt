@@ -12,6 +12,7 @@ class ConversationContextProjector(
         history: List<StoredChatMessage>,
         current: MessageContent,
         inferenceConfig: InferenceConfig,
+        effectiveSystemPrompt: String = systemPrompt,
     ): ProjectedConversationContext {
         val reconstructibleHistory =
             history
@@ -29,7 +30,7 @@ class ConversationContextProjector(
             }
         val messages =
             promptContextBuilder.build(
-                systemPrompt = systemPrompt,
+                systemPrompt = effectiveSystemPrompt,
                 history = reconstructibleHistory,
                 userPrompt = userPrompt,
                 inferenceConfig = inferenceConfig,

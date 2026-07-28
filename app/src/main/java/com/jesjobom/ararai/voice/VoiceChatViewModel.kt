@@ -46,6 +46,7 @@ import java.io.File
 internal class VoiceChatViewModel(
     private val engine: LocalLlmEngine,
     private val systemPrompt: String,
+    private val systemInstructionProvider: () -> String = { systemPrompt },
     private val preferences: VoiceChatPreferences,
     private val captureFactory: (VoiceChatSettings) -> VoiceTurnCapture,
     speechQueueFactory: ((IntRange) -> Unit, (IntRange) -> Unit, () -> Unit, (String) -> Unit) -> VoiceSpeechQueue,
@@ -276,12 +277,18 @@ internal class VoiceChatViewModel(
                 maybeTitleConversation(sessionId, userMessage.id, effectiveContent)
                 val projected =
                     if (activeModel.inputCapabilities.audio) {
-                        conversationCoordinator.project(history, effectiveContent, activeInference)
+                        conversationCoordinator.project(
+                            history,
+                            effectiveContent,
+                            activeInference,
+                            systemInstructionProvider(),
+                        )
                     } else {
                         conversationCoordinator.project(
                             history,
                             MessageContent.TextPrompt(effectiveContent.transcript.orEmpty()),
                             activeInference,
+                            systemInstructionProvider(),
                         )
                     }
                 val loadStartedAt = System.nanoTime()
