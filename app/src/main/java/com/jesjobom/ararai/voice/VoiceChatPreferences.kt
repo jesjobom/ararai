@@ -29,6 +29,7 @@ class SharedPreferencesVoiceChatPreferences(context: Context) : VoiceChatPrefere
     override fun update(settings: VoiceChatSettings) {
         val valid = settings.validated()
         preferences.edit()
+            .putBoolean("reasoning_enabled", valid.reasoningEnabled)
             .putInt("pause_millis", valid.pauseMillis)
             .putInt("minimum_words", valid.minimumWords)
             .putFloat("speech_rate_multiplier", valid.speechRateMultiplier)
@@ -45,6 +46,7 @@ class SharedPreferencesVoiceChatPreferences(context: Context) : VoiceChatPrefere
     }
 
     private fun read() = VoiceChatSettings(
+        reasoningEnabled = preferences.getBoolean("reasoning_enabled", false),
         pauseMillis = preferences.getInt("pause_millis", VoiceChatSettings.DEFAULT_PAUSE_MILLIS),
         minimumWords = preferences.getInt("minimum_words", VoiceChatSettings.DEFAULT_MINIMUM_WORDS),
         speechRateMultiplier = readSpeechRate(),

@@ -3,6 +3,8 @@ package com.jesjobom.ararai.engine
 import com.jesjobom.ararai.chat.AudioPrompt
 import com.jesjobom.ararai.chat.ImageAttachment
 import com.jesjobom.ararai.chat.MessageContent
+import com.jesjobom.ararai.knowledge.KnowledgeSource
+import com.jesjobom.ararai.knowledge.ToolFailureReason
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import kotlinx.coroutines.flow.Flow
@@ -37,6 +39,7 @@ data class PromptRequest(
     val chatMessages: List<PromptChatMessage> = defaultChatMessages(content),
     val reasoningEnabled: Boolean = false,
     val chatSessionId: String? = null,
+    val advertisedToolNames: Set<String> = emptySet(),
 ) {
     constructor(prompt: String) : this(MessageContent.TextPrompt(prompt), userChatMessages(prompt))
 
@@ -114,6 +117,16 @@ sealed interface GenerationEvent {
 
     data class Failed(
         val message: String,
+    ) : GenerationEvent
+
+    data class KnowledgeToolStarted(
+        val toolName: String,
+    ) : GenerationEvent
+
+    data class KnowledgeToolFinished(
+        val toolName: String,
+        val sources: List<KnowledgeSource> = emptyList(),
+        val failureReason: ToolFailureReason? = null,
     ) : GenerationEvent
 
     data object Completed : GenerationEvent

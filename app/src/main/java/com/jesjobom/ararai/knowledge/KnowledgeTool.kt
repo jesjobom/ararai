@@ -28,6 +28,7 @@ enum class ToolFailureReason {
     InvalidArguments,
     NoResults,
     Unavailable,
+    MalformedResponse,
     TimedOut,
     Cancelled,
 }

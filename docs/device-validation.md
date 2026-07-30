@@ -30,34 +30,15 @@ downloading a production model.
 ## LiteRT-LM
 
 - Download and integrity-check each candidate LiteRT-LM model used by the release.
-- For Gemma tool-calling candidates, open the model's **Diagnostics** screen and
-  run one isolated **Structured tool calling** case with one repetition. Start
-  with `english-search` while capturing Logcat. The harness uses an offline
-  deterministic `wikipedia_search` implementation; it must not make network
-  requests.
-- Before a characterization run, capture a complete terminal log:
-  `adb logcat -c`, then
-  `adb logcat -b all -v threadtime > ararai-tool-calling.log`.
-  Reproduce the issue, wait for the app to finish or exit, stop capture with
-  Ctrl+C, and inspect before sharing. Useful markers include
-  `ArarAI.ToolCalling`, `ArarAI.LiteRtLm`, `AndroidRuntime`, `libc`,
-  `DEBUG`, `FATAL`, `SIGSEGV`, `ANR`, and `lowmemorykiller`.
-- Each case runs in a dedicated `:tool_calling_diagnostic` process. After
-  saving or sharing the report, use **Close and release process** before
-  selecting another case. The process is killed intentionally so native/GPU
-  allocations are released even when `Conversation.close()` or engine unload
-  does not return. Treat `onDone`, tool execution, conversation cleanup, and
-  engine unload as separate diagnostic phases.
-- Share and retain the generated characterization report. Require all cases to
-  pass: direct answer without a call, English and Portuguese structured calls,
-  controlled tool failure, single-call behavior, protocol-leak prevention, and
-  cancellation. Successful tool cases use distinctive factual evidence in the
-  deterministic extract; the visible answer must incorporate that evidence but
-  must not expose the internal result ID or JSON protocol. The report evaluates
-  structured behavior and native conversation cleanup separately.
-- Run the same isolated cases independently for E2B and E4B. Record each bundle hash,
-  device/build details, and report verdict. Do not add tool capability metadata
-  to a catalog entry solely because another bundle in the same family passed.
+- For a quick provider check, open **Instructions and tools**, select the
+  **Tools** tab, and run the Wikipedia smoke test. It calls the provider
+  directly with a fixed query and does not load or prompt the model.
+- Validate model-driven tool selection through normal Chat and Voice Chat.
+  Confirm English-first search, fallback to the question language, controlled
+  failure, the three-call ceiling, and absence of visible protocol content.
+- Test E2B and E4B independently and record each bundle hash plus device/build
+  details. Do not add tool capability metadata to a catalog entry solely
+  because another bundle in the same family passed.
 - Run text, image, audio, and reasoning cases only where the model declares support.
 - Confirm the reported acceleration/backend and capture TTFT/decode metrics.
 - Cancel during active generation, run again, switch Gemma variants, and unload.
@@ -85,8 +66,30 @@ downloading a production model.
   segments remain ordered, Stop flushes speech, and no callback restarts work.
 - After completion, failure, Stop, activity destruction, and forced process death,
   verify Voice Chat WAVs are absent after the next launch and Chat media remains.
-- Confirm Voice Chat creates no session/history, does not carry prior turns into
-  a new request, and clears in-memory diagnostics when its owner is destroyed.
+- Confirm Voice Chat uses the selected persisted session shared with normal
+  Chat, carries bounded reconstructible history across modes, and clears only
+  transient diagnostics when its owner is destroyed.
+
+## Wikipedia skill
+
+- Test both validated Gemma 4 E2B and E4B bundles with Wikipedia disabled.
+  Open Chat, Voice Chat, settings, and existing history; confirm there is no
+  research indicator or Wikipedia request.
+- Enable Wikipedia and submit a direct non-research prompt. Confirm the model
+  answers without a request or source links.
+- Ask explicitly for Wikipedia information in English and Portuguese. Confirm
+  the transient research indicator, one request, a final answer, and at most
+  three official clickable source links.
+- While research is active, confirm Voice Chat microphone capture remains
+  inactive and no JSON, extract, function name, or tool protocol is spoken.
+- Open the Voice-created answer in normal Chat, restart the process, and verify
+  that source links remain attached to the answer.
+- Disable networking and repeat an eligible request. Then test cancellation
+  during research. Confirm controlled recovery, no retry, no partial source
+  metadata, and a usable next turn.
+- Switch Wikipedia off, change between E2B/E4B and an unsupported model, edit
+  the Chat and Voice instructions, and switch modes. Confirm the retained
+  native conversation is recreated only when compatibility changes.
 
 ## Media, permissions, storage, and privacy
 

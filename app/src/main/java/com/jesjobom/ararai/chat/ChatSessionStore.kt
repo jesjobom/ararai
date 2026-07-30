@@ -545,32 +545,7 @@ private object MessageContentCodec {
         is MessageContent.TextPrompt ->
             Encoded(
                 kind = "text",
-                payload =
-                buildString {
-                    appendLine(content.text.encodeField())
-                    if (content.reasoningText.isNotBlank()) {
-                        append("reasoning")
-                        append('\t')
-                        appendLine(content.reasoningText.encodeField())
-                    }
-                    content.imageAttachments.forEach { image ->
-                        append("image")
-                        append('\t')
-                        append(image.uri.encodeField())
-                        append('\t')
-                        append(image.mimeType.encodeField())
-                        append('\t')
-                        append((image.displayName ?: "").encodeField())
-                        append('\t')
-                        append(
-                            image.byteSize
-                                ?.toString()
-                                .orEmpty()
-                                .encodeField(),
-                        )
-                        appendLine()
-                    }
-                },
+                payload = encodeTextPrompt(content),
             )
         is MessageContent.AudioPromptContent ->
             Encoded(
@@ -626,34 +601,74 @@ private object MessageContentCodec {
                     transcriptionIncompleteReason = fields.getOrNull(11)?.takeIf { it.isNotBlank() },
                 )
             } ?: MessageContent.TextPrompt(legacyText)
-        else -> {
-            if (payload == null) return MessageContent.TextPrompt(legacyText)
-            val lines = payload.lineSequence().toList()
-            val text = lines.firstOrNull()?.decodeField() ?: legacyText
-            val reasoningText =
-                lines
-                    .drop(1)
-                    .firstNotNullOfOrNull { line ->
-                        val fields = line.split('\t')
-                        if (fields.firstOrNull() == "reasoning") {
-                            fields.getOrNull(1)?.decodeField()
-                        } else {
-                            null
-                        }
-                    }.orEmpty()
-            val images =
-                lines.drop(1).mapNotNull { line ->
-                    val fields = line.split('\t')
-                    if (fields.firstOrNull() != "image") return@mapNotNull null
-                    ImageAttachment(
-                        uri = fields.getOrElse(1) { "" }.decodeField(),
-                        mimeType = fields.getOrElse(2) { "image/*" }.decodeField(),
-                        displayName = fields.getOrNull(3)?.decodeField()?.takeIf { it.isNotBlank() },
-                        byteSize = fields.getOrNull(4)?.decodeField()?.toLongOrNull(),
-                    )
-                }
-            MessageContent.TextPrompt(text, images, reasoningText)
+        else -> decodeTextPrompt(payload, legacyText)
+    }
+
+    private fun encodeTextPrompt(content: MessageContent.TextPrompt): String = buildString {
+        appendLine(content.text.encodeField())
+        if (content.reasoningText.isNotBlank()) {
+            append("reasoning\t")
+            appendLine(content.reasoningText.encodeField())
         }
+        content.imageAttachments.forEach { image ->
+            append("image\t")
+            append(
+                listOf(image.uri, image.mimeType, image.displayName.orEmpty(), image.byteSize?.toString().orEmpty())
+                    .joinToString("\t") { it.encodeField() },
+            )
+            appendLine()
+        }
+        content.sources.forEach { source ->
+            append("source\t")
+            append(
+                listOf(
+                    source.provider,
+                    source.title,
+                    source.canonicalUrl,
+                    source.language,
+                    source.retrievedAtMillis.toString(),
+                ).joinToString("\t") { it.encodeField() },
+            )
+            appendLine()
+        }
+    }
+
+    private fun decodeTextPrompt(
+        payload: String?,
+        legacyText: String,
+    ): MessageContent.TextPrompt {
+        if (payload == null) return MessageContent.TextPrompt(legacyText)
+        val lines = payload.lineSequence().toList()
+        val text = lines.firstOrNull()?.decodeField() ?: legacyText
+        val reasoningText =
+            lines.drop(1).firstNotNullOfOrNull { line ->
+                val fields = line.split('\t')
+                fields.getOrNull(1)?.decodeField().takeIf { fields.firstOrNull() == "reasoning" }
+            }.orEmpty()
+        val images =
+            lines.drop(1).mapNotNull { line ->
+                val fields = line.split('\t')
+                if (fields.firstOrNull() != "image") return@mapNotNull null
+                ImageAttachment(
+                    uri = fields.getOrElse(1) { "" }.decodeField(),
+                    mimeType = fields.getOrElse(2) { "image/*" }.decodeField(),
+                    displayName = fields.getOrNull(3)?.decodeField()?.takeIf { it.isNotBlank() },
+                    byteSize = fields.getOrNull(4)?.decodeField()?.toLongOrNull(),
+                )
+            }
+        val sources =
+            lines.drop(1).mapNotNull { line ->
+                val fields = line.split('\t')
+                if (fields.firstOrNull() != "source") return@mapNotNull null
+                com.jesjobom.ararai.knowledge.KnowledgeSource(
+                    provider = fields.getOrElse(1) { "" }.decodeField(),
+                    title = fields.getOrElse(2) { "" }.decodeField(),
+                    canonicalUrl = fields.getOrElse(3) { "" }.decodeField(),
+                    language = fields.getOrElse(4) { "" }.decodeField(),
+                    retrievedAtMillis = fields.getOrNull(5)?.decodeField()?.toLongOrNull() ?: 0L,
+                )
+            }
+        return MessageContent.TextPrompt(text, images, reasoningText, sources)
     }
 
     private fun String.encodeField(): String = java.util.Base64

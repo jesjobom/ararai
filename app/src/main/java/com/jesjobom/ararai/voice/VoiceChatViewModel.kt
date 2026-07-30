@@ -23,6 +23,7 @@ import com.jesjobom.ararai.chat.ChatSessionUiState
 import com.jesjobom.ararai.chat.ConversationContextProjector
 import com.jesjobom.ararai.chat.ConversationCoordinator
 import com.jesjobom.ararai.chat.ConversationSelection
+import com.jesjobom.ararai.chat.ConversationTurnSettings
 import com.jesjobom.ararai.chat.InMemoryChatSessionStore
 import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.chat.NoOpChatMediaRepository
@@ -46,7 +47,9 @@ import java.io.File
 internal class VoiceChatViewModel(
     private val engine: LocalLlmEngine,
     private val systemPrompt: String,
-    private val systemInstructionProvider: () -> String = { systemPrompt },
+    private val conversationTurnSettingsProvider: (LocalModel?) -> ConversationTurnSettings = {
+        ConversationTurnSettings(systemPrompt)
+    },
     private val preferences: VoiceChatPreferences,
     private val captureFactory: (VoiceChatSettings) -> VoiceTurnCapture,
     speechQueueFactory: ((IntRange) -> Unit, (IntRange) -> Unit, () -> Unit, (String) -> Unit) -> VoiceSpeechQueue,
@@ -94,6 +97,7 @@ internal class VoiceChatViewModel(
                 it.copy(
                     modelAvailable = true,
                     modelSupportsAudio = startup.model.inputCapabilities.audio,
+                    canEnableReasoning = startup.model.reasoningCapabilities.request,
                     transcriptionAvailable = audioTranscriber.isAvailable,
                     isModelLoaded = it.isModelLoaded && !modelChanged,
                 )
@@ -106,6 +110,7 @@ internal class VoiceChatViewModel(
                 it.copy(
                     modelAvailable = false,
                     modelSupportsAudio = false,
+                    canEnableReasoning = false,
                     transcriptionAvailable = audioTranscriber.isAvailable,
                     isLoadingModel = false,
                     isModelLoaded = false,
@@ -241,7 +246,14 @@ internal class VoiceChatViewModel(
         firstSpeechAt = null
         segmenter = VoiceResponseSegmenter(preferences.settings.value.minimumWords)
         mutableState.update {
-            it.copy(phase = VoiceChatPhase.Processing, responsePreview = "", spokenRange = null, readingAnchor = 0)
+            it.copy(
+                phase = VoiceChatPhase.Processing,
+                responsePreview = "",
+                spokenRange = null,
+                readingAnchor = 0,
+                researchInProgress = false,
+                researchSources = emptyList(),
+            )
         }
         val activeModel = model ?: return fail("Model unavailable")
         val activeInference = inference ?: return fail("Inference configuration unavailable")
@@ -275,20 +287,21 @@ internal class VoiceChatViewModel(
                             ?: return@launch fail("Audio transcription failed")
                     }
                 maybeTitleConversation(sessionId, userMessage.id, effectiveContent)
+                val turnSettings = conversationTurnSettingsProvider(activeModel)
                 val projected =
                     if (activeModel.inputCapabilities.audio) {
                         conversationCoordinator.project(
                             history,
                             effectiveContent,
                             activeInference,
-                            systemInstructionProvider(),
+                            turnSettings.systemInstruction,
                         )
                     } else {
                         conversationCoordinator.project(
                             history,
                             MessageContent.TextPrompt(effectiveContent.transcript.orEmpty()),
                             activeInference,
-                            systemInstructionProvider(),
+                            turnSettings.systemInstruction,
                         )
                     }
                 val loadStartedAt = System.nanoTime()
@@ -302,12 +315,18 @@ internal class VoiceChatViewModel(
                     "Voice turn runtime check: load=$loadMillis ms, audioPrepare=${prepareStartedAt.elapsedMillis()} ms",
                 )
                 val answer = StringBuilder()
+                val reasoning = StringBuilder()
+                var answerSources = emptyList<com.jesjobom.ararai.knowledge.KnowledgeSource>()
                 conversationCoordinator.generate(
                     engine,
                     PromptRequest(
                         content = projected.requestContent,
                         chatMessages = projected.messages,
+                        reasoningEnabled =
+                        mutableState.value.settings.reasoningEnabled &&
+                            activeModel.reasoningCapabilities.request,
                         chatSessionId = sessionId,
+                        advertisedToolNames = turnSettings.advertisedToolNames,
                     ),
                 ).collect { event ->
                     if (activeRun != runId) return@collect
@@ -322,12 +341,35 @@ internal class VoiceChatViewModel(
                             mutableState.update { it.copy(responsePreview = answer.toString()) }
                             segmenter.append(answer.toString()).forEach(speechQueue::enqueue)
                         }
-                        is GenerationEvent.ReasoningToken, is GenerationEvent.Metrics -> Unit
+                        is GenerationEvent.ReasoningToken -> reasoning.append(event.text)
+                        is GenerationEvent.Metrics -> Unit
+                        is GenerationEvent.KnowledgeToolStarted -> {
+                            answerSources = emptyList()
+                            mutableState.update {
+                                it.copy(
+                                    researchInProgress = true,
+                                    researchSources = emptyList(),
+                                )
+                            }
+                        }
+                        is GenerationEvent.KnowledgeToolFinished -> {
+                            answerSources = event.sources
+                            mutableState.update {
+                                it.copy(
+                                    researchInProgress = false,
+                                    researchSources = event.sources,
+                                )
+                            }
+                        }
                         is GenerationEvent.Failed -> fail(event.message)
                         GenerationEvent.Completed -> {
                             conversationCoordinator.appendAssistant(
                                 sessionId,
-                                MessageContent.TextPrompt(answer.toString()),
+                                MessageContent.TextPrompt(
+                                    text = answer.toString(),
+                                    reasoningText = reasoning.toString(),
+                                    sources = answerSources,
+                                ),
                             )
                             segmenter.complete(answer.toString()).forEach(speechQueue::enqueue)
                             speechQueue.markGenerationComplete()
@@ -457,7 +499,14 @@ internal class VoiceChatViewModel(
         speechQueue.stop()
         deleteCurrentAudio()
         mutableState.update {
-            it.copy(phase = VoiceChatPhase.Idle, responsePreview = "", spokenRange = null, readingAnchor = 0, error = null)
+            it.copy(
+                phase = VoiceChatPhase.Idle,
+                responsePreview = "",
+                spokenRange = null,
+                readingAnchor = 0,
+                researchInProgress = false,
+                error = null,
+            )
         }
     }
 
@@ -469,7 +518,13 @@ internal class VoiceChatViewModel(
         speechQueue.stop()
         recordDiagnostic("failed")
         deleteCurrentAudio()
-        mutableState.update { it.copy(phase = VoiceChatPhase.Error, error = message) }
+        mutableState.update {
+            it.copy(
+                phase = VoiceChatPhase.Error,
+                researchInProgress = false,
+                error = message,
+            )
+        }
     }
 
     fun dismissError() {

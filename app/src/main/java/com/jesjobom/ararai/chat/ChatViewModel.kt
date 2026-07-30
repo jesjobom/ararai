@@ -24,7 +24,9 @@ class ChatViewModel(
     initialModel: LocalModel?,
     inferenceConfig: InferenceConfig,
     private val systemPrompt: String = ModelCatalog.DEFAULT_SYSTEM_PROMPT,
-    private val systemInstructionProvider: () -> String = { systemPrompt },
+    private val conversationTurnSettingsProvider: (LocalModel?) -> ConversationTurnSettings = {
+        ConversationTurnSettings(systemPrompt)
+    },
     private val sessionStore: ChatSessionStore = InMemoryChatSessionStore(),
     private val mediaRepository: ChatMediaRepository = NoOpChatMediaRepository,
     promptContextBuilder: PromptContextBuilder = PromptContextBuilder(),
@@ -62,6 +64,7 @@ class ChatViewModel(
     private var assistantPersistenceJob: Job? = null
     private var assistantPresentationJob: Job? = null
     private var assistantBuffer: AssistantMessageBuffer? = null
+    private var pendingResearchSources = emptyList<com.jesjobom.ararai.knowledge.KnowledgeSource>()
     private val assistantBufferLock = Any()
     private val initialSession =
         conversationSelection.currentSessionId
@@ -180,6 +183,8 @@ class ChatViewModel(
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
+                researchInProgress = false,
+                researchSources = emptyList(),
                 error = null,
             )
         }
@@ -198,6 +203,8 @@ class ChatViewModel(
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
+                researchInProgress = false,
+                researchSources = emptyList(),
                 error = null,
             )
         }
@@ -273,6 +280,8 @@ class ChatViewModel(
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
+                researchInProgress = false,
+                researchSources = emptyList(),
                 error = null,
             )
         }
@@ -436,6 +445,8 @@ class ChatViewModel(
                 messages = sessionStore.getMessages(sessionId).toChatMessages(),
                 isLoadingModel = true,
                 isGenerating = true,
+                researchInProgress = false,
+                researchSources = emptyList(),
                 error = null,
             )
         }
@@ -455,6 +466,7 @@ class ChatViewModel(
                 }
 
                 try {
+                    val turnSettings = conversationTurnSettingsProvider(modelForRequest)
                     val effectiveContent =
                         if (submittedContent is MessageContent.AudioPromptContent) {
                             if (modelForRequest.inputCapabilities.audio) {
@@ -472,7 +484,7 @@ class ChatViewModel(
                             history = history,
                             current = effectiveContent,
                             inferenceConfig = inferenceForRequest,
-                            effectiveSystemPrompt = systemInstructionProvider(),
+                            effectiveSystemPrompt = turnSettings.systemInstruction,
                         )
                     val requestContent =
                         if (
@@ -495,30 +507,53 @@ class ChatViewModel(
                                 chatMessages = projected.messages,
                                 reasoningEnabled = current.reasoningEnabled && modelForRequest.reasoningCapabilities.request,
                                 chatSessionId = sessionId,
+                                advertisedToolNames = turnSettings.advertisedToolNames,
                             ),
                         ).collect { event ->
                             when (event) {
                                 is GenerationEvent.Token -> appendAssistantToken(event.text)
                                 is GenerationEvent.ReasoningToken -> appendAssistantReasoningToken(event.text)
                                 is GenerationEvent.Metrics -> Unit
+                                is GenerationEvent.KnowledgeToolStarted -> {
+                                    pendingResearchSources = emptyList()
+                                    _uiState.update {
+                                        it.copy(
+                                            researchInProgress = true,
+                                            researchSources = emptyList(),
+                                        )
+                                    }
+                                }
+                                is GenerationEvent.KnowledgeToolFinished -> {
+                                    pendingResearchSources = event.sources
+                                    _uiState.update {
+                                        it.copy(
+                                            researchInProgress = false,
+                                            researchSources = event.sources,
+                                        )
+                                    }
+                                }
                                 is GenerationEvent.Failed -> {
+                                    pendingResearchSources = emptyList()
                                     flushAssistantPresentation()
                                     flushAssistantMessage()
                                     _uiState.update {
                                         it.copy(
                                             isLoadingModel = false,
                                             isGenerating = false,
+                                            researchInProgress = false,
                                             error = event.message,
                                         )
                                     }
                                 }
                                 GenerationEvent.Completed -> {
+                                    attachSourcesToAssistant(pendingResearchSources)
                                     flushAssistantPresentation()
                                     flushAssistantMessage()
                                     _uiState.update {
                                         it.copy(
                                             isLoadingModel = false,
                                             isGenerating = false,
+                                            researchInProgress = false,
                                             prompt = "",
                                             imageAttachments = emptyList(),
                                             audioPrompt = null,
@@ -647,6 +682,8 @@ class ChatViewModel(
             it.copy(
                 isLoadingModel = false,
                 isGenerating = false,
+                researchInProgress = false,
+                researchSources = emptyList(),
             )
         }
     }
@@ -674,6 +711,8 @@ class ChatViewModel(
             it.copy(
                 isLoadingModel = false,
                 isGenerating = false,
+                researchInProgress = false,
+                researchSources = emptyList(),
                 error = null,
             )
         }
@@ -697,6 +736,11 @@ class ChatViewModel(
 
     private fun appendAssistantReasoningToken(token: String) {
         appendAssistantContent { it.reasoning.append(token) }
+    }
+
+    private fun attachSourcesToAssistant(sources: List<com.jesjobom.ararai.knowledge.KnowledgeSource>) {
+        if (sources.isEmpty()) return
+        appendAssistantContent { it.sources = sources }
     }
 
     private fun appendAssistantContent(update: (AssistantMessageBuffer) -> Unit) {
@@ -776,6 +820,7 @@ class ChatViewModel(
             assistantPersistenceJob = null
             assistantBuffer = null
             activeAssistantMessageId = null
+            pendingResearchSources = emptyList()
         }
     }
 
@@ -814,12 +859,14 @@ class ChatViewModel(
         val messageId: String,
         val text: StringBuilder = StringBuilder(),
         val reasoning: StringBuilder = StringBuilder(),
+        var sources: List<com.jesjobom.ararai.knowledge.KnowledgeSource> = emptyList(),
         var persistenceDirty: Boolean = false,
         var presentationDirty: Boolean = false,
     ) {
         fun snapshot(): MessageContent.TextPrompt = MessageContent.TextPrompt(
             text = text.toString(),
             reasoningText = reasoning.toString(),
+            sources = sources,
         )
     }
 

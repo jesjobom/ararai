@@ -38,6 +38,10 @@ backend, or external database.
   Jetpack Compose; model benchmarks are opened from downloaded model cards.
 - Persistent System, Light, and Dark appearance selection with Material dynamic
   colors on supported devices.
+- Optional Wikipedia knowledge retrieval for the validated Gemma 4 E2B and E4B
+  bundles in normal Chat and Voice Chat. The model selects structured calls
+  semantically; successful answers retain bounded canonical source links in the
+  shared local conversation.
 
 The checked-in catalog is authoritative for models the UI can manage. A feature
 being present in the UI does not prove that every model or device supports it;
@@ -129,6 +133,32 @@ device therefore does not restore conversations, media, models, or settings.
 Model downloads still require network access to their configured artifact URLs.
 Once a valid model is present, core inference and Chat do not call a hosted
 inference service.
+
+Wikipedia is an explicit opt-in exception to otherwise local Chat processing.
+Enable it under **Instructions and tools**. A request is sent only when the
+selected installed model advertises `wikipedia_search` and the model emits that
+structured call for the current turn. Enabling the option does not send data by
+itself and does not guarantee that every factual prompt will trigger research.
+
+Each eligible call sends only the model-selected query and `en` or `pt`
+language to the corresponding official MediaWiki HTTPS endpoint. ArarAI does
+not send the conversation history, system instruction, session identifier,
+audio, image, or local model data. The provider allows one call with no
+automatic retry per user turn, rejects redirects and non-Wikipedia URLs,
+applies a 12-second total deadline and bounded response/context limits, and
+returns at most three sources. Wikipedia content is external untrusted
+reference material and is not guaranteed to be current or complete.
+
+Completed assistant answers persist only bounded source metadata: provider,
+title, canonical URL, language, and retrieval time. Raw extracts, MediaWiki
+JSON, and LiteRT-LM tool protocol are not stored or rendered. Normal Chat shows
+the source links with the answer. Voice Chat keeps microphone capture inactive
+during research, speaks only the final answer, and leaves the same sources
+visible when the shared conversation is opened in normal Chat. Offline,
+timeout, cancellation, and provider failures remain controlled outcomes.
+
+The current networking and storage contract, automated evidence, and extension
+rules for future skills are documented in `docs/wikipedia-skill.md`.
 
 Chat audio transcription uses only the bundled whisper.cpp runtime with an
 explicitly downloaded local model; there is no hosted or Android

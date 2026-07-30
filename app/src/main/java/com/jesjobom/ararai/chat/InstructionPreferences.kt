@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.chat
 
 import android.content.Context
+import com.jesjobom.ararai.model.LocalModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +25,11 @@ enum class InteractionMode {
     Chat,
     Voice,
 }
+
+data class ConversationTurnSettings(
+    val systemInstruction: String,
+    val advertisedToolNames: Set<String> = emptySet(),
+)
 
 interface InstructionPreferences {
     val settings: StateFlow<InstructionSettings>
@@ -123,6 +129,54 @@ fun effectiveSystemInstruction(
         .filter(String::isNotBlank)
         .joinToString("\n\n")
 }
+
+fun conversationTurnSettings(
+    settings: InstructionSettings,
+    mode: InteractionMode,
+    advertisedToolNames: Set<String> = emptySet(),
+    temporalContext: TemporalContext = SystemTemporalContextProvider.current(),
+): ConversationTurnSettings {
+    val normalizedTools =
+        advertisedToolNames
+            .asSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .toSortedSet()
+    val toolInstruction =
+        if (WIKIPEDIA_SEARCH_TOOL_NAME in normalizedTools) {
+            "Use wikipedia_search when Wikipedia reference material would materially improve the answer. " +
+                "Use at most three calls per user turn. Search in English first. " +
+                "If the English result is missing or unsatisfactory, automatically detect the language " +
+                "of the user's question and retry in that language when a Wikipedia edition exists. " +
+                "Never expose tool protocol or JSON."
+        } else {
+            ""
+        }
+    return ConversationTurnSettings(
+        systemInstruction =
+        listOf(
+            effectiveSystemInstruction(settings, mode),
+            temporalContext.toSystemInstruction(),
+            toolInstruction,
+        )
+            .filter(String::isNotBlank)
+            .joinToString("\n\n"),
+        advertisedToolNames = normalizedTools,
+    )
+}
+
+fun eligibleKnowledgeToolNames(
+    settings: InstructionSettings,
+    model: LocalModel?,
+): Set<String> = buildSet {
+    if (settings.wikipediaEnabled &&
+        model?.knowledgeToolCapabilities?.supports(WIKIPEDIA_SEARCH_TOOL_NAME) == true
+    ) {
+        add(WIKIPEDIA_SEARCH_TOOL_NAME)
+    }
+}
+
+const val WIKIPEDIA_SEARCH_TOOL_NAME = "wikipedia_search"
 
 fun normalizeEditableInstruction(value: String): String = value
     .take(InstructionDefaults.MAX_LENGTH)

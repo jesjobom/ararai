@@ -5,8 +5,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -21,8 +24,13 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import com.jesjobom.ararai.chat.ChatViewModel
 import com.jesjobom.ararai.chat.InMemoryChatSessionStore
+import com.jesjobom.ararai.chat.InstructionDefaults
+import com.jesjobom.ararai.chat.InstructionSettings
+import com.jesjobom.ararai.chat.InteractionMode
+import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.chat.NoOpChatMediaRepository
 import com.jesjobom.ararai.engine.FakeLocalLlmEngine
+import com.jesjobom.ararai.knowledge.KnowledgeSource
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ManagedModelItem
@@ -45,6 +53,8 @@ import com.jesjobom.ararai.ui.ChatScreen
 import com.jesjobom.ararai.ui.ChatTextToSpeechListener
 import com.jesjobom.ararai.ui.ChatTextToSpeechService
 import com.jesjobom.ararai.ui.HomeScreen
+import com.jesjobom.ararai.ui.InstructionsAndToolsScreen
+import com.jesjobom.ararai.ui.MessageContentView
 import com.jesjobom.ararai.ui.ModelStatusScreen
 import com.jesjobom.ararai.ui.ModelStatusUiState
 import com.jesjobom.ararai.ui.SettingsScreen
@@ -58,6 +68,89 @@ import org.junit.Test
 class CriticalComposeJourneysTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun instructionsAndToolsSupportsEditingRestoreDisclosureAndCompatibility() {
+        var settings by mutableStateOf(InstructionSettings())
+        var compatible by mutableStateOf(true)
+        composeRule.setContent {
+            MaterialTheme {
+                InstructionsAndToolsScreen(
+                    settings = settings,
+                    wikipediaCompatible = compatible,
+                    onInstructionChange = { mode, value ->
+                        settings =
+                            when (mode) {
+                                InteractionMode.Chat -> settings.copy(chatInstruction = value)
+                                InteractionMode.Voice -> settings.copy(voiceInstruction = value)
+                            }
+                    },
+                    onRestoreDefault = { mode ->
+                        settings =
+                            when (mode) {
+                                InteractionMode.Chat -> settings.copy(chatInstruction = InstructionDefaults.CHAT)
+                                InteractionMode.Voice -> settings.copy(voiceInstruction = InstructionDefaults.VOICE)
+                            }
+                    },
+                    onWikipediaEnabledChange = { settings = settings.copy(wikipediaEnabled = it) },
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("chat-instruction").performTextClearance()
+        composeRule.onNodeWithTag("chat-instruction").performTextInput("Custom chat behavior")
+        composeRule.onNodeWithText("Custom chat behavior").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Restore default")[0].performClick()
+        composeRule.onNodeWithText(InstructionDefaults.CHAT).assertIsDisplayed()
+        composeRule.onNodeWithText("Tools").performClick()
+        composeRule.onNodeWithText(
+            "When enabled for a compatible model, eligible search queries and results use the external " +
+                "Wikipedia/MediaWiki service. Inference and conversation storage remain local.",
+        ).assertIsDisplayed()
+        composeRule.onNodeWithTag("wikipedia-enabled").assertIsOff().performClick().assertIsOn()
+        composeRule.onNodeWithTag("wikipedia-smoke-test").assertIsDisplayed()
+        composeRule.onNodeWithText("Available for the selected model.").assertIsDisplayed()
+
+        compatible = false
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText(
+            "Unavailable until the selected Gemma bundle passes tool-calling validation.",
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun assistantSourcesAreRenderedAsLinksWithoutToolProtocol() {
+        val content =
+            MessageContent.TextPrompt(
+                text = "Ada Lovelace was a computing pioneer.",
+                sources =
+                listOf(
+                    KnowledgeSource(
+                        provider = "Wikipedia",
+                        title = "Ada Lovelace",
+                        canonicalUrl = "https://en.wikipedia.org/wiki/Ada_Lovelace",
+                        language = "en",
+                        retrievedAtMillis = 1L,
+                    ),
+                ),
+            )
+
+        composeRule.setContent {
+            MaterialTheme {
+                MessageContentView(
+                    content = content,
+                    showReasoning = false,
+                    showAudioTranscriptions = false,
+                    mediaServices = fakeMediaServices(),
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Sources").assertIsDisplayed()
+        composeRule.onNodeWithText("Ada Lovelace · EN").assertIsDisplayed()
+        composeRule.onAllNodesWithText("wikipedia_search").assertCountEquals(0)
+    }
 
     @Test
     fun chatSubmitShowsGenerationControlAndStreamedResult() {
@@ -315,7 +408,7 @@ class CriticalComposeJourneysTest {
         composeRule.setContent {
             MaterialTheme {
                 VoiceChatScreen(
-                    state = VoiceChatUiState(),
+                    state = VoiceChatUiState(canEnableReasoning = true),
                     onEnter = {},
                     onStart = {},
                     onStop = {},
@@ -328,6 +421,7 @@ class CriticalComposeJourneysTest {
         }
 
         composeRule.onNodeWithContentDescription("Voice Chat settings").performClick()
+        composeRule.onNodeWithTag("voice-reasoning-switch").performClick()
         composeRule.onNodeWithTag("voice-speech-rate-slider")
             .performSemanticsAction(SemanticsActions.SetProgress) { setProgress -> setProgress(2.0f) }
         composeRule.onNodeWithText("Silero").performClick()
@@ -335,6 +429,7 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithText("Save").performClick()
 
         composeRule.runOnIdle {
+            assertEquals(true, savedSettings?.reasoningEnabled)
             assertEquals(2.0f, savedSettings?.speechRateMultiplier)
             assertEquals(VadProvider.WebRtc, savedSettings?.vadProvider)
         }

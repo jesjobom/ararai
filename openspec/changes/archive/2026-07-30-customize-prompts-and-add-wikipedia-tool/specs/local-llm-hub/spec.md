@@ -14,6 +14,18 @@ normal Chat or Voice Chat.
 - **AND** Voice Chat uses its checked-in default user instruction
 - **AND** app-owned invariant instructions remain present and non-editable.
 
+#### Scenario: Build prompt with configured system prompt
+
+- **GIVEN** the effective configured system instruction is present
+- **AND** a persisted conversation has previous eligible messages
+- **WHEN** either Chat screen submits a new turn that requires context
+  initialization
+- **THEN** generation receives the effective system instruction
+- **AND** recent eligible conversation history
+- **AND** the new user message
+- **AND** a compatible incremental native continuation does not prefill that
+  unchanged history again.
+
 #### Scenario: Build a normal-Chat prompt
 
 - **GIVEN** normal Chat has a persisted user instruction
@@ -31,6 +43,16 @@ normal Chat or Voice Chat.
 - **AND** the Voice-Chat user instruction
 - **AND** recent eligible canonical conversation history
 - **AND** the new user turn.
+
+#### Scenario: Add current temporal context to a conversation turn
+
+- **GIVEN** the device has a current local date and configured time zone
+- **WHEN** normal Chat or Voice Chat builds a generation request
+- **THEN** the effective system instruction contains the current local date,
+  time-zone identifier, and UTC offset
+- **AND** the temporal context is regenerated for that turn
+- **AND** it appears only once in the projected prompt
+- **AND** it is not persisted as canonical conversation history.
 
 #### Scenario: Restore an instruction default
 
@@ -140,10 +162,10 @@ reference content for final answer synthesis.
 
 #### Scenario: Bound repeated calls
 
-- **GIVEN** a turn already invoked Wikipedia once
+- **GIVEN** a turn already attempted Wikipedia three times
 - **WHEN** the model attempts another Wikipedia call in that turn
-- **THEN** the app rejects the repeated call with a controlled result
-- **AND** performs no second network request
+- **THEN** the app rejects the fourth call with a controlled result
+- **AND** performs no fourth network request
 - **AND** does not enter an automatic retry loop.
 
 #### Scenario: Recover from unavailable research
@@ -179,3 +201,15 @@ as conversation messages.
 - **AND** source metadata remains available for presentation
 - **AND** the app does not repeat the historical network request
 - **AND** does not require raw retrieved extracts as canonical history.
+
+### Requirement: Latest conversation position
+
+Normal Chat SHALL position persisted history at its newest message when the
+screen opens or the selected session changes.
+
+#### Scenario: Open or switch a conversation
+
+- **GIVEN** the selected conversation contains more messages than fit onscreen
+- **WHEN** the user opens normal Chat or selects another session
+- **THEN** the list positions itself at the end
+- **AND** the newest messages are visible without manual scrolling.

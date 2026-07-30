@@ -7,6 +7,16 @@ its Voice-Chat-specific effective instruction, keep microphone capture inactive
 during model processing, tool execution, and TTS playback, and resume the loop
 without a per-turn tool confirmation.
 
+#### Scenario: Start the voice loop
+
+- **GIVEN** voice input can be routed to the selected locally available model
+- **AND** Voice Chat is idle
+- **WHEN** the user activates the central control
+- **THEN** the app requests microphone permission if needed
+- **AND** starts app-owned audio capture after permission is granted
+- **AND** presents the listening state
+- **AND** changes the central control to a stop action.
+
 #### Scenario: Process one contextual turn
 
 - **GIVEN** a valid audio turn has completed
@@ -20,6 +30,21 @@ without a per-turn tool confirmation.
 - **AND** otherwise bounded persisted history initializes generation context
 - **AND** a successful assistant response is persisted in the same conversation.
 
+#### Scenario: Title the first voice turn
+
+- **GIVEN** the current conversation still has the default title
+- **WHEN** its first audio message receives a completed transcript
+- **THEN** the transcript supplies the automatic conversation title
+- **AND** asynchronous assistant persistence does not prevent that title update.
+
+#### Scenario: Preserve the spoken language
+
+- **GIVEN** local Whisper transcription is used for a Voice Chat turn
+- **WHEN** the user speaks a Whisper-supported language
+- **THEN** transcription uses automatic language detection
+- **AND** the transcript remains in the detected spoken language rather than
+  being forced to Portuguese.
+
 #### Scenario: Research during a voice turn
 
 - **GIVEN** Wikipedia is enabled and registered for the selected model
@@ -30,6 +55,14 @@ without a per-turn tool confirmation.
 - **AND** intermediate tool protocol and raw results are not spoken
 - **AND** the final synthesized response is queued for speech
 - **AND** validated sources remain available in the shared conversation.
+
+#### Scenario: Preserve voice reasoning for shared history
+
+- **GIVEN** Voice Chat reasoning is enabled for a capable model
+- **WHEN** the model emits reasoning and completes the assistant response
+- **THEN** Voice Chat does not render or speak the reasoning
+- **AND** persists it with the completed assistant message
+- **AND** normal Chat displays it when `Show reasoning` is enabled.
 
 #### Scenario: Recover the voice loop after research failure
 
@@ -51,3 +84,19 @@ without a per-turn tool confirmation.
   remain persisted
 - **AND** a fresh recording starts
 - **AND** Voice Chat returns to listening with accumulated conversation context.
+
+#### Scenario: Continue the same conversation in normal Chat
+
+- **GIVEN** Voice Chat committed one or more exchanges
+- **WHEN** the user opens normal Chat
+- **THEN** those exchanges appear in the current persisted conversation
+- **AND** the next normal Chat turn continues the same eligible context
+- **AND** a compatible live native session can be reused without resending its
+  retained transcript.
+
+#### Scenario: Continue a normal Chat conversation by voice
+
+- **GIVEN** normal Chat committed one or more exchanges
+- **WHEN** the user opens Voice Chat and submits a turn
+- **THEN** Voice Chat uses the same current persisted conversation
+- **AND** does not duplicate or resubmit the latest committed normal Chat turn.

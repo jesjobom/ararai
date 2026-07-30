@@ -4,10 +4,13 @@ import app.cash.turbine.test
 import com.jesjobom.ararai.chat.AudioPrompt
 import com.jesjobom.ararai.chat.ImageAttachment
 import com.jesjobom.ararai.chat.MessageContent
+import com.jesjobom.ararai.knowledge.KnowledgeSource
+import com.jesjobom.ararai.knowledge.KnowledgeToolExecutionEvent
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelAccelerationPolicy
 import com.jesjobom.ararai.model.ModelInputCapabilities
+import com.jesjobom.ararai.model.ModelKnowledgeToolCapabilities
 import com.jesjobom.ararai.model.ModelRuntime
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -96,6 +99,95 @@ class LiteRtLmLocalLlmEngineTest {
             assertEquals(GenerationEvent.Completed, awaitItem())
             awaitComplete()
         }
+    }
+
+    @Test
+    fun `forwards model knowledge capabilities and rejects unadvertised model tools`() = runTest {
+        val bridge = RecordingBridge()
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
+        val capableModel =
+            model.copy(
+                knowledgeToolCapabilities =
+                ModelKnowledgeToolCapabilities(setOf("wikipedia_search")),
+            )
+
+        engine.load(capableModel, config)
+
+        assertEquals(setOf("wikipedia_search"), bridge.loadedKnowledgeToolNames)
+        engine
+            .generate(
+                PromptRequest(
+                    content = MessageContent.TextPrompt("hello"),
+                    advertisedToolNames = setOf("calendar_lookup"),
+                ),
+            ).test {
+                assertEquals(
+                    GenerationEvent.Failed("Selected model does not support the requested knowledge tools"),
+                    awaitItem(),
+                )
+                awaitComplete()
+            }
+        assertEquals(null, bridge.session.lastRequest)
+    }
+
+    @Test
+    fun `translates knowledge tool progress and sources across engine boundary`() = runTest {
+        val source =
+            KnowledgeSource(
+                provider = "Wikipedia",
+                title = "Alan Turing",
+                canonicalUrl = "https://en.wikipedia.org/wiki/Alan_Turing",
+                language = "en",
+                retrievedAtMillis = 42L,
+            )
+        val bridge =
+            RecordingBridge(
+                chunks =
+                listOf(
+                    LiteRtLmChunk(knowledgeToolEvent = KnowledgeToolExecutionEvent.Started),
+                    LiteRtLmChunk(
+                        knowledgeToolEvent =
+                        KnowledgeToolExecutionEvent.Succeeded(listOf(source)),
+                    ),
+                    LiteRtLmChunk(text = "answer"),
+                ),
+            )
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
+        engine.load(
+            model.copy(
+                knowledgeToolCapabilities =
+                ModelKnowledgeToolCapabilities(setOf("wikipedia_search")),
+            ),
+            config,
+        )
+
+        engine
+            .generate(
+                PromptRequest(
+                    content = MessageContent.TextPrompt("Who was Alan Turing?"),
+                    advertisedToolNames = setOf("wikipedia_search"),
+                ),
+            ).test {
+                assertEquals(GenerationEvent.KnowledgeToolStarted("wikipedia_search"), awaitItem())
+                assertEquals(
+                    GenerationEvent.KnowledgeToolFinished(
+                        toolName = "wikipedia_search",
+                        sources = listOf(source),
+                    ),
+                    awaitItem(),
+                )
+                assertEquals(GenerationEvent.Token("answer"), awaitItem())
+                assertEquals(GenerationEvent.Completed, awaitItem())
+                awaitComplete()
+            }
     }
 
     @Test
@@ -285,6 +377,23 @@ class LiteRtLmLocalLlmEngineTest {
         )
         assertEquals(
             false,
+            canReuseLiteRtLmConversation(
+                key,
+                transcript,
+                key.copy(advertisedToolNames = setOf("wikipedia_search")),
+                transcript,
+            ),
+        )
+        assertTrue(
+            canReuseLiteRtLmConversation(
+                key.copy(advertisedToolNames = setOf("calendar_lookup", "wikipedia_search")),
+                transcript,
+                key.copy(advertisedToolNames = setOf("wikipedia_search", "calendar_lookup")),
+                transcript,
+            ),
+        )
+        assertEquals(
+            false,
             canReuseLiteRtLmConversation(key, transcript, key, transcript.dropLast(1)),
         )
     }
@@ -445,25 +554,6 @@ class LiteRtLmLocalLlmEngineTest {
     }
 
     @Test
-    fun `deferred cleanup never executes while requested from terminal callback`() = runTest {
-        val cleanup = DeferredCleanup()
-        var callbackActive = true
-        var cleanupCalls = 0
-
-        cleanup.request {
-            assertEquals(false, callbackActive)
-            cleanupCalls += 1
-        }
-
-        assertEquals(0, cleanupCalls)
-        callbackActive = false
-        val cleanupJob = launch { cleanup.runAfterCallbackBoundary() }
-        cleanupJob.join()
-
-        assertEquals(1, cleanupCalls)
-    }
-
-    @Test
     fun `replacing incompatible retained state closes the old resource without cancelling it`() {
         val old = RecordingResource()
         val replacement = RecordingResource()
@@ -503,6 +593,8 @@ class LiteRtLmLocalLlmEngineTest {
             private set
         var loadedInputCapabilities: ModelInputCapabilities? = null
             private set
+        var loadedKnowledgeToolNames: Set<String> = emptySet()
+            private set
         var loadedProfile: LiteRtLmWorkloadProfile? = null
             private set
         val loadedProfiles = mutableListOf<LiteRtLmWorkloadProfile>()
@@ -512,12 +604,14 @@ class LiteRtLmLocalLlmEngineTest {
             config: InferenceConfig,
             useGpu: Boolean,
             inputCapabilities: ModelInputCapabilities,
+            knowledgeToolNames: Set<String>,
             profile: LiteRtLmWorkloadProfile,
         ): LiteRtLmSession {
             loadedModelPath = modelPath
             loadedConfig = config
             loadedUseGpu = useGpu
             loadedInputCapabilities = inputCapabilities
+            loadedKnowledgeToolNames = knowledgeToolNames
             loadedProfile = profile
             loadedProfiles += profile
             return session

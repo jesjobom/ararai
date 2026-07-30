@@ -222,31 +222,6 @@ class BenchmarkViewModelTest {
     }
 
     @Test
-    fun `surfaces characterization load exception with diagnostic stack trace`() = runTest {
-        val engine = FailingCharacterizationEngine()
-        val viewModel =
-            BenchmarkViewModel(
-                engine = engine,
-                initialConfig = config,
-                initialState = ModelStartupState.Available(model, config.inference),
-                clock = SequenceClock(0L, 25_000_000L),
-                scope = this,
-            )
-
-        viewModel.runToolCallingCharacterization()
-        runCurrent()
-
-        val state = viewModel.uiState.value
-        val diagnostic = state.characterizationDiagnostic!!
-        assertEquals("Tool-calling characterization failed", state.status)
-        assertEquals("native initialization failed", state.error)
-        assertTrue(diagnostic.contains("phase=failed"))
-        assertTrue(diagnostic.contains("IllegalStateException"))
-        assertTrue(diagnostic.contains("native initialization failed"))
-        assertEquals(1, engine.unloadCalls)
-    }
-
-    @Test
     fun `cancel benchmark stops active run and unloads engine`() = runTest {
         val engine = SlowEngine()
         val viewModel =
@@ -322,31 +297,6 @@ class BenchmarkViewModelTest {
             emit(GenerationEvent.Token("partial"))
             kotlinx.coroutines.delay(Long.MAX_VALUE)
         }
-
-        override suspend fun unload() {
-            unloadCalls += 1
-        }
-    }
-
-    private class FailingCharacterizationEngine :
-        LocalLlmEngine,
-        ToolCallingCharacterizationEngine {
-        var unloadCalls = 0
-            private set
-
-        override suspend fun load(
-            model: LocalModel,
-            config: InferenceConfig,
-        ) {
-            error("native initialization failed")
-        }
-
-        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf()
-
-        override suspend fun runToolCallingCase(
-            case: ToolCallingCase,
-            onEvent: (ToolCallingRuntimeEvent) -> Unit,
-        ): ToolCallingObservation = error("unreachable")
 
         override suspend fun unload() {
             unloadCalls += 1

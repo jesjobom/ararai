@@ -15,11 +15,6 @@ data class BenchmarkUiState(
             "Selected model must be available locally"
         },
     val result: BenchmarkResult? = null,
-    val toolCallingSupported: Boolean = false,
-    val characterizationCaseId: String = "multi-turn-reuse",
-    val characterizationProgress: String? = null,
-    val characterizationReport: ToolCallingCharacterizationReport? = null,
-    val characterizationDiagnostic: String? = null,
     val error: String? = null,
 )
 

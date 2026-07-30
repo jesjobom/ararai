@@ -1,5 +1,7 @@
 package com.jesjobom.ararai.chat
 
+import com.jesjobom.ararai.knowledge.KnowledgeSource
+
 data class ChatUiState(
     val modelStatus: String,
     val prompt: String = "",
@@ -19,6 +21,8 @@ data class ChatUiState(
     val completedAssistantMessageId: String? = null,
     val isLoadingModel: Boolean = false,
     val isGenerating: Boolean = false,
+    val researchInProgress: Boolean = false,
+    val researchSources: List<KnowledgeSource> = emptyList(),
     val canRetryModelDownload: Boolean = false,
     val error: String? = null,
 ) {
@@ -71,6 +75,7 @@ sealed interface MessageContent {
         val text: String,
         val imageAttachments: List<ImageAttachment> = emptyList(),
         val reasoningText: String = "",
+        val sources: List<KnowledgeSource> = emptyList(),
     ) : MessageContent
 
     data class AudioPromptContent(

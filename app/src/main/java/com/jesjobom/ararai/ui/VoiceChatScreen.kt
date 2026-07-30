@@ -138,6 +138,12 @@ internal fun VoiceChatScreen(
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(phaseLabel(state.phase), style = MaterialTheme.typography.headlineSmall)
+                if (state.researchInProgress) {
+                    Text(
+                        "Researching Wikipedia…",
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 if (state.isLoadingModel) Text("Loading model…")
                 if (!state.modelSupportsAudio && !state.transcriptionAvailable) {
                     Text("Install a transcription model or select an audio-capable model.")
@@ -180,10 +186,15 @@ internal fun VoiceChatScreen(
         AlertDialog(onDismissRequest = onDismissError, confirmButton = { TextButton(onClick = onDismissError) { Text("Close") } }, title = { Text("Voice Chat stopped") }, text = { Text(state.error.orEmpty()) })
     }
     if (showSettings) {
-        VoiceChatSettingsDialog(state.settings, onDismiss = { showSettings = false }, onSave = {
-            onSettings(it)
-            showSettings = false
-        })
+        VoiceChatSettingsDialog(
+            initial = state.settings,
+            canEnableReasoning = state.canEnableReasoning,
+            onDismiss = { showSettings = false },
+            onSave = {
+                onSettings(it)
+                showSettings = false
+            },
+        )
     }
     if (showFullResponse) {
         ExpandedResponseDialog(
@@ -335,7 +346,12 @@ private fun IntRange.boundedBy(textLength: Int): IntRange? {
 }
 
 @Composable
-private fun VoiceChatSettingsDialog(initial: VoiceChatSettings, onDismiss: () -> Unit, onSave: (VoiceChatSettings) -> Unit) {
+private fun VoiceChatSettingsDialog(
+    initial: VoiceChatSettings,
+    canEnableReasoning: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (VoiceChatSettings) -> Unit,
+) {
     var value by remember(initial) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -345,6 +361,24 @@ private fun VoiceChatSettingsDialog(initial: VoiceChatSettings, onDismiss: () ->
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Enable reasoning")
+                        if (!canEnableReasoning) {
+                            Text(
+                                "Unavailable for this model",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = value.reasoningEnabled && canEnableReasoning,
+                        enabled = canEnableReasoning,
+                        onCheckedChange = { value = value.copy(reasoningEnabled = it) },
+                        modifier = Modifier.testTag("voice-reasoning-switch"),
+                    )
+                }
                 Text("Reading speed: ${value.speechRateMultiplier.asRateLabel()}")
                 Slider(
                     value = value.speechRateMultiplier,

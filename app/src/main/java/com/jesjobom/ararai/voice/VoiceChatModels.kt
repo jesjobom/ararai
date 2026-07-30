@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.voice
 
 import com.jesjobom.ararai.chat.ChatSessionUiState
+import com.jesjobom.ararai.knowledge.KnowledgeSource
 
 enum class VoiceChatPhase { Idle, Listening, Processing, Speaking, Error }
 
@@ -11,6 +12,7 @@ enum class VadMode { Normal, Aggressive, VeryAggressive }
 enum class VoiceCaptureSource { Microphone, VoiceRecognition, VoiceCommunication }
 
 data class VoiceChatSettings(
+    val reasoningEnabled: Boolean = false,
     val pauseMillis: Int = DEFAULT_PAUSE_MILLIS,
     val minimumWords: Int = DEFAULT_MINIMUM_WORDS,
     val speechRateMultiplier: Float = DEFAULT_SPEECH_RATE,
@@ -62,12 +64,15 @@ data class VoiceChatUiState(
     val phase: VoiceChatPhase = VoiceChatPhase.Idle,
     val modelAvailable: Boolean = false,
     val modelSupportsAudio: Boolean = false,
+    val canEnableReasoning: Boolean = false,
     val transcriptionAvailable: Boolean = false,
     val isLoadingModel: Boolean = false,
     val isModelLoaded: Boolean = false,
     val settings: VoiceChatSettings = VoiceChatSettings(),
     val diagnostics: List<VoiceDiagnostic> = emptyList(),
     val responsePreview: String = "",
+    val researchInProgress: Boolean = false,
+    val researchSources: List<KnowledgeSource> = emptyList(),
     val spokenRange: IntRange? = null,
     val readingAnchor: Int = 0,
     val error: String? = null,

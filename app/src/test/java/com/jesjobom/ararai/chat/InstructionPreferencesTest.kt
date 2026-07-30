@@ -1,11 +1,43 @@
 package com.jesjobom.ararai.chat
 
+import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.model.ModelKnowledgeToolCapabilities
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InstructionPreferencesTest {
+    @Test
+    fun `advertises Wikipedia only when preference and model capability are both enabled`() {
+        val supported =
+            LocalModel(
+                id = "supported",
+                name = "Supported",
+                filePath = "/tmp/model",
+                knowledgeToolCapabilities =
+                ModelKnowledgeToolCapabilities(setOf(WIKIPEDIA_SEARCH_TOOL_NAME)),
+            )
+        val unsupported = supported.copy(knowledgeToolCapabilities = ModelKnowledgeToolCapabilities())
+
+        assertEquals(
+            setOf(WIKIPEDIA_SEARCH_TOOL_NAME),
+            eligibleKnowledgeToolNames(InstructionSettings(wikipediaEnabled = true), supported),
+        )
+        assertEquals(
+            emptySet<String>(),
+            eligibleKnowledgeToolNames(InstructionSettings(wikipediaEnabled = false), supported),
+        )
+        assertEquals(
+            emptySet<String>(),
+            eligibleKnowledgeToolNames(InstructionSettings(wikipediaEnabled = true), unsupported),
+        )
+        assertEquals(
+            emptySet<String>(),
+            eligibleKnowledgeToolNames(InstructionSettings(wikipediaEnabled = true), null),
+        )
+    }
+
     @Test
     fun `uses independent checked in defaults`() {
         val preferences = InMemoryInstructionPreferences()
@@ -35,6 +67,54 @@ class InstructionPreferencesTest {
 
         assertEquals(InstructionDefaults.APP_INVARIANTS, effective)
         assertTrue(effective.contains("untrusted"))
+    }
+
+    @Test
+    fun `turn settings select independent Chat and Voice instructions`() {
+        val settings =
+            InstructionSettings(
+                chatInstruction = "Detailed written answer.",
+                voiceInstruction = "Brief spoken answer.",
+            )
+
+        val temporalContext = TemporalContext("2026-07-29", "America/Toronto", "-04:00")
+        val chat = conversationTurnSettings(settings, InteractionMode.Chat, temporalContext = temporalContext)
+        val voice = conversationTurnSettings(settings, InteractionMode.Voice, temporalContext = temporalContext)
+
+        assertTrue(chat.systemInstruction.contains("Detailed written answer."))
+        assertTrue(voice.systemInstruction.contains("Brief spoken answer."))
+        assertTrue(chat.systemInstruction.startsWith(InstructionDefaults.APP_INVARIANTS))
+        assertTrue(voice.systemInstruction.startsWith(InstructionDefaults.APP_INVARIANTS))
+        assertTrue(chat.systemInstruction.contains("Current date: 2026-07-29"))
+        assertTrue(voice.systemInstruction.contains("Timezone: America/Toronto (UTC-04:00)"))
+    }
+
+    @Test
+    fun `turn settings normalize an extensible advertised skill set`() {
+        val turn =
+            conversationTurnSettings(
+                settings = InstructionSettings(),
+                mode = InteractionMode.Chat,
+                advertisedToolNames = setOf(" wikipedia_search ", "", "calendar_lookup"),
+            )
+
+        assertEquals(setOf("calendar_lookup", "wikipedia_search"), turn.advertisedToolNames)
+        assertTrue(turn.systemInstruction.contains("Use wikipedia_search"))
+        assertTrue(turn.systemInstruction.contains("at most three calls"))
+        assertTrue(turn.systemInstruction.contains("Search in English first"))
+        assertTrue(turn.systemInstruction.contains("detect the language"))
+    }
+
+    @Test
+    fun `does not add Wikipedia instruction when tool is not advertised`() {
+        val turn =
+            conversationTurnSettings(
+                settings = InstructionSettings(wikipediaEnabled = true),
+                mode = InteractionMode.Chat,
+                advertisedToolNames = emptySet(),
+            )
+
+        assertFalse(turn.systemInstruction.contains("wikipedia_search"))
     }
 
     @Test

@@ -71,6 +71,7 @@ internal fun ChatScreen(
     var followLatestMessages by remember { mutableStateOf(true) }
     val currentSessionTitle = state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title ?: "Chat"
     val modelStatusText = when {
+        state.researchInProgress -> "Researching Wikipedia"
         state.isLoadingModel -> "Loading model"
         state.isGenerating -> "Generating"
         else -> state.modelStatus
@@ -97,7 +98,7 @@ internal fun ChatScreen(
             }
         }
         if (state.messages.isNotEmpty()) {
-            bottomRequester.bringIntoView()
+            messageListState.scrollToItem(state.messages.size)
         }
     }
 

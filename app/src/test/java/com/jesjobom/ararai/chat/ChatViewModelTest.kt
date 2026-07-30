@@ -7,6 +7,7 @@ import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptChatMessage
 import com.jesjobom.ararai.engine.PromptChatRole
 import com.jesjobom.ararai.engine.PromptRequest
+import com.jesjobom.ararai.knowledge.KnowledgeSource
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelInputCapabilities
@@ -500,6 +501,38 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `captures instruction and advertised skills from one turn snapshot`() = runTest {
+        val engine = CapturingEngine()
+        var snapshots = 0
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                conversationTurnSettingsProvider = {
+                    snapshots += 1
+                    ConversationTurnSettings(
+                        systemInstruction = "Turn-specific instruction.",
+                        advertisedToolNames = setOf("wikipedia_search", "calendar_lookup"),
+                    )
+                },
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("Current question")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        val request = engine.lastRequest!!
+        assertEquals(1, snapshots)
+        assertEquals(
+            PromptChatMessage(PromptChatRole.System, "Turn-specific instruction."),
+            request.chatMessages.first(),
+        )
+        assertEquals(setOf("wikipedia_search", "calendar_lookup"), request.advertisedToolNames)
+    }
+
+    @Test
     fun `submits text prompt with image attachment`() = runTest {
         val engine = CapturingEngine()
         val viewModel =
@@ -904,6 +937,47 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `captures completed knowledge sources without persisting tool protocol`() = runTest {
+        val source =
+            KnowledgeSource(
+                provider = "Wikipedia",
+                title = "Alan Turing",
+                canonicalUrl = "https://en.wikipedia.org/wiki/Alan_Turing",
+                language = "en",
+                retrievedAtMillis = 42L,
+            )
+        val store = CountingChatSessionStore()
+        val viewModel =
+            streamingViewModel(
+                engine =
+                EventStreamingEngine(
+                    listOf(
+                        GenerationEvent.KnowledgeToolStarted("wikipedia_search"),
+                        GenerationEvent.KnowledgeToolFinished(
+                            toolName = "wikipedia_search",
+                            sources = listOf(source),
+                        ),
+                        GenerationEvent.Token("Final answer"),
+                        GenerationEvent.Completed,
+                    ),
+                ),
+                store = store,
+            )
+
+        viewModel.onPromptChanged("research")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        assertFalse(viewModel.uiState.value.researchInProgress)
+        assertEquals(listOf(source), viewModel.uiState.value.researchSources)
+        assertEquals("Final answer", store.latestAssistantText())
+        assertEquals(
+            listOf(source),
+            store.latestAssistantContent().sources,
+        )
+    }
+
+    @Test
     fun `flushes pending assistant content on generation failure`() = runTest {
         val store = CountingChatSessionStore()
         val viewModel =
@@ -1077,6 +1151,19 @@ class ChatViewModelTest {
         override suspend fun unload() = Unit
     }
 
+    private class EventStreamingEngine(
+        private val events: List<GenerationEvent>,
+    ) : LocalLlmEngine {
+        override suspend fun load(
+            model: LocalModel,
+            config: InferenceConfig,
+        ) = Unit
+
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(*events.toTypedArray())
+
+        override suspend fun unload() = Unit
+    }
+
     private class CountingChatSessionStore(
         private val delegate: ChatSessionStore = InMemoryChatSessionStore(),
     ) : ChatSessionStore by delegate {
@@ -1091,9 +1178,14 @@ class ChatViewModelTest {
             delegate.updateMessage(messageId, content)
         }
 
-        fun latestAssistantText(): String {
+        fun latestAssistantText(): String = latestAssistantContent().text
+
+        fun latestAssistantContent(): MessageContent.TextPrompt {
             val session = delegate.listSessions().first()
-            return delegate.getMessages(session.id).last { it.role == ChatRole.Assistant }.text
+            return delegate
+                .getMessages(session.id)
+                .last { it.role == ChatRole.Assistant }
+                .content as MessageContent.TextPrompt
         }
     }
 

@@ -2,7 +2,6 @@ package com.jesjobom.ararai.ui
 
 import android.app.ActivityManager
 import android.content.Context
-import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -54,6 +52,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,9 +65,6 @@ import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.benchmark.BenchmarkResult
 import com.jesjobom.ararai.benchmark.BenchmarkUiState
 import com.jesjobom.ararai.benchmark.BenchmarkViewModel
-import com.jesjobom.ararai.benchmark.ToolCallingCharacterizationReport
-import com.jesjobom.ararai.benchmark.ToolCallingDiagnosticActivity
-import com.jesjobom.ararai.benchmark.defaultToolCallingCases
 import com.jesjobom.ararai.chat.AudioTranscriber
 import com.jesjobom.ararai.chat.ChatMediaRepository
 import com.jesjobom.ararai.chat.ChatPreferences
@@ -80,11 +76,14 @@ import com.jesjobom.ararai.chat.ConversationSelection
 import com.jesjobom.ararai.chat.InMemoryInstructionPreferences
 import com.jesjobom.ararai.chat.InstructionPreferences
 import com.jesjobom.ararai.chat.InteractionMode
-import com.jesjobom.ararai.chat.effectiveSystemInstruction
+import com.jesjobom.ararai.chat.conversationTurnSettings
+import com.jesjobom.ararai.chat.eligibleKnowledgeToolNames
 import com.jesjobom.ararai.engine.AndroidLiteRtLmBridge
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.LiteRtLmLocalLlmEngine
 import com.jesjobom.ararai.engine.LocalLlmEngine
+import com.jesjobom.ararai.knowledge.ToolSmokeTestResult
+import com.jesjobom.ararai.knowledge.WikipediaSmokeTest
 import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelCatalogController
 import com.jesjobom.ararai.model.ModelPurpose
@@ -98,6 +97,7 @@ import com.jesjobom.ararai.voice.AndroidVoiceTurnCapture
 import com.jesjobom.ararai.voice.SequentialVoiceSpeechQueue
 import com.jesjobom.ararai.voice.VoiceChatPreferences
 import com.jesjobom.ararai.voice.VoiceChatViewModel
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
 
@@ -113,7 +113,13 @@ private enum class AppDestination {
 }
 
 @Composable
-@Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod", "MaxLineLength")
+@Suppress(
+    "LongParameterList",
+    "LongMethod",
+    "CyclomaticComplexMethod",
+    "MaxLineLength",
+    "TooGenericExceptionCaught",
+)
 internal fun ArarAiApp(
     modelController: ModelCatalogController,
     chatSessionStore: ChatSessionStore,
@@ -145,6 +151,11 @@ internal fun ArarAiApp(
     val modelConfig = modelCatalogState.selectedConfig
     var destination by remember { mutableStateOf(AppDestination.Home) }
     var whisperBenchmarkModelId by remember { mutableStateOf<String?>(null) }
+    var toolSmokeRunning by remember { mutableStateOf(false) }
+    var toolSmokeResult by remember { mutableStateOf<ToolSmokeTestResult?>(null) }
+    var toolSmokeError by remember { mutableStateOf<String?>(null) }
+    val toolSmokeTest = remember { WikipediaSmokeTest() }
+    val coroutineScope = rememberCoroutineScope()
     val localLlmRuntime = remember(localLlmEngineFactory) {
         AppLocalLlmRuntime(localLlmEngineFactory)
     }
@@ -162,8 +173,13 @@ internal fun ArarAiApp(
             initialModel = availableState?.model,
             inferenceConfig = availableState?.inference ?: modelConfig.requireInference(),
             systemPrompt = systemPrompt,
-            systemInstructionProvider = {
-                effectiveSystemInstruction(instructionPreferences.settings.value, InteractionMode.Chat)
+            conversationTurnSettingsProvider = { activeModel ->
+                val settings = instructionPreferences.settings.value
+                conversationTurnSettings(
+                    settings,
+                    InteractionMode.Chat,
+                    eligibleKnowledgeToolNames(settings, activeModel),
+                )
             },
             sessionStore = chatSessionStore,
             mediaRepository = chatMediaRepository,
@@ -184,8 +200,13 @@ internal fun ArarAiApp(
         VoiceChatViewModel(
             engine = localLlmRuntime.engine,
             systemPrompt = systemPrompt,
-            systemInstructionProvider = {
-                effectiveSystemInstruction(instructionPreferences.settings.value, InteractionMode.Voice)
+            conversationTurnSettingsProvider = { activeModel ->
+                val settings = instructionPreferences.settings.value
+                conversationTurnSettings(
+                    settings,
+                    InteractionMode.Voice,
+                    eligibleKnowledgeToolNames(settings, activeModel),
+                )
             },
             preferences = voiceChatPreferences,
             captureFactory = { settings -> AndroidVoiceTurnCapture(appContext, voiceTemporaryDirectory, settings) },
@@ -267,6 +288,7 @@ internal fun ArarAiApp(
             },
             onOpenVoiceChat = { destination = AppDestination.VoiceChat },
             onOpenModelStatus = { destination = AppDestination.ModelStatus },
+            onOpenInstructionsTools = { destination = AppDestination.InstructionsTools },
             onOpenSettings = { destination = AppDestination.Settings },
         )
         AppDestination.Chat -> ChatScreen(
@@ -300,26 +322,6 @@ internal fun ArarAiApp(
         }
         AppDestination.Diagnostics -> BenchmarkScreen(
             viewModel = benchmarkViewModel,
-            onRunToolCalling = { caseId ->
-                val available = startupState as? ModelStartupState.Available
-                if (available != null) {
-                    appContext.startActivity(
-                        ToolCallingDiagnosticActivity.intent(
-                            context = appContext,
-                            model = available.model,
-                            inference =
-                            modelConfig.requireInference().copy(
-                                contextTokens = modelConfig.requireInference().contextTokens.coerceAtMost(2048),
-                                maxTokens = modelConfig.requireInference().maxTokens.coerceAtMost(128),
-                                temperature = 0.2f,
-                                topP = 0.9f,
-                            ),
-                            sha256 = modelConfig.sha256,
-                            caseId = caseId,
-                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }
-            },
             onBack = {
                 benchmarkViewModel.onLeavingBenchmark()
                 destination = AppDestination.ModelStatus
@@ -365,16 +367,38 @@ internal fun ArarAiApp(
         AppDestination.Settings -> SettingsScreen(
             themeMode = themeMode,
             onThemeModeChange = onThemeModeChange,
-            onOpenInstructionsTools = { destination = AppDestination.InstructionsTools },
             onBack = { returnHome() },
         )
         AppDestination.InstructionsTools -> InstructionsAndToolsScreen(
             settings = instructionSettings,
-            wikipediaCompatible = false,
+            wikipediaCompatible =
+            (startupState as? ModelStartupState.Available)
+                ?.model
+                ?.knowledgeToolCapabilities
+                ?.supports(com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME) == true,
             onInstructionChange = instructionPreferences::setInstruction,
             onRestoreDefault = instructionPreferences::restoreDefault,
             onWikipediaEnabledChange = instructionPreferences::setWikipediaEnabled,
-            onBack = { destination = AppDestination.Settings },
+            toolSmokeRunning = toolSmokeRunning,
+            toolSmokeResult = toolSmokeResult,
+            toolSmokeError = toolSmokeError,
+            onRunWikipediaSmoke = {
+                if (!toolSmokeRunning) {
+                    toolSmokeRunning = true
+                    toolSmokeResult = null
+                    toolSmokeError = null
+                    coroutineScope.launch {
+                        try {
+                            toolSmokeResult = toolSmokeTest.run()
+                        } catch (error: RuntimeException) {
+                            toolSmokeError = error.message ?: "Tool smoke test failed"
+                        } finally {
+                            toolSmokeRunning = false
+                        }
+                    }
+                }
+            },
+            onBack = { returnHome() },
         )
     }
 }
@@ -438,6 +462,7 @@ internal fun HomeScreen(
     onOpenChat: () -> Unit,
     onOpenVoiceChat: () -> Unit,
     onOpenModelStatus: () -> Unit,
+    onOpenInstructionsTools: () -> Unit = {},
     onOpenSettings: () -> Unit,
 ) {
     ArarAiScaffold(
@@ -490,6 +515,14 @@ internal fun HomeScreen(
             )
 
             StatusCard(
+                title = "Instructions and tools",
+                value = "Customize assistant behavior",
+                detail = "Manage Chat and Voice Chat instructions and optional tools.",
+                icon = Icons.Filled.Bolt,
+                onAction = onOpenInstructionsTools,
+            )
+
+            StatusCard(
                 title = "Settings",
                 value = "Appearance and preferences",
                 detail = "Choose how ArarAI looks and manage future application options.",
@@ -505,7 +538,6 @@ internal fun HomeScreen(
 internal fun SettingsScreen(
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
-    onOpenInstructionsTools: () -> Unit = {},
     onBack: () -> Unit,
 ) {
     ArarAiScaffold(title = "Settings", onBack = onBack) { modifier ->
@@ -515,15 +547,6 @@ internal fun SettingsScreen(
                 .padding(vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Card(onClick = onOpenInstructionsTools) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Instructions and tools", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Customize Chat and Voice Chat behavior and manage optional knowledge tools.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
             Text(
                 text = "Appearance",
                 style = MaterialTheme.typography.titleLarge,
@@ -587,60 +610,153 @@ internal fun InstructionsAndToolsScreen(
     onInstructionChange: (InteractionMode, String) -> Unit,
     onRestoreDefault: (InteractionMode) -> Unit,
     onWikipediaEnabledChange: (Boolean) -> Unit,
+    toolSmokeRunning: Boolean = false,
+    toolSmokeResult: ToolSmokeTestResult? = null,
+    toolSmokeError: String? = null,
+    onRunWikipediaSmoke: () -> Unit = {},
     onBack: () -> Unit,
 ) {
+    var selectedTab by remember { mutableStateOf(0) }
     ArarAiScaffold(title = "Instructions and tools", onBack = onBack) { modifier ->
         Column(
-            modifier = modifier.verticalScroll(rememberScrollState()).padding(vertical = 20.dp),
+            modifier = modifier.padding(vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                "These instructions customize behavior. ArarAI's application and safety rules remain active.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            InstructionEditor(
-                title = "Chat instruction",
-                value = settings.chatInstruction,
-                tag = "chat-instruction",
-                onValueChange = { onInstructionChange(InteractionMode.Chat, it) },
-                onRestore = { onRestoreDefault(InteractionMode.Chat) },
-            )
-            InstructionEditor(
-                title = "Voice Chat instruction",
-                value = settings.voiceInstruction,
-                tag = "voice-instruction",
-                onValueChange = { onInstructionChange(InteractionMode.Voice, it) },
-                onRestore = { onRestoreDefault(InteractionMode.Voice) },
-            )
-            Text("Wikipedia", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Text(
-                "When enabled for a compatible model, eligible search queries and results use the external " +
-                    "Wikipedia/MediaWiki service. Inference and conversation storage remain local.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Enable Wikipedia")
-                    Text(
-                        if (wikipediaCompatible) {
-                            "Available for the selected model."
-                        } else {
-                            "Unavailable until the selected Gemma bundle passes tool-calling validation."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+            PrimaryTabRow(selectedTabIndex = selectedTab) {
+                listOf("Instructions", "Tools").forEachIndexed { index, label ->
+                    Tab(
+                        selected = selectedTab == index,
+                        onClick = { selectedTab = index },
+                        text = { Text(label) },
+                        modifier = Modifier.testTag("instructions-tools-tab-${label.lowercase()}"),
                     )
                 }
-                Switch(
-                    checked = settings.wikipediaEnabled,
-                    onCheckedChange = onWikipediaEnabledChange,
-                    modifier = Modifier.testTag("wikipedia-enabled"),
+            }
+            Column(
+                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (selectedTab == 0) {
+                    InstructionsTab(
+                        settings = settings,
+                        onInstructionChange = onInstructionChange,
+                        onRestoreDefault = onRestoreDefault,
+                    )
+                } else {
+                    ToolsTab(
+                        settings = settings,
+                        wikipediaCompatible = wikipediaCompatible,
+                        onWikipediaEnabledChange = onWikipediaEnabledChange,
+                        smokeRunning = toolSmokeRunning,
+                        smokeResult = toolSmokeResult,
+                        smokeError = toolSmokeError,
+                        onRunSmoke = onRunWikipediaSmoke,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InstructionsTab(
+    settings: com.jesjobom.ararai.chat.InstructionSettings,
+    onInstructionChange: (InteractionMode, String) -> Unit,
+    onRestoreDefault: (InteractionMode) -> Unit,
+) {
+    Text(
+        "These instructions customize behavior. ArarAI's application and safety rules remain active.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    InstructionEditor(
+        title = "Chat instruction",
+        value = settings.chatInstruction,
+        tag = "chat-instruction",
+        onValueChange = { onInstructionChange(InteractionMode.Chat, it) },
+        onRestore = { onRestoreDefault(InteractionMode.Chat) },
+    )
+    InstructionEditor(
+        title = "Voice Chat instruction",
+        value = settings.voiceInstruction,
+        tag = "voice-instruction",
+        onValueChange = { onInstructionChange(InteractionMode.Voice, it) },
+        onRestore = { onRestoreDefault(InteractionMode.Voice) },
+    )
+}
+
+@Composable
+@Suppress("LongParameterList", "LongMethod")
+private fun ToolsTab(
+    settings: com.jesjobom.ararai.chat.InstructionSettings,
+    wikipediaCompatible: Boolean,
+    onWikipediaEnabledChange: (Boolean) -> Unit,
+    smokeRunning: Boolean,
+    smokeResult: ToolSmokeTestResult?,
+    smokeError: String?,
+    onRunSmoke: () -> Unit,
+) {
+    Text("Wikipedia", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    Text(
+        "When enabled for a compatible model, eligible search queries and results use the external " +
+            "Wikipedia/MediaWiki service. Inference and conversation storage remain local.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Enable Wikipedia")
+            Text(
+                if (wikipediaCompatible) {
+                    "Available for the selected model."
+                } else {
+                    "Unavailable for the selected model."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = settings.wikipediaEnabled,
+            onCheckedChange = onWikipediaEnabledChange,
+            modifier = Modifier.testTag("wikipedia-enabled"),
+        )
+    }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("Smoke test", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Calls the Wikipedia tool directly with a fixed query. The model is not loaded or prompted.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = onRunSmoke,
+                enabled = !smokeRunning,
+                modifier = Modifier.fillMaxWidth().testTag("wikipedia-smoke-test"),
+            ) {
+                Text(if (smokeRunning) "Running smoke test" else "Run smoke test")
+            }
+            if (smokeRunning) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            smokeResult?.let { result ->
+                Text(
+                    if (result.passed) "PASS — ${result.detail}" else "FAIL — ${result.detail}",
+                    color =
+                    if (result.passed) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
                 )
             }
+            smokeError?.let { Text("FAIL — $it", color = MaterialTheme.colorScheme.error) }
         }
     }
 }
@@ -766,11 +882,9 @@ private fun StatusCard(
 @Suppress("LongMethod")
 private fun BenchmarkScreen(
     viewModel: BenchmarkViewModel,
-    onRunToolCalling: (String) -> Unit,
     onBack: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsState()
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     ArarAiScaffold(
         title = "Diagnostics",
@@ -814,186 +928,8 @@ private fun BenchmarkScreen(
             state.error?.let { message ->
                 ErrorCard(message)
             }
-            state.characterizationDiagnostic?.let { diagnostic ->
-                CharacterizationDiagnosticCard(
-                    diagnostic = diagnostic,
-                    onShare = {
-                        context.startActivity(
-                            Intent.createChooser(
-                                Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_SUBJECT, "ArarAI characterization diagnostic")
-                                    putExtra(Intent.EXTRA_TEXT, diagnostic)
-                                },
-                                "Share diagnostic output",
-                            ),
-                        )
-                    },
-                )
-            }
-
             state.result?.let { result ->
                 BenchmarkResultCard(result)
-            }
-
-            if (state.toolCallingSupported) {
-                ToolCallingCharacterizationCard(
-                    state = state,
-                    onCaseChanged = viewModel::setCharacterizationCase,
-                    onRun = { onRunToolCalling(state.characterizationCaseId) },
-                )
-                state.characterizationReport?.let { report ->
-                    ToolCallingReportCard(
-                        report = report,
-                        onShare = {
-                            context.startActivity(
-                                Intent.createChooser(
-                                    Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_SUBJECT, "ArarAI tool-calling characterization")
-                                        putExtra(Intent.EXTRA_TEXT, report.asText())
-                                    },
-                                    "Share characterization report",
-                                ),
-                            )
-                        },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CharacterizationDiagnosticCard(
-    diagnostic: String,
-    onShare: () -> Unit,
-) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = "Diagnostic output",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            SelectionContainer {
-                Text(
-                    text = diagnostic,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 24,
-                )
-            }
-            OutlinedButton(onClick = onShare, modifier = Modifier.fillMaxWidth()) {
-                Text("Share diagnostic output")
-            }
-        }
-    }
-}
-
-@Composable
-private fun ToolCallingCharacterizationCard(
-    state: BenchmarkUiState,
-    onCaseChanged: (String) -> Unit,
-    onRun: () -> Unit,
-) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = "Structured tool calling",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text =
-                "Runs an isolated deterministic case with an offline wikipedia_search tool. " +
-                    "The multi-turn case reuses one Conversation for four turns and only cleans up at the end.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text("Case", style = MaterialTheme.typography.labelLarge)
-            defaultToolCallingCases().forEach { case ->
-                OutlinedButton(
-                    onClick = { onCaseChanged(case.id) },
-                    enabled = !state.isRunning,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    val label =
-                        if (state.characterizationCaseId == case.id) {
-                            "✓ ${case.id}"
-                        } else {
-                            case.id
-                        }
-                    Text(label)
-                }
-            }
-            Text(
-                text = "Runs once in a disposable diagnostic process.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(
-                onClick = onRun,
-                enabled = state.canRun && !state.isRunning,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null)
-                Text("Run selected tool-calling case", modifier = Modifier.padding(start = 8.dp))
-            }
-            state.characterizationProgress?.let {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                Text(it, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ToolCallingReportCard(
-    report: ToolCallingCharacterizationReport,
-    onShare: () -> Unit,
-) {
-    val colors =
-        if (report.passed) {
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            )
-        } else {
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            )
-        }
-    Card(colors = colors) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = if (report.passed) "Characterization passed" else "Characterization failed",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            LabeledValue("Cases", "${report.passedCount}/${report.results.size} passed")
-            LabeledValue("Model", report.modelId)
-            report.results.filterNot { it.passed }.take(3).forEach { result ->
-                Text(
-                    text = "${result.caseId} #${result.repetition}: ${result.reason}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            OutlinedButton(onClick = onShare, modifier = Modifier.fillMaxWidth()) {
-                Text("Share report")
             }
         }
     }

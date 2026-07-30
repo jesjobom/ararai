@@ -14,9 +14,10 @@ automatic execution.
 
 ## What Changes
 
-- Add an `Instructions and tools` destination where the user can maintain
-  separate normal-Chat and Voice-Chat instructions, restore each checked-in
-  default, and enable or disable supported tools.
+- Add an `Instructions and tools` Home destination above Settings, with
+  separate Instructions and Tools tabs where the user can maintain normal-Chat
+  and Voice-Chat instructions, restore defaults, manage supported tools, and
+  run direct provider smoke tests.
 - Compose each effective system instruction from an app-owned invariant section
   and the selected interaction mode's user-editable section.
 - Persist instruction and tool preferences locally without splitting the shared

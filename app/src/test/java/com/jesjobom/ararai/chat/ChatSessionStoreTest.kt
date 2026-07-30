@@ -3,6 +3,7 @@ package com.jesjobom.ararai.chat
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
+import com.jesjobom.ararai.knowledge.KnowledgeSource
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -249,6 +250,31 @@ class ChatSessionStoreTest {
 
         assertEquals("Final answer", content.text)
         assertEquals("Private scratchpad", content.reasoningText)
+        assertEquals("Final answer", restored.text)
+    }
+
+    @Test
+    fun `persists bounded source metadata with assistant answer across restart`() {
+        val store = store()
+        val session = store.ensureSession()
+        val source =
+            KnowledgeSource(
+                provider = "Wikipedia",
+                title = "Ada Lovelace",
+                canonicalUrl = "https://en.wikipedia.org/wiki/Ada_Lovelace",
+                language = "en",
+                retrievedAtMillis = 1234L,
+            )
+        val message =
+            store.appendMessage(
+                session.id,
+                ChatRole.Assistant,
+                MessageContent.TextPrompt(text = "Final answer", sources = listOf(source)),
+            )
+
+        val restored = store().getMessages(session.id).single { it.id == message.id }
+
+        assertEquals(listOf(source), (restored.content as MessageContent.TextPrompt).sources)
         assertEquals("Final answer", restored.text)
     }
 

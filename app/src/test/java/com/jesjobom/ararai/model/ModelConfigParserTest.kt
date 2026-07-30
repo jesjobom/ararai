@@ -39,6 +39,7 @@ class ModelConfigParserTest {
         assertEquals(false, config.inputCapabilities.audio)
         assertEquals(false, config.reasoningCapabilities.request)
         assertEquals(false, config.reasoningCapabilities.output)
+        assertEquals(emptySet<String>(), config.knowledgeToolCapabilities.toolNames)
         assertEquals("models/smollm2-135m-q4.gguf", config.relativePath)
         assertEquals(1234L, config.expectedBytes)
         assertEquals(4294967296L, config.recommendedFreeRamBytes)
@@ -116,6 +117,23 @@ class ModelConfigParserTest {
 
         assertEquals(true, config.reasoningCapabilities.request)
         assertEquals(true, config.reasoningCapabilities.output)
+    }
+
+    @Test
+    fun `parses explicit knowledge tool capabilities`() {
+        val config =
+            ModelConfigParser.parse(
+                validRawConfig() +
+                    """
+
+                    model.capabilities.knowledgeTools=wikipedia_search, calendar_lookup
+                    """.trimIndent(),
+            )
+
+        assertEquals(
+            setOf("wikipedia_search", "calendar_lookup"),
+            config.knowledgeToolCapabilities.toolNames,
+        )
     }
 
     @Test
@@ -236,6 +254,7 @@ class ModelConfigParserTest {
             assertEquals(ModelRuntime.LiteRtLm, model.runtime)
             assertEquals(ModelArtifactFormat.LiteRtLmBundle, model.artifactFormat)
             assertEquals("gemma-4", model.family)
+            assertEquals(setOf("wikipedia_search"), model.knowledgeToolCapabilities.toolNames)
         }
         val candidates = catalog.models.filter { it.supportsTask(ModelTask.Transcription) }
         assertEquals(2, candidates.size)

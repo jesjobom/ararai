@@ -30,6 +30,7 @@ class VoiceChatPreferencesTest {
         val preferences = InMemoryVoiceChatPreferences()
         preferences.update(
             VoiceChatSettings(
+                reasoningEnabled = true,
                 pauseMillis = 2_000,
                 minimumWords = 8,
                 speechRateMultiplier = 1.7f,
@@ -40,6 +41,7 @@ class VoiceChatPreferencesTest {
                 minimumSpeechMillis = 700,
             ),
         )
+        assertEquals(true, preferences.settings.value.reasoningEnabled)
         assertEquals(2_000, preferences.settings.value.pauseMillis)
         assertEquals(8, preferences.settings.value.minimumWords)
         assertEquals(1.7f, preferences.settings.value.speechRateMultiplier, 0.001f)

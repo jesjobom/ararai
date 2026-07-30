@@ -49,6 +49,34 @@ be treated as trusted system content.
 
 ## Decisions
 
+### Knowledge-tool capability is explicit catalog metadata
+
+Each model declares a normalized set of supported knowledge-tool names. The
+checked-in E2B and E4B bundles advertise `wikipedia_search` because both passed
+the physical structured-calling matrix. Capability is propagated into
+`LocalModel`; it is not inferred from family, filename, runtime, or prompt.
+
+For each Chat or Voice turn, the application resolves the advertised set from
+the user's persisted preference and the installed active model's capability.
+The LiteRT-LM engine validates that set again before generation and registers
+only the corresponding structured `OpenApiTool`. An empty set creates the
+ordinary conversation configuration with no hidden tool prompt or textual
+fallback.
+
+### Tool lifecycle crosses the engine boundary as bounded domain events
+
+The LiteRT-LM adapter reports a per-turn lifecycle of started followed by
+either succeeded-with-sources or controlled failure. The local engine maps
+those callbacks to `GenerationEvent` values consumed identically by normal
+Chat and Voice Chat. Events contain only the normalized tool name, bounded
+canonical `KnowledgeSource` metadata, and a controlled failure reason. Raw
+reference text and LiteRT-LM protocol payloads never cross this boundary.
+
+The transient UI state is reset at the beginning and terminal paths of a turn.
+Persistence and rendering of successful sources remain separate work in
+section 7 so that a partially generated answer cannot accidentally commit
+source metadata.
+
 ### Separate editable behavior from app-owned invariants
 
 The UI presents one editable instruction for normal Chat and one for Voice Chat.
@@ -58,8 +86,18 @@ user text is valid and means no additional user instruction.
 The effective system instruction is composed deterministically from:
 
 1. a short app-owned invariant section needed for conversation and tool
-   semantics; and
-2. the current turn origin's persisted editable instruction.
+   semantics;
+2. the current turn origin's persisted editable instruction; and
+3. an ephemeral runtime block containing the device's current local date,
+   time-zone identifier, and UTC offset.
+
+The temporal block is regenerated when each Chat or Voice Chat turn begins and
+is never written to canonical conversation storage. Reconstructing a long
+conversation therefore includes exactly one current temporal block rather than
+one historical copy per turn. Exact clock time is intentionally omitted because
+most date comparisons do not require it and changing it continuously would
+invalidate otherwise compatible prompt prefixes. The model benchmark retains
+its fixed baseline prompt so results remain comparable across dates.
 
 The app-owned section is not shown as editable system text. This prevents a
 customization field from accidentally removing tool protocol or untrusted-data
@@ -81,6 +119,14 @@ interaction modes whose effective instructions differ closes the retained
 LiteRT-LM conversation and rehydrates a new one from bounded canonical history.
 This accepts a one-time performance cost instead of leaking stale instructions
 across modes.
+
+Each submitted turn captures one immutable compatibility snapshot containing
+the effective instruction and the normalized set of advertised tool names.
+Normal Chat and Voice Chat use the same snapshot contract. The retained
+LiteRT-LM key compares the tool-name set independently of ordering, so adding,
+removing, enabling, or disabling any present or future application-owned skill
+invalidates stale native state without coupling conversation reuse specifically
+to Wikipedia.
 
 ### Make tool enablement explicit but tool use automatic
 
@@ -128,7 +174,23 @@ source title, canonical URL, language, retrieval time, and controlled error.
 This prevents HTTP and MediaWiki response details from becoming part of the
 conversation coordinator or UI.
 
-The first increment permits at most one Wikipedia invocation per user turn.
+The runtime adapter and the network provider are validated separately before
+production Chat integration. Deterministic characterization uses the real
+`OpenApiTool` adapter with a fake `KnowledgeTool`, exercising the complete
+schema, validation, result-serialization, continuation, cancellation, and
+cleanup path without depending on external network availability or mutable
+Wikipedia content.
+
+A direct opt-in smoke test in the Tools tab may use the real Wikipedia provider
+to verify Android networking, TLS, endpoint behavior, and response parsing
+without loading or prompting a model. Each future tool should expose the same
+small smoke-test contract. Live network results are diagnostic evidence only
+and are not deterministic acceptance gates. The model benchmark remains
+limited to model performance.
+
+The first increment permits at most three Wikipedia invocations per user turn. The model searches
+English Wikipedia first and may retry in the automatically detected language of the user's question
+when a corresponding Wikipedia edition exists and the English result is missing or unsatisfactory.
 Arguments, schemes, hostnames, response status, media type, redirects, decoded
 size, and item count are validated. The implementation uses an official
 Wikipedia/MediaWiki HTTPS endpoint and does not accept a model-supplied URL.
@@ -172,7 +234,9 @@ remains inactive.
 An empty result, malformed call, unsupported language, HTTP failure, timeout, or
 cancellation returns a controlled tool error. The model may explain that the
 search was unavailable, but the UI never claims that research succeeded without
-a validated result. A failed call cannot retry automatically in the same turn.
+a validated result. The model may retry within the three-call budget, including
+the supported language of the user's question when an English search is not
+satisfactory.
 Generation or tool cancellation follows existing incomplete-turn semantics and
 does not leave a reusable partial native conversation.
 
@@ -183,8 +247,8 @@ does not leave a reusable partial native conversation.
   device before enabling the shipped flag.
 - **Different mode instructions reduce native-session reuse** → include the
   effective instruction in compatibility and accept safe rehydration.
-- **Automatic calls add Voice Chat latency** → one call, strict deadlines,
-  bounded extracts, visible research state, and no automatic retry.
+- **Automatic calls add Voice Chat latency** → a three-call ceiling, strict
+  per-call deadlines, bounded extracts, and visible research state.
 - **Wikipedia is mistaken for a real-time source** → describe it as
   encyclopedic knowledge and require uncertainty rather than freshness claims.
 - **Retrieved text attempts prompt injection** → plain-text extraction,
@@ -206,14 +270,18 @@ does not leave a reusable partial native conversation.
    checked-in prompt as both initial defaults.
 3. Select effective instructions by turn origin and invalidate retained native
    state on effective-context changes.
-4. Add explicit catalog capability for the validated Gemma 4 LiteRT-LM entries.
-5. Implement the bounded Wikipedia knowledge provider and test it independently
-   from model inference.
-6. Register the provider through LiteRT-LM automatic tool calling and carry
+4. Complete and deterministically test the bounded Wikipedia provider,
+   including deadlines, cancellation, redirects, response bounds, and
+   controlled failures.
+5. Add the LiteRT-LM adapter and characterize it offline with a fake provider on
+   both checked-in Gemma bundles.
+6. Add a direct opt-in Wikipedia smoke test to the Tools tab, then add explicit
+   catalog capability only for validated Gemma 4 LiteRT-LM entries.
+7. Register the provider through LiteRT-LM automatic tool calling and carry
    progress, cancellation, controlled errors, and sources through the shared
    coordinator.
-7. Integrate Voice Chat research state and normal Chat source presentation.
-8. Physically validate E2B and E4B before shipping their capability flag.
+8. Integrate Voice Chat research state and normal Chat source presentation.
+9. Physically validate E2B and E4B before shipping their capability flag.
 
 Rollback disables or removes the catalog capability and tool registration.
 Persisted instruction preferences and source metadata remain harmless,
