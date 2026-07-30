@@ -192,7 +192,7 @@ class BenchmarkViewModel(
             backendLabel = runtimeLabel(),
             promptLabel = BENCHMARK_PROMPT_LABEL,
             contextTokens = selectedInference.contextTokens,
-            maxTokens = selectedInference.maxTokens,
+            maxTokens = selectedInference.promptReserveTokens,
             canRun = canRun,
         )
     }
@@ -211,7 +211,7 @@ class BenchmarkViewModel(
 
         fun stableBenchmarkConfig(config: InferenceConfig): InferenceConfig = config.copy(
             contextTokens = config.contextTokens.coerceAtMost(2048),
-            maxTokens = config.maxTokens.coerceAtMost(BENCHMARK_MAX_TOKENS),
+            promptReserveTokens = config.promptReserveTokens.coerceAtMost(BENCHMARK_MAX_TOKENS),
             temperature = 0.2f,
             topP = 0.9f,
         )

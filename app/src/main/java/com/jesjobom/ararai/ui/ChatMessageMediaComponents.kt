@@ -44,6 +44,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.R
+import com.jesjobom.ararai.chat.AssistantCompletionStatus
 import com.jesjobom.ararai.chat.AudioPrompt
 import com.jesjobom.ararai.chat.AudioTranscriptionStatus
 import com.jesjobom.ararai.chat.ChatMessage
@@ -247,6 +248,7 @@ internal fun MessageRow(
 }
 
 @Composable
+@Suppress("LongMethod")
 internal fun MessageContentView(
     content: MessageContent,
     showReasoning: Boolean,
@@ -285,7 +287,26 @@ internal fun MessageContentView(
                         )
                     }
                 }
-                MarkdownText(text = content.text.ifBlank { "..." })
+                if (content.completionStatus == AssistantCompletionStatus.Incomplete) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        shape = MaterialTheme.shapes.medium,
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text("Incomplete response", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "The model finished before producing a final answer.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+                if (content.text.isNotBlank()) {
+                    MarkdownText(text = content.text)
+                } else if (content.completionStatus == AssistantCompletionStatus.Complete) {
+                    MarkdownText(text = "...")
+                }
                 if (content.sources.isNotEmpty()) {
                     Text(
                         text = "Sources",

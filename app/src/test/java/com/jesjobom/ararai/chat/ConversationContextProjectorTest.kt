@@ -12,7 +12,7 @@ class ConversationContextProjectorTest {
     private val inference =
         InferenceConfig(
             contextTokens = 256,
-            maxTokens = 32,
+            promptReserveTokens = 32,
             temperature = 0.7f,
             topP = 0.9f,
         )

@@ -106,7 +106,11 @@ object ModelConfigParser {
         if (getProperty("${prefix}contextTokens").isNullOrBlank()) return null
         return InferenceConfig(
             contextTokens = required("${prefix}contextTokens").toInt(),
-            maxTokens = required("${prefix}maxTokens").toInt(),
+            promptReserveTokens =
+            (
+                getProperty("${prefix}promptReserveTokens")
+                    ?: required("${prefix}maxTokens")
+                ).toInt(),
             temperature = required("${prefix}temperature").toFloat(),
             topP = required("${prefix}topP").toFloat(),
             topK = optional("${prefix}topK", "40").toInt(),
@@ -192,8 +196,8 @@ object ModelConfigParser {
         require(inference.contextTokens > 0) {
             "inference.contextTokens must be positive"
         }
-        require(inference.maxTokens > 0) {
-            "inference.maxTokens must be positive"
+        require(inference.promptReserveTokens > 0) {
+            "inference.promptReserveTokens must be positive"
         }
         require(inference.temperature >= 0f) {
             "inference.temperature must be non-negative"

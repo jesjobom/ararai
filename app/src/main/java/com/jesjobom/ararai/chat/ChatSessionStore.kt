@@ -610,6 +610,10 @@ private object MessageContentCodec {
             append("reasoning\t")
             appendLine(content.reasoningText.encodeField())
         }
+        if (content.completionStatus != AssistantCompletionStatus.Complete) {
+            append("completion\t")
+            appendLine(content.completionStatus.name.encodeField())
+        }
         content.imageAttachments.forEach { image ->
             append("image\t")
             append(
@@ -668,7 +672,15 @@ private object MessageContentCodec {
                     retrievedAtMillis = fields.getOrNull(5)?.decodeField()?.toLongOrNull() ?: 0L,
                 )
             }
-        return MessageContent.TextPrompt(text, images, reasoningText, sources)
+        val completionStatus =
+            lines.drop(1).firstNotNullOfOrNull { line ->
+                val fields = line.split('\t')
+                fields.getOrNull(1)
+                    ?.decodeField()
+                    ?.takeIf { fields.firstOrNull() == "completion" }
+                    ?.let { runCatching { AssistantCompletionStatus.valueOf(it) }.getOrNull() }
+            } ?: AssistantCompletionStatus.Complete
+        return MessageContent.TextPrompt(text, images, reasoningText, sources, completionStatus)
     }
 
     private fun String.encodeField(): String = java.util.Base64

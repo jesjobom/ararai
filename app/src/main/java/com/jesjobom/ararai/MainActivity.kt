@@ -24,6 +24,7 @@ import com.jesjobom.ararai.chat.SqliteChatSessionStore
 import com.jesjobom.ararai.chat.WhisperCppAudioTranscriber
 import com.jesjobom.ararai.engine.prepareLiteRtLmCacheDir
 import com.jesjobom.ararai.model.ModelStartupState
+import com.jesjobom.ararai.model.SharedPreferencesGenerationPreferences
 import com.jesjobom.ararai.settings.SharedPreferencesThemePreferenceStore
 import com.jesjobom.ararai.ui.AndroidChatTextToSpeechService
 import com.jesjobom.ararai.ui.ArarAiApp
@@ -50,6 +51,7 @@ class MainActivity : ComponentActivity() {
         val chatMediaServices = androidChatMediaServices(chatMediaRepository)
         val chatPreferences = SharedPreferencesChatPreferences(this)
         val instructionPreferences = SharedPreferencesInstructionPreferences(this)
+        val generationPreferences = SharedPreferencesGenerationPreferences(this)
         val audioTranscriber = WhisperCppAudioTranscriber(
             models = { modelController.state.value.models },
         )
@@ -89,6 +91,7 @@ class MainActivity : ComponentActivity() {
                         chatMediaServices = chatMediaServices,
                         chatPreferences = chatPreferences,
                         instructionPreferences = instructionPreferences,
+                        generationPreferences = generationPreferences,
                         audioTranscriber = audioTranscriber,
                         chatTextToSpeechServiceFactory = { AndroidChatTextToSpeechService(this) },
                         chatLanguageIdentifierFactory = { MlKitChatLanguageIdentifier() },

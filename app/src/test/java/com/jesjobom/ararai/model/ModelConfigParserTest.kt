@@ -21,7 +21,7 @@ class ModelConfigParserTest {
                 model.expectedBytes=1234
                 model.recommendedFreeRamBytes=4294967296
                 inference.contextTokens=2048
-                inference.maxTokens=512
+                inference.promptReserveTokens=512
                 inference.temperature=0.7
                 inference.topP=0.9
                 """.trimIndent(),
@@ -45,7 +45,7 @@ class ModelConfigParserTest {
         assertEquals(4294967296L, config.recommendedFreeRamBytes)
         val inference = config.requireInference()
         assertEquals(2048, inference.contextTokens)
-        assertEquals(512, inference.maxTokens)
+        assertEquals(512, inference.promptReserveTokens)
         assertEquals(0.7f, inference.temperature)
         assertEquals(0.9f, inference.topP)
         assertEquals(40, inference.topK)
@@ -152,7 +152,7 @@ class ModelConfigParserTest {
                 model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 model.expectedBytes=1234
                 inference.contextTokens=2048
-                inference.maxTokens=512
+                inference.promptReserveTokens=512
                 inference.temperature=0.7
                 inference.topP=0.9
                 """.trimIndent(),
@@ -207,7 +207,7 @@ class ModelConfigParserTest {
                 models.0.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 models.0.expectedBytes=1234
                 models.0.inference.contextTokens=1024
-                models.0.inference.maxTokens=128
+                models.0.inference.promptReserveTokens=128
                 models.0.inference.temperature=0.7
                 models.0.inference.topP=0.9
                 models.1.id=small
@@ -218,7 +218,7 @@ class ModelConfigParserTest {
                 models.1.sha256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
                 models.1.expectedBytes=5678
                 models.1.inference.contextTokens=2048
-                models.1.inference.maxTokens=256
+                models.1.inference.promptReserveTokens=256
                 models.1.inference.temperature=0.6
                 models.1.inference.topP=0.8
                 """.trimIndent(),
@@ -229,7 +229,7 @@ class ModelConfigParserTest {
         assertEquals(2, catalog.models.size)
         assertEquals("Tiny Model", catalog.models[0].name)
         assertEquals("Small Model", catalog.models[1].name)
-        assertEquals(256, catalog.models[1].requireInference().maxTokens)
+        assertEquals(256, catalog.models[1].requireInference().promptReserveTokens)
     }
 
     @Test
@@ -295,7 +295,7 @@ class ModelConfigParserTest {
                 models.0.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 models.0.expectedBytes=1
                 models.0.inference.contextTokens=1024
-                models.0.inference.maxTokens=128
+                models.0.inference.promptReserveTokens=128
                 models.0.inference.temperature=0.7
                 models.0.inference.topP=0.9
                 models.1.id=dup
@@ -306,7 +306,7 @@ class ModelConfigParserTest {
                 models.1.sha256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
                 models.1.expectedBytes=1
                 models.1.inference.contextTokens=1024
-                models.1.inference.maxTokens=128
+                models.1.inference.promptReserveTokens=128
                 models.1.inference.temperature=0.7
                 models.1.inference.topP=0.9
                 """.trimIndent(),
@@ -346,8 +346,8 @@ class ModelConfigParserTest {
             expectedMessage = "inference.topP must be between 0 and 1",
         )
         assertInvalid(
-            raw = validRawConfig().replace("inference.maxTokens=512", "inference.maxTokens=0"),
-            expectedMessage = "inference.maxTokens must be positive",
+            raw = validRawConfig().replace("inference.promptReserveTokens=512", "inference.promptReserveTokens=0"),
+            expectedMessage = "inference.promptReserveTokens must be positive",
         )
         assertInvalid(
             raw =
@@ -389,7 +389,7 @@ class ModelConfigParserTest {
         model.sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         model.expectedBytes=1234
         inference.contextTokens=2048
-        inference.maxTokens=512
+        inference.promptReserveTokens=512
         inference.temperature=0.7
         inference.topP=0.9
         """.trimIndent()

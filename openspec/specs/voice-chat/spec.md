@@ -360,9 +360,10 @@ temporary recordings after their current exchange no longer needs them.
 ### Requirement: Contextual half-duplex voice loop
 
 Voice Chat SHALL process turns through the shared persisted conversation using
-its Voice-Chat-specific effective instruction, keep microphone capture inactive
-during model processing, tool execution, and TTS playback, and resume the loop
-without a per-turn tool confirmation.
+its Voice-Chat-specific effective instruction and the selected model's
+effective conversational generation settings, keep microphone capture inactive
+during model processing, tool execution, and TTS playback, and recover without
+speaking empty output when generation is incomplete.
 
 #### Scenario: Start the voice loop
 
@@ -380,6 +381,8 @@ without a per-turn tool confirmation.
 - **WHEN** Voice Chat submits it through the shared conversation coordinator
 - **THEN** the user turn is persisted in the current conversation
 - **AND** generation uses the Voice-Chat-specific effective instruction
+- **AND** generation uses the selected model's effective context window and
+  temperature
 - **AND** an audio-capable model may receive direct audio while transcription
   enriches the persisted turn
 - **AND** a text-only model receives the completed local transcript
@@ -430,15 +433,34 @@ without a per-turn tool confirmation.
 - **AND** the turn follows its normal controlled completion or cancellation path
 - **AND** the loop can return to listening when the exchange finishes.
 
+#### Scenario: Finish reasoning without a speakable answer
+
+- **GIVEN** Voice Chat generation emits reasoning but no usable final answer
+- **WHEN** the runtime reaches its terminal completion callback
+- **THEN** Voice Chat persists an incomplete assistant message with partial
+  reasoning in the shared conversation
+- **AND** does not queue reasoning, empty text, protocol output, or an ellipsis
+  for TTS
+- **AND** presents a brief controlled incomplete-response notice
+- **AND** the active loop returns to its next valid state.
+
+#### Scenario: Review an incomplete voice response in normal Chat
+
+- **GIVEN** Voice Chat persisted an incomplete assistant response
+- **WHEN** the user opens the same session in normal Chat
+- **THEN** normal Chat displays its incomplete status
+- **AND** displays partial reasoning when `Show reasoning` is enabled
+- **AND** does not duplicate the voice turn.
+
 #### Scenario: Resume listening after one exchange
 
 - **GIVEN** current generation, eligible tool execution, and every queued speech
-  segment have completed
+  segment have completed or the response ended incomplete
 - **AND** the loop has not been stopped
 - **WHEN** the contextual exchange finishes
 - **THEN** non-canonical temporary capture and tool-result resources are deleted
-- **AND** canonical conversation media, messages, and bounded source metadata
-  remain persisted
+- **AND** canonical conversation media, messages, completion status, and bounded
+  source metadata remain persisted
 - **AND** a fresh recording starts
 - **AND** Voice Chat returns to listening with accumulated conversation context.
 

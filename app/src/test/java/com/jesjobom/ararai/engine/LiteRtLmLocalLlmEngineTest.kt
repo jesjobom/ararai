@@ -28,7 +28,7 @@ class LiteRtLmLocalLlmEngineTest {
     private val config =
         InferenceConfig(
             contextTokens = 128,
-            maxTokens = 8,
+            promptReserveTokens = 8,
             temperature = 0.7f,
             topP = 0.9f,
         )
@@ -99,6 +99,23 @@ class LiteRtLmLocalLlmEngineTest {
             assertEquals(GenerationEvent.Completed, awaitItem())
             awaitComplete()
         }
+    }
+
+    @Test
+    fun `reloads engine when total context capacity changes`() = runTest {
+        val bridge = RecordingBridge()
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
+
+        engine.load(model, config)
+        engine.load(model, config.copy(temperature = 0.2f))
+        engine.load(model, config.copy(contextTokens = 256))
+
+        assertEquals(2, bridge.loadCalls)
+        assertEquals(256, bridge.loadedConfig?.contextTokens)
     }
 
     @Test
@@ -225,7 +242,7 @@ class LiteRtLmLocalLlmEngineTest {
 
     @Test
     fun `does not cancel LiteRT generation based on callback chunk count`() = runTest {
-        val chunks = List(config.maxTokens + 3) { LiteRtLmChunk(text = "chunk-$it") }
+        val chunks = List(config.promptReserveTokens + 3) { LiteRtLmChunk(text = "chunk-$it") }
         val bridge = RecordingBridge(chunks = chunks)
         val engine =
             LiteRtLmLocalLlmEngine(
@@ -598,6 +615,8 @@ class LiteRtLmLocalLlmEngineTest {
         var loadedProfile: LiteRtLmWorkloadProfile? = null
             private set
         val loadedProfiles = mutableListOf<LiteRtLmWorkloadProfile>()
+        var loadCalls = 0
+            private set
 
         override suspend fun load(
             modelPath: String,
@@ -607,6 +626,7 @@ class LiteRtLmLocalLlmEngineTest {
             knowledgeToolNames: Set<String>,
             profile: LiteRtLmWorkloadProfile,
         ): LiteRtLmSession {
+            loadCalls += 1
             loadedModelPath = modelPath
             loadedConfig = config
             loadedUseGpu = useGpu

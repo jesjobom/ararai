@@ -24,9 +24,18 @@ inference remains device-, driver-, model-, and workload-dependent.
   recommended. Downloads are resumable foreground data transfers with
   notification progress, and the selected model persists locally.
 - The Chat supports streamed generation, cancellation, persistent and
-  renameable sessions, bounded context, selectable Markdown and local LaTeX math output, settings, and
+  renameable sessions, per-model conversational context and temperature
+  overrides, bounded context, selectable Markdown and local LaTeX math output, settings, and
   capability-gated reasoning, plus language-aware native speech playback for
   completed assistant responses.
+- Assistant configuration groups mode-specific instructions, optional tools,
+  and per-model conversational generation controls. LiteRT-LM total context is
+  applied to its KV-cache capacity; unsupported independent response limits are
+  disclosed rather than simulated. Runtime-backed last-turn metrics are
+  ephemeral and benchmark runs retain fixed isolated parameters.
+- Reasoning-only terminal generations are persisted as incomplete assistant
+  responses. Normal Chat can show partial reasoning, while Voice Chat avoids
+  empty TTS and recovers its loop.
 - Structured prompts can contain text, normalized images, or recorded audio.
   Audio-capable models receive recordings directly. With a valid downloaded
   Whisper model, text-only models receive a locally produced transcript

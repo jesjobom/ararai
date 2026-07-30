@@ -22,6 +22,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import com.jesjobom.ararai.chat.AssistantCompletionStatus
 import com.jesjobom.ararai.chat.ChatViewModel
 import com.jesjobom.ararai.chat.InMemoryChatSessionStore
 import com.jesjobom.ararai.chat.InstructionDefaults
@@ -52,6 +53,7 @@ import com.jesjobom.ararai.ui.ChatMediaServices
 import com.jesjobom.ararai.ui.ChatScreen
 import com.jesjobom.ararai.ui.ChatTextToSpeechListener
 import com.jesjobom.ararai.ui.ChatTextToSpeechService
+import com.jesjobom.ararai.ui.GenerationModelUiState
 import com.jesjobom.ararai.ui.HomeScreen
 import com.jesjobom.ararai.ui.InstructionsAndToolsScreen
 import com.jesjobom.ararai.ui.MessageContentView
@@ -73,10 +75,24 @@ class CriticalComposeJourneysTest {
     fun instructionsAndToolsSupportsEditingRestoreDisclosureAndCompatibility() {
         var settings by mutableStateOf(InstructionSettings())
         var compatible by mutableStateOf(true)
+        var contextTokens by mutableStateOf(2_048)
+        var temperature by mutableStateOf(0.7f)
         composeRule.setContent {
             MaterialTheme {
                 InstructionsAndToolsScreen(
                     settings = settings,
+                    generationModel =
+                    GenerationModelUiState(
+                        modelId = "e2b",
+                        modelName = "Gemma E2B",
+                        catalogContextTokens = 2_048,
+                        catalogTemperature = 0.7f,
+                        effectiveContextTokens = contextTokens,
+                        effectiveTemperature = temperature,
+                        supportsReasoning = true,
+                        metrics = null,
+                        hasOverrides = contextTokens != 2_048 || temperature != 0.7f,
+                    ),
                     wikipediaCompatible = compatible,
                     onInstructionChange = { mode, value ->
                         settings =
@@ -93,6 +109,12 @@ class CriticalComposeJourneysTest {
                             }
                     },
                     onWikipediaEnabledChange = { settings = settings.copy(wikipediaEnabled = it) },
+                    onContextTokensChange = { contextTokens = it },
+                    onTemperatureChange = { temperature = it },
+                    onRestoreGenerationDefaults = {
+                        contextTokens = 2_048
+                        temperature = 0.7f
+                    },
                     onBack = {},
                 )
             }
@@ -115,8 +137,18 @@ class CriticalComposeJourneysTest {
         compatible = false
         composeRule.waitForIdle()
         composeRule.onNodeWithText(
-            "Unavailable until the selected Gemma bundle passes tool-calling validation.",
+            "Unavailable for the selected model.",
         ).assertIsDisplayed()
+
+        composeRule.onNodeWithText("Generation").performClick()
+        composeRule.onNodeWithText("Gemma E2B").assertIsDisplayed()
+        composeRule.onNodeWithText("Response limit: controlled by model/runtime.").assertIsDisplayed()
+        composeRule.onNodeWithTag("generation-context").performTextClearance()
+        composeRule.onNodeWithTag("generation-context").performTextInput("4096")
+        composeRule.onNodeWithText("Apply context window").performClick()
+        assertEquals(4_096, contextTokens)
+        composeRule.onNodeWithText("Precise").performClick()
+        assertEquals(0.2f, temperature)
     }
 
     @Test
@@ -150,6 +182,29 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithText("Sources").assertIsDisplayed()
         composeRule.onNodeWithText("Ada Lovelace · EN").assertIsDisplayed()
         composeRule.onAllNodesWithText("wikipedia_search").assertCountEquals(0)
+    }
+
+    @Test
+    fun incompleteAssistantResponseIsExplicitWithoutPlaceholderEllipsis() {
+        composeRule.setContent {
+            MaterialTheme {
+                MessageContentView(
+                    content =
+                    MessageContent.TextPrompt(
+                        text = "",
+                        reasoningText = "partial reasoning",
+                        completionStatus = AssistantCompletionStatus.Incomplete,
+                    ),
+                    showReasoning = true,
+                    showAudioTranscriptions = true,
+                    mediaServices = fakeMediaServices(),
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Incomplete response").assertIsDisplayed()
+        composeRule.onNodeWithText("partial reasoning").assertIsDisplayed()
+        composeRule.onAllNodesWithText("...").assertCountEquals(0)
     }
 
     @Test
@@ -489,7 +544,7 @@ class CriticalComposeJourneysTest {
         val inference =
             InferenceConfig(
                 contextTokens = 256,
-                maxTokens = 32,
+                promptReserveTokens = 32,
                 temperature = 0.2f,
                 topP = 0.9f,
             )

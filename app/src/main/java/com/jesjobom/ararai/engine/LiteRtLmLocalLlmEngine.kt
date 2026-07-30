@@ -67,7 +67,8 @@ class LiteRtLmLocalLlmEngine(
                 val isLoaded =
                     loadedSession != null &&
                         loadedModelId == model.id &&
-                        loadedModelPath == model.filePath
+                        loadedModelPath == model.filePath &&
+                        loadedConfig?.contextTokens == config.contextTokens
                 if (isLoaded) {
                     loadedConfig = config
                     loadedInputCapabilities = model.inputCapabilities
@@ -335,7 +336,7 @@ class AndroidLiteRtLmBridge(
                 backend = backend,
                 visionBackend = if (profile.image && inputCapabilities.image) backend else null,
                 audioBackend = if (profile.audio && inputCapabilities.audio) Backend.CPU() else null,
-                maxNumTokens = null,
+                maxNumTokens = config.contextTokens,
                 cacheDir = cacheDir,
             )
         val engine = Engine(engineConfig)

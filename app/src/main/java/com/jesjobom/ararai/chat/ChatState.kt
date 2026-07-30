@@ -76,6 +76,7 @@ sealed interface MessageContent {
         val imageAttachments: List<ImageAttachment> = emptyList(),
         val reasoningText: String = "",
         val sources: List<KnowledgeSource> = emptyList(),
+        val completionStatus: AssistantCompletionStatus = AssistantCompletionStatus.Complete,
     ) : MessageContent
 
     data class AudioPromptContent(
@@ -88,6 +89,11 @@ sealed interface MessageContent {
         val transcriptionMayBeIncomplete: Boolean = false,
         val transcriptionIncompleteReason: String? = null,
     ) : MessageContent
+}
+
+enum class AssistantCompletionStatus {
+    Complete,
+    Incomplete,
 }
 
 enum class AudioTranscriptionStatus { NotRequested, Pending, Completed, Failed }

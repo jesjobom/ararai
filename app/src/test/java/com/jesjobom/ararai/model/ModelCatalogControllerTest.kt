@@ -224,7 +224,7 @@ class ModelCatalogControllerTest {
         relativePath = "models/default.gguf",
         sha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
         expectedBytes = 5,
-        inference = InferenceConfig(contextTokens = 128, maxTokens = 32, temperature = 0.7f, topP = 0.9f),
+        inference = InferenceConfig(contextTokens = 128, promptReserveTokens = 32, temperature = 0.7f, topP = 0.9f),
     )
 
     private fun optionalConfig(): ModelConfig = ModelConfig(
@@ -235,7 +235,7 @@ class ModelCatalogControllerTest {
         relativePath = "models/optional.gguf",
         sha256 = "ec91fdd9256cb75ae611249b50cb7eb16533f0fa91b86239ec1d439a1ea033b8",
         expectedBytes = 8,
-        inference = InferenceConfig(contextTokens = 128, maxTokens = 32, temperature = 0.7f, topP = 0.9f),
+        inference = InferenceConfig(contextTokens = 128, promptReserveTokens = 32, temperature = 0.7f, topP = 0.9f),
     )
 
     private fun utilityConfig(): ModelConfig = ModelConfig(

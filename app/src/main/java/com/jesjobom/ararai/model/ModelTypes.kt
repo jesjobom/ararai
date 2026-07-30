@@ -2,7 +2,7 @@ package com.jesjobom.ararai.model
 
 data class InferenceConfig(
     val contextTokens: Int,
-    val maxTokens: Int = 128,
+    val promptReserveTokens: Int = 128,
     val temperature: Float,
     val topP: Float,
     val topK: Int = 40,

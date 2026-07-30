@@ -16,7 +16,7 @@ class PromptContextBuilder(
         val systemMessage = PromptChatMessage(PromptChatRole.System, systemPrompt.trim())
         val currentTurn = PromptChatMessage(PromptChatRole.User, userPrompt.trim())
         val maxChars =
-            ((inferenceConfig.contextTokens - inferenceConfig.maxTokens).coerceAtLeast(32) * charsPerToken)
+            ((inferenceConfig.contextTokens - inferenceConfig.promptReserveTokens).coerceAtLeast(32) * charsPerToken)
                 .coerceAtLeast(systemMessage.estimatedLength() + currentTurn.estimatedLength())
         val selectedHistory = mutableListOf<ChatMessage>()
         var used = systemMessage.estimatedLength() + currentTurn.estimatedLength()

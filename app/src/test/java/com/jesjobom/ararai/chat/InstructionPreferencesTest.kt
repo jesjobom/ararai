@@ -85,6 +85,8 @@ class InstructionPreferencesTest {
         assertTrue(voice.systemInstruction.contains("Brief spoken answer."))
         assertTrue(chat.systemInstruction.startsWith(InstructionDefaults.APP_INVARIANTS))
         assertTrue(voice.systemInstruction.startsWith(InstructionDefaults.APP_INVARIANTS))
+        assertTrue(chat.systemInstruction.contains("synthesize the best available answer"))
+        assertTrue(voice.systemInstruction.contains("all four digits"))
         assertTrue(chat.systemInstruction.contains("Current date: 2026-07-29"))
         assertTrue(voice.systemInstruction.contains("Timezone: America/Toronto (UTC-04:00)"))
     }

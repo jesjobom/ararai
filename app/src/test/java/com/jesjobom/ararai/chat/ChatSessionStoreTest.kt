@@ -43,6 +43,10 @@ class ChatSessionStoreTest {
             "Legacy question",
             (messages.single().content as MessageContent.TextPrompt).text,
         )
+        assertEquals(
+            AssistantCompletionStatus.Complete,
+            (messages.single().content as MessageContent.TextPrompt).completionStatus,
+        )
     }
 
     @Test
@@ -61,6 +65,28 @@ class ChatSessionStoreTest {
             setOf("file:///chat/image.jpg", "file:///chat/audio.m4a"),
             store.referencedMediaUris(),
         )
+    }
+
+    @Test
+    fun `persists incomplete assistant status and defaults legacy messages to complete`() {
+        val store = store()
+        val session = store.createSession("Status")
+        val incomplete =
+            store.appendMessage(
+                session.id,
+                ChatRole.Assistant,
+                MessageContent.TextPrompt(
+                    text = "",
+                    reasoningText = "partial",
+                    completionStatus = AssistantCompletionStatus.Incomplete,
+                ),
+            )
+
+        val restored =
+            store.getMessages(session.id).single { it.id == incomplete.id }.content as MessageContent.TextPrompt
+
+        assertEquals(AssistantCompletionStatus.Incomplete, restored.completionStatus)
+        assertEquals("partial", restored.reasoningText)
     }
 
     @Test

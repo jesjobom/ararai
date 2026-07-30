@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.chat
 
 import com.jesjobom.ararai.engine.GenerationEvent
+import com.jesjobom.ararai.engine.GenerationMetrics
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptRequest
 import com.jesjobom.ararai.model.InferenceConfig
@@ -27,6 +28,8 @@ class ChatViewModel(
     private val conversationTurnSettingsProvider: (LocalModel?) -> ConversationTurnSettings = {
         ConversationTurnSettings(systemPrompt)
     },
+    private val generationConfigProvider: (LocalModel, InferenceConfig) -> InferenceConfig = { _, config -> config },
+    private val generationMetricsConsumer: (LocalModel, GenerationMetrics) -> Unit = { _, _ -> },
     private val sessionStore: ChatSessionStore = InMemoryChatSessionStore(),
     private val mediaRepository: ChatMediaRepository = NoOpChatMediaRepository,
     promptContextBuilder: PromptContextBuilder = PromptContextBuilder(),
@@ -427,7 +430,8 @@ class ChatViewModel(
 
         val sessionId = current.selectedSessionId ?: return
         val modelForRequest = model
-        val inferenceForRequest = inferenceConfig
+        val inferenceForRequest =
+            modelForRequest?.let { generationConfigProvider(it, inferenceConfig) } ?: inferenceConfig
         val submittedContent = current.toSubmittedContent(audioTranscriber.isAvailable)
         val submittedTitle = submittedContent.displayText
         if (submittedContent !is MessageContent.AudioPromptContent) maybeTitleSession(sessionId, submittedTitle)
@@ -513,7 +517,7 @@ class ChatViewModel(
                             when (event) {
                                 is GenerationEvent.Token -> appendAssistantToken(event.text)
                                 is GenerationEvent.ReasoningToken -> appendAssistantReasoningToken(event.text)
-                                is GenerationEvent.Metrics -> Unit
+                                is GenerationEvent.Metrics -> generationMetricsConsumer(modelForRequest, event.value)
                                 is GenerationEvent.KnowledgeToolStarted -> {
                                     pendingResearchSources = emptyList()
                                     _uiState.update {
@@ -546,6 +550,7 @@ class ChatViewModel(
                                     }
                                 }
                                 GenerationEvent.Completed -> {
+                                    markAssistantIncompleteWhenNeeded()
                                     attachSourcesToAssistant(pendingResearchSources)
                                     flushAssistantPresentation()
                                     flushAssistantMessage()
@@ -743,6 +748,14 @@ class ChatViewModel(
         appendAssistantContent { it.sources = sources }
     }
 
+    private fun markAssistantIncompleteWhenNeeded() {
+        appendAssistantContent { buffer ->
+            if (buffer.text.isBlank() && buffer.reasoning.isNotBlank()) {
+                buffer.completionStatus = AssistantCompletionStatus.Incomplete
+            }
+        }
+    }
+
     private fun appendAssistantContent(update: (AssistantMessageBuffer) -> Unit) {
         val assistantMessageId = activeAssistantMessageId ?: return
         synchronized(assistantBufferLock) {
@@ -860,6 +873,7 @@ class ChatViewModel(
         val text: StringBuilder = StringBuilder(),
         val reasoning: StringBuilder = StringBuilder(),
         var sources: List<com.jesjobom.ararai.knowledge.KnowledgeSource> = emptyList(),
+        var completionStatus: AssistantCompletionStatus = AssistantCompletionStatus.Complete,
         var persistenceDirty: Boolean = false,
         var presentationDirty: Boolean = false,
     ) {
@@ -867,6 +881,7 @@ class ChatViewModel(
             text = text.toString(),
             reasoningText = reasoning.toString(),
             sources = sources,
+            completionStatus = completionStatus,
         )
     }
 

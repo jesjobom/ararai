@@ -13,6 +13,7 @@ package com.jesjobom.ararai.voice
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.jesjobom.ararai.chat.AssistantCompletionStatus
 import com.jesjobom.ararai.chat.AudioTranscriber
 import com.jesjobom.ararai.chat.AudioTranscriptionStatus
 import com.jesjobom.ararai.chat.ChatMediaRepository
@@ -30,6 +31,7 @@ import com.jesjobom.ararai.chat.NoOpChatMediaRepository
 import com.jesjobom.ararai.chat.UnavailableAudioTranscriber
 import com.jesjobom.ararai.chat.mediaUris
 import com.jesjobom.ararai.engine.GenerationEvent
+import com.jesjobom.ararai.engine.GenerationMetrics
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.LocalLlmWorkload
 import com.jesjobom.ararai.engine.PromptRequest
@@ -50,6 +52,8 @@ internal class VoiceChatViewModel(
     private val conversationTurnSettingsProvider: (LocalModel?) -> ConversationTurnSettings = {
         ConversationTurnSettings(systemPrompt)
     },
+    private val generationConfigProvider: (LocalModel, InferenceConfig) -> InferenceConfig = { _, config -> config },
+    private val generationMetricsConsumer: (LocalModel, GenerationMetrics) -> Unit = { _, _ -> },
     private val preferences: VoiceChatPreferences,
     private val captureFactory: (VoiceChatSettings) -> VoiceTurnCapture,
     speechQueueFactory: ((IntRange) -> Unit, (IntRange) -> Unit, () -> Unit, (String) -> Unit) -> VoiceSpeechQueue,
@@ -128,7 +132,7 @@ internal class VoiceChatViewModel(
         currentSessionId = session.id
         refreshSessions(session.id)
         val activeModel = model ?: return
-        val activeInference = inference ?: return
+        val activeInference = inference?.let { generationConfigProvider(activeModel, it) } ?: return
         if (!activeModel.inputCapabilities.audio && !audioTranscriber.isAvailable) return
         mutableState.update { it.copy(isLoadingModel = true, isModelLoaded = false, error = null) }
         modelLoadJob = viewModelScope.launch {
@@ -143,7 +147,10 @@ internal class VoiceChatViewModel(
                     LOG_TAG,
                     "Voice model ready: load=$loadMillis ms, audioPrepare=${prepareStartedAt.elapsedMillis()} ms",
                 )
-                if (model == activeModel && inference == activeInference) {
+                if (
+                    model == activeModel &&
+                    inference?.let { generationConfigProvider(activeModel, it) } == activeInference
+                ) {
                     mutableState.update { it.copy(isLoadingModel = false, isModelLoaded = true) }
                 }
             } catch (error: Throwable) {
@@ -215,7 +222,14 @@ internal class VoiceChatViewModel(
         if (!state.value.canStart) return
         runId++
         mutableState.update {
-            it.copy(phase = VoiceChatPhase.Listening, responsePreview = "", spokenRange = null, readingAnchor = 0, error = null)
+            it.copy(
+                phase = VoiceChatPhase.Listening,
+                responsePreview = "",
+                spokenRange = null,
+                readingAnchor = 0,
+                notice = null,
+                error = null,
+            )
         }
         startCapture(runId)
     }
@@ -253,10 +267,13 @@ internal class VoiceChatViewModel(
                 readingAnchor = 0,
                 researchInProgress = false,
                 researchSources = emptyList(),
+                notice = null,
             )
         }
         val activeModel = model ?: return fail("Model unavailable")
-        val activeInference = inference ?: return fail("Inference configuration unavailable")
+        val activeInference =
+            inference?.let { generationConfigProvider(activeModel, it) }
+                ?: return fail("Inference configuration unavailable")
         val sessionId = currentSessionId ?: return fail("Conversation unavailable")
         generationJob = viewModelScope.launch {
             try {
@@ -342,7 +359,7 @@ internal class VoiceChatViewModel(
                             segmenter.append(answer.toString()).forEach(speechQueue::enqueue)
                         }
                         is GenerationEvent.ReasoningToken -> reasoning.append(event.text)
-                        is GenerationEvent.Metrics -> Unit
+                        is GenerationEvent.Metrics -> generationMetricsConsumer(activeModel, event.value)
                         is GenerationEvent.KnowledgeToolStarted -> {
                             answerSources = emptyList()
                             mutableState.update {
@@ -363,15 +380,31 @@ internal class VoiceChatViewModel(
                         }
                         is GenerationEvent.Failed -> fail(event.message)
                         GenerationEvent.Completed -> {
+                            val incomplete = answer.isBlank() && reasoning.isNotBlank()
                             conversationCoordinator.appendAssistant(
                                 sessionId,
                                 MessageContent.TextPrompt(
                                     text = answer.toString(),
                                     reasoningText = reasoning.toString(),
                                     sources = answerSources,
+                                    completionStatus =
+                                    if (incomplete) {
+                                        AssistantCompletionStatus.Incomplete
+                                    } else {
+                                        AssistantCompletionStatus.Complete
+                                    },
                                 ),
                             )
-                            segmenter.complete(answer.toString()).forEach(speechQueue::enqueue)
+                            if (incomplete) {
+                                mutableState.update {
+                                    it.copy(
+                                        responsePreview = "Incomplete response",
+                                        notice = "The model finished before producing a final answer.",
+                                    )
+                                }
+                            } else {
+                                segmenter.complete(answer.toString()).forEach(speechQueue::enqueue)
+                            }
                             speechQueue.markGenerationComplete()
                         }
                     }
@@ -505,6 +538,7 @@ internal class VoiceChatViewModel(
                 spokenRange = null,
                 readingAnchor = 0,
                 researchInProgress = false,
+                notice = null,
                 error = null,
             )
         }

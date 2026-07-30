@@ -84,12 +84,16 @@ import com.jesjobom.ararai.engine.LiteRtLmLocalLlmEngine
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.knowledge.ToolSmokeTestResult
 import com.jesjobom.ararai.knowledge.WikipediaSmokeTest
+import com.jesjobom.ararai.model.GenerationPreferences
+import com.jesjobom.ararai.model.InMemoryGenerationPreferences
 import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelCatalogController
 import com.jesjobom.ararai.model.ModelPurpose
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.model.ModelTask
+import com.jesjobom.ararai.model.TemperaturePreset
 import com.jesjobom.ararai.model.requireInference
+import com.jesjobom.ararai.model.resolve
 import com.jesjobom.ararai.model.supportsPurpose
 import com.jesjobom.ararai.model.supportsTask
 import com.jesjobom.ararai.settings.ThemeMode
@@ -127,6 +131,7 @@ internal fun ArarAiApp(
     chatMediaServices: ChatMediaServices,
     chatPreferences: ChatPreferences,
     instructionPreferences: InstructionPreferences = InMemoryInstructionPreferences(),
+    generationPreferences: GenerationPreferences = InMemoryGenerationPreferences(),
     audioTranscriber: AudioTranscriber,
     chatTextToSpeechServiceFactory: () -> ChatTextToSpeechService,
     chatLanguageIdentifierFactory: () -> ChatLanguageIdentifier,
@@ -147,6 +152,7 @@ internal fun ArarAiApp(
     val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val modelCatalogState by modelController.state.collectAsState()
     val instructionSettings by instructionPreferences.settings.collectAsState()
+    val generationSettings by generationPreferences.state.collectAsState()
     val startupState = modelCatalogState.selectedStartupState
     val modelConfig = modelCatalogState.selectedConfig
     var destination by remember { mutableStateOf(AppDestination.Home) }
@@ -181,6 +187,12 @@ internal fun ArarAiApp(
                     eligibleKnowledgeToolNames(settings, activeModel),
                 )
             },
+            generationConfigProvider = { activeModel, catalog ->
+                generationPreferences.state.value.resolve(activeModel.id, catalog)
+            },
+            generationMetricsConsumer = { activeModel, metrics ->
+                generationPreferences.recordMetrics(activeModel.id, metrics)
+            },
             sessionStore = chatSessionStore,
             mediaRepository = chatMediaRepository,
             preferences = chatPreferences,
@@ -207,6 +219,12 @@ internal fun ArarAiApp(
                     InteractionMode.Voice,
                     eligibleKnowledgeToolNames(settings, activeModel),
                 )
+            },
+            generationConfigProvider = { activeModel, catalog ->
+                generationPreferences.state.value.resolve(activeModel.id, catalog)
+            },
+            generationMetricsConsumer = { activeModel, metrics ->
+                generationPreferences.recordMetrics(activeModel.id, metrics)
             },
             preferences = voiceChatPreferences,
             captureFactory = { settings -> AndroidVoiceTurnCapture(appContext, voiceTemporaryDirectory, settings) },
@@ -371,6 +389,21 @@ internal fun ArarAiApp(
         )
         AppDestination.InstructionsTools -> InstructionsAndToolsScreen(
             settings = instructionSettings,
+            generationModel =
+            modelConfig.inference?.let { catalogInference ->
+                val effective = generationSettings.resolve(modelConfig.id, catalogInference)
+                GenerationModelUiState(
+                    modelId = modelConfig.id,
+                    modelName = modelConfig.name,
+                    catalogContextTokens = catalogInference.contextTokens,
+                    catalogTemperature = catalogInference.temperature,
+                    effectiveContextTokens = effective.contextTokens,
+                    effectiveTemperature = effective.temperature,
+                    supportsReasoning = modelConfig.reasoningCapabilities.request,
+                    metrics = generationSettings.lastMetricsByModel[modelConfig.id],
+                    hasOverrides = generationSettings.overrides.containsKey(modelConfig.id),
+                )
+            },
             wikipediaCompatible =
             (startupState as? ModelStartupState.Available)
                 ?.model
@@ -379,6 +412,9 @@ internal fun ArarAiApp(
             onInstructionChange = instructionPreferences::setInstruction,
             onRestoreDefault = instructionPreferences::restoreDefault,
             onWikipediaEnabledChange = instructionPreferences::setWikipediaEnabled,
+            onContextTokensChange = { generationPreferences.setContextTokens(modelConfig.id, it) },
+            onTemperatureChange = { generationPreferences.setTemperature(modelConfig.id, it) },
+            onRestoreGenerationDefaults = { generationPreferences.restoreDefaults(modelConfig.id) },
             toolSmokeRunning = toolSmokeRunning,
             toolSmokeResult = toolSmokeResult,
             toolSmokeError = toolSmokeError,
@@ -515,9 +551,9 @@ internal fun HomeScreen(
             )
 
             StatusCard(
-                title = "Instructions and tools",
+                title = "Assistant configuration",
                 value = "Customize assistant behavior",
-                detail = "Manage Chat and Voice Chat instructions and optional tools.",
+                detail = "Manage instructions, tools, and model generation.",
                 icon = Icons.Filled.Bolt,
                 onAction = onOpenInstructionsTools,
             )
@@ -606,10 +642,14 @@ internal fun SettingsScreen(
 @Suppress("LongParameterList")
 internal fun InstructionsAndToolsScreen(
     settings: com.jesjobom.ararai.chat.InstructionSettings,
+    generationModel: GenerationModelUiState? = null,
     wikipediaCompatible: Boolean,
     onInstructionChange: (InteractionMode, String) -> Unit,
     onRestoreDefault: (InteractionMode) -> Unit,
     onWikipediaEnabledChange: (Boolean) -> Unit,
+    onContextTokensChange: (Int) -> Unit = {},
+    onTemperatureChange: (Float) -> Unit = {},
+    onRestoreGenerationDefaults: () -> Unit = {},
     toolSmokeRunning: Boolean = false,
     toolSmokeResult: ToolSmokeTestResult? = null,
     toolSmokeError: String? = null,
@@ -617,13 +657,13 @@ internal fun InstructionsAndToolsScreen(
     onBack: () -> Unit,
 ) {
     var selectedTab by remember { mutableStateOf(0) }
-    ArarAiScaffold(title = "Instructions and tools", onBack = onBack) { modifier ->
+    ArarAiScaffold(title = "Assistant configuration", onBack = onBack) { modifier ->
         Column(
             modifier = modifier.padding(vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             PrimaryTabRow(selectedTabIndex = selectedTab) {
-                listOf("Instructions", "Tools").forEachIndexed { index, label ->
+                listOf("Instructions", "Tools", "Generation").forEachIndexed { index, label ->
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
@@ -636,14 +676,13 @@ internal fun InstructionsAndToolsScreen(
                 modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                if (selectedTab == 0) {
-                    InstructionsTab(
+                when (selectedTab) {
+                    0 -> InstructionsTab(
                         settings = settings,
                         onInstructionChange = onInstructionChange,
                         onRestoreDefault = onRestoreDefault,
                     )
-                } else {
-                    ToolsTab(
+                    1 -> ToolsTab(
                         settings = settings,
                         wikipediaCompatible = wikipediaCompatible,
                         onWikipediaEnabledChange = onWikipediaEnabledChange,
@@ -652,9 +691,141 @@ internal fun InstructionsAndToolsScreen(
                         smokeError = toolSmokeError,
                         onRunSmoke = onRunWikipediaSmoke,
                     )
+                    else -> GenerationTab(
+                        model = generationModel,
+                        onContextTokensChange = onContextTokensChange,
+                        onTemperatureChange = onTemperatureChange,
+                        onRestoreDefaults = onRestoreGenerationDefaults,
+                    )
                 }
             }
         }
+    }
+}
+
+internal data class GenerationModelUiState(
+    val modelId: String,
+    val modelName: String,
+    val catalogContextTokens: Int,
+    val catalogTemperature: Float,
+    val effectiveContextTokens: Int,
+    val effectiveTemperature: Float,
+    val supportsReasoning: Boolean,
+    val metrics: com.jesjobom.ararai.engine.GenerationMetrics?,
+    val hasOverrides: Boolean,
+)
+
+@Composable
+@Suppress("LongMethod", "CyclomaticComplexMethod")
+private fun GenerationTab(
+    model: GenerationModelUiState?,
+    onContextTokensChange: (Int) -> Unit,
+    onTemperatureChange: (Float) -> Unit,
+    onRestoreDefaults: () -> Unit,
+) {
+    if (model == null) {
+        Text("The selected model does not expose generation settings.")
+        return
+    }
+    var contextText by remember(model.modelId, model.effectiveContextTokens) {
+        mutableStateOf(model.effectiveContextTokens.toString())
+    }
+    var temperatureText by remember(model.modelId, model.effectiveTemperature) {
+        mutableStateOf(model.effectiveTemperature.toString())
+    }
+    val contextValue = contextText.toIntOrNull()
+    val temperatureValue = temperatureText.toFloatOrNull()
+    Text(model.modelName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    Text(
+        "Settings are saved separately for each model and apply to future Chat and Voice Chat turns.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    OutlinedTextField(
+        value = contextText,
+        onValueChange = { contextText = it },
+        label = { Text("Context window") },
+        supportingText = {
+            Text(
+                if (contextValue == null || contextValue <= 0) {
+                    "Enter a positive token count."
+                } else {
+                    "Total input + output capacity. Catalog default: ${model.catalogContextTokens}."
+                },
+            )
+        },
+        isError = contextValue == null || contextValue <= 0,
+        modifier = Modifier.fillMaxWidth().testTag("generation-context"),
+    )
+    Button(
+        onClick = { contextValue?.takeIf { it > 0 }?.let(onContextTokensChange) },
+        enabled = contextValue != null && contextValue > 0,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Apply context window")
+    }
+    Text("Temperature", style = MaterialTheme.typography.titleMedium)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TemperaturePreset.entries.forEach { preset ->
+            OutlinedButton(onClick = {
+                temperatureText = preset.value.toString()
+                onTemperatureChange(preset.value)
+            }) {
+                Text(preset.displayName)
+            }
+        }
+    }
+    OutlinedTextField(
+        value = temperatureText,
+        onValueChange = { temperatureText = it },
+        label = { Text("Manual temperature") },
+        supportingText = {
+            Text(
+                if (temperatureValue == null || !temperatureValue.isFinite() || temperatureValue < 0f) {
+                    "Enter a finite non-negative number."
+                } else {
+                    "Effective: $temperatureValue. Catalog default: ${model.catalogTemperature}."
+                },
+            )
+        },
+        isError = temperatureValue == null || !temperatureValue.isFinite() || temperatureValue < 0f,
+        modifier = Modifier.fillMaxWidth().testTag("generation-temperature"),
+    )
+    Button(
+        onClick = {
+            temperatureValue
+                ?.takeIf { it.isFinite() && it >= 0f }
+                ?.let(onTemperatureChange)
+        },
+        enabled = temperatureValue != null && temperatureValue.isFinite() && temperatureValue >= 0f,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Apply temperature")
+    }
+    OutlinedButton(
+        onClick = onRestoreDefaults,
+        enabled = model.hasOverrides,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Restore catalog defaults")
+    }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Runtime limits", fontWeight = FontWeight.SemiBold)
+            Text("Response limit: controlled by model/runtime.")
+            Text("Reasoning and the final answer share the total context capacity.")
+            Text(if (model.supportsReasoning) "Reasoning supported." else "Reasoning unavailable.")
+        }
+    }
+    Text("Last conversational turn", style = MaterialTheme.typography.titleMedium)
+    val metrics = model.metrics
+    if (metrics == null) {
+        Text("Metrics unavailable.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } else {
+        LabeledValue("Time to first token", "${metrics.timeToFirstTokenMillis} ms")
+        LabeledValue("Prefill tokens", metrics.prefillTokenCount.toString())
+        LabeledValue("Prefill speed", String.format(Locale.US, "%.2f tokens/s", metrics.prefillTokensPerSecond))
+        LabeledValue("Decode tokens", metrics.decodeTokenCount.toString())
+        LabeledValue("Decode speed", String.format(Locale.US, "%.2f tokens/s", metrics.decodeTokensPerSecond))
     }
 }
 

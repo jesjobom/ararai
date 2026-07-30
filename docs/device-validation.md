@@ -91,6 +91,29 @@ downloading a production model.
   the Chat and Voice instructions, and switch modes. Confirm the retained
   native conversation is recreated only when compatibility changes.
 
+## Conversational generation configuration
+
+- For E2B and E4B, open **Assistant configuration → Generation** and verify the
+  selected model, catalog defaults, reasoning capability, and unavailable
+  last-turn metrics before the first run.
+- Set distinct context windows and temperatures for E2B and E4B. Switch models
+  in both directions and restart the app; confirm each model restores its own
+  values.
+- Exercise Precise, Balanced, Creative, and a valid manual temperature. Confirm
+  the next Chat and Voice Chat turns use the saved value and that benchmark
+  parameters remain unchanged.
+- Try progressively larger context windows. Record model, device, app build,
+  load latency, memory pressure, ANR/process termination, and whether returning
+  to the catalog default recovers normally.
+- Confirm changing context closes incompatible runtime state and preserves
+  canonical conversation history.
+- Run a reasoning-heavy turn that finishes without final answer text. Confirm
+  normal Chat shows Incomplete response, preserves partial reasoning under Show
+  reasoning, and never rewrites truncated years automatically.
+- Repeat in Voice Chat. Confirm no empty text, reasoning, ellipsis, or protocol
+  content enters TTS; the incomplete message is visible in shared normal Chat
+  history and the voice loop returns to a valid state.
+
 ## Media, permissions, storage, and privacy
 
 - Deny microphone permission, retry, grant it, record, cancel, record again, and send.

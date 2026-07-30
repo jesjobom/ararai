@@ -20,7 +20,13 @@ class PromptContextBuilderTest {
                     ChatMessage(ChatRole.Assistant, "Earlier answer"),
                 ),
                 userPrompt = "Current question",
-                inferenceConfig = InferenceConfig(contextTokens = 128, maxTokens = 16, temperature = 0.7f, topP = 0.9f),
+                inferenceConfig =
+                InferenceConfig(
+                    contextTokens = 128,
+                    promptReserveTokens = 16,
+                    temperature = 0.7f,
+                    topP = 0.9f,
+                ),
             )
 
         assertEquals(
@@ -45,7 +51,13 @@ class PromptContextBuilderTest {
                     ChatMessage(ChatRole.Assistant, "new reply"),
                 ),
                 userPrompt = "new question",
-                inferenceConfig = InferenceConfig(contextTokens = 70, maxTokens = 1, temperature = 0.7f, topP = 0.9f),
+                inferenceConfig =
+                InferenceConfig(
+                    contextTokens = 70,
+                    promptReserveTokens = 1,
+                    temperature = 0.7f,
+                    topP = 0.9f,
+                ),
             )
         val text = messages.joinToString("\n") { it.text }
 

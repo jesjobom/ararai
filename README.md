@@ -34,7 +34,7 @@ backend, or external database.
   transcription performance.
 - Resumable model downloads continue under an Android foreground service with
   progress and cancellation in a persistent notification.
-- Home, Chat, Voice Chat, Models, and Settings destinations implemented with
+- Home, Chat, Voice Chat, Models, Assistant configuration, and Settings destinations implemented with
   Jetpack Compose; model benchmarks are opened from downloaded model cards.
 - Persistent System, Light, and Dark appearance selection with Material dynamic
   colors on supported devices.
@@ -135,16 +135,16 @@ Once a valid model is present, core inference and Chat do not call a hosted
 inference service.
 
 Wikipedia is an explicit opt-in exception to otherwise local Chat processing.
-Enable it under **Instructions and tools**. A request is sent only when the
+Enable it under **Assistant configuration → Tools**. A request is sent only when the
 selected installed model advertises `wikipedia_search` and the model emits that
 structured call for the current turn. Enabling the option does not send data by
 itself and does not guarantee that every factual prompt will trigger research.
 
-Each eligible call sends only the model-selected query and `en` or `pt`
-language to the corresponding official MediaWiki HTTPS endpoint. ArarAI does
+Each eligible call sends only the model-selected query and a validated
+Wikipedia language code to the corresponding official MediaWiki HTTPS endpoint. ArarAI does
 not send the conversation history, system instruction, session identifier,
-audio, image, or local model data. The provider allows one call with no
-automatic retry per user turn, rejects redirects and non-Wikipedia URLs,
+audio, image, or local model data. The provider allows up to three calls per
+user turn, rejects redirects and non-Wikipedia URLs,
 applies a 12-second total deadline and bounded response/context limits, and
 returns at most three sources. Wikipedia content is external untrusted
 reference material and is not guaranteed to be current or complete.
@@ -185,6 +185,21 @@ failure, while the app-owned conversation copy remains available for replay.
 Stale Voice Chat temporary files are reconciled on startup. A completed
 transcript reconstructs an audio turn after native-state loss; the app omits
 rather than fabricates content for legacy or failed audio without a transcript.
+
+Assistant configuration also has a **Generation** tab. Context window and
+temperature overrides are saved independently for each Chat model and apply to
+future normal Chat and Voice Chat turns. Context window configures LiteRT-LM's
+total input-plus-output capacity and may reload the engine. Temperature offers
+Precise, Balanced, Creative, and manual values. LiteRT-LM 0.14.0 does not expose
+an independent output-token limit, so the app reports that limitation instead
+of presenting a control it cannot enforce. Runtime-backed metrics from the last
+conversational turn are shown when available; benchmark parameters and metrics
+remain fixed and isolated.
+
+If a reasoning-enabled generation finishes without final answer text, ArarAI
+persists and displays an explicit incomplete response. Partial reasoning remains
+available in normal Chat when Show reasoning is enabled. Voice Chat does not
+speak empty output and recovers the loop after recording the incomplete turn.
 
 ## Planning and sources of truth
 

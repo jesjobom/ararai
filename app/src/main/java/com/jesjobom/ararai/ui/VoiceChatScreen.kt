@@ -149,6 +149,7 @@ internal fun VoiceChatScreen(
                     Text("Install a transcription model or select an audio-capable model.")
                     OutlinedButton(onClick = onOpenModels) { Text("Manage models") }
                 }
+                state.notice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 if (state.responsePreview.isNotBlank()) {
                     ResponseReadingViewport(

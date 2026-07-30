@@ -41,7 +41,7 @@ class BenchmarkViewModelTest {
             inference =
             InferenceConfig(
                 contextTokens = 4096,
-                maxTokens = 512,
+                promptReserveTokens = 512,
                 temperature = 0.7f,
                 topP = 0.9f,
             ),
@@ -107,7 +107,7 @@ class BenchmarkViewModelTest {
         assertEquals(1, engine.generateCalls)
         assertEquals(1, engine.unloadCalls)
         assertEquals(2048, engine.loadedConfig?.contextTokens)
-        assertEquals(128, engine.loadedConfig?.maxTokens)
+        assertEquals(128, engine.loadedConfig?.promptReserveTokens)
         assertEquals(0.2f, engine.loadedConfig?.temperature)
         assertEquals(0.9f, engine.loadedConfig?.topP)
     }

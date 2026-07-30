@@ -75,6 +75,7 @@ data class VoiceChatUiState(
     val researchSources: List<KnowledgeSource> = emptyList(),
     val spokenRange: IntRange? = null,
     val readingAnchor: Int = 0,
+    val notice: String? = null,
     val error: String? = null,
     val sessions: List<ChatSessionUiState> = emptyList(),
     val selectedSessionId: String? = null,

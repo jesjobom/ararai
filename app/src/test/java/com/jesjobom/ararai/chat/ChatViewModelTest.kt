@@ -856,6 +856,71 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `marks reasoning without final answer as incomplete`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val viewModel =
+            ChatViewModel(
+                engine =
+                EventStreamingEngine(
+                    listOf(
+                        GenerationEvent.ReasoningToken("unfinished reasoning"),
+                        GenerationEvent.Completed,
+                    ),
+                ),
+                initialModel =
+                model.copy(
+                    reasoningCapabilities = ModelReasoningCapabilities(request = true, output = true),
+                ),
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("solve")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        val content = store.getMessages(store.listSessions().first().id).last().content as MessageContent.TextPrompt
+        assertEquals("", content.text)
+        assertEquals("unfinished reasoning", content.reasoningText)
+        assertEquals(AssistantCompletionStatus.Incomplete, content.completionStatus)
+    }
+
+    @Test
+    fun `uses effective generation configuration and records metrics`() = runTest {
+        val engine = CapturingEngine()
+        var recorded: com.jesjobom.ararai.engine.GenerationMetrics? = null
+        val metrics = com.jesjobom.ararai.engine.GenerationMetrics(10, 2, 20.0, 3, 30.0)
+        val viewModel =
+            ChatViewModel(
+                engine =
+                EventStreamingEngine(
+                    listOf(
+                        GenerationEvent.Metrics(metrics),
+                        GenerationEvent.Token("answer"),
+                        GenerationEvent.Completed,
+                    ),
+                    onLoad = { engine.loadedConfig = it },
+                ),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                generationConfigProvider = { _, config ->
+                    config.copy(contextTokens = 4_096, temperature = 0.2f)
+                },
+                generationMetricsConsumer = { _, value -> recorded = value },
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("hello")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        assertEquals(4_096, engine.loadedConfig?.contextTokens)
+        assertEquals(0.2f, engine.loadedConfig?.temperature)
+        assertEquals(metrics, recorded)
+    }
+
+    @Test
     fun `coalesces streamed presentation independently from persistence`() = runTest {
         val store = CountingChatSessionStore()
         val viewModel =
@@ -1153,11 +1218,12 @@ class ChatViewModelTest {
 
     private class EventStreamingEngine(
         private val events: List<GenerationEvent>,
+        private val onLoad: (InferenceConfig) -> Unit = {},
     ) : LocalLlmEngine {
         override suspend fun load(
             model: LocalModel,
             config: InferenceConfig,
-        ) = Unit
+        ) = onLoad(config)
 
         override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(*events.toTypedArray())
 
@@ -1190,6 +1256,7 @@ class ChatViewModelTest {
     }
 
     private class CapturingEngine : LocalLlmEngine {
+        var loadedConfig: InferenceConfig? = null
         var lastPrompt: String? = null
             private set
         var lastRequest: PromptRequest? = null
