@@ -22,6 +22,7 @@ data class ChatUiState(
     val isLoadingModel: Boolean = false,
     val isGenerating: Boolean = false,
     val researchInProgress: Boolean = false,
+    val activeKnowledgeToolName: String? = null,
     val researchSources: List<KnowledgeSource> = emptyList(),
     val canRetryModelDownload: Boolean = false,
     val error: String? = null,

@@ -165,7 +165,10 @@ class LiteRtLmLocalLlmEngineTest {
             RecordingBridge(
                 chunks =
                 listOf(
-                    LiteRtLmChunk(knowledgeToolEvent = KnowledgeToolExecutionEvent.Started),
+                    LiteRtLmChunk(
+                        knowledgeToolEvent = KnowledgeToolExecutionEvent.Started,
+                        knowledgeToolDisplayName = "Wikipedia",
+                    ),
                     LiteRtLmChunk(
                         knowledgeToolEvent =
                         KnowledgeToolExecutionEvent.Succeeded(listOf(source)),
@@ -193,7 +196,10 @@ class LiteRtLmLocalLlmEngineTest {
                     advertisedToolNames = setOf("wikipedia_search"),
                 ),
             ).test {
-                assertEquals(GenerationEvent.KnowledgeToolStarted("wikipedia_search"), awaitItem())
+                assertEquals(
+                    GenerationEvent.KnowledgeToolStarted("wikipedia_search", "Wikipedia"),
+                    awaitItem(),
+                )
                 assertEquals(
                     GenerationEvent.KnowledgeToolFinished(
                         toolName = "wikipedia_search",
@@ -202,6 +208,68 @@ class LiteRtLmLocalLlmEngineTest {
                     awaitItem(),
                 )
                 assertEquals(GenerationEvent.Token("answer"), awaitItem())
+                assertEquals(GenerationEvent.Completed, awaitItem())
+                awaitComplete()
+            }
+    }
+
+    @Test
+    fun `preserves web search tool identity across engine boundary`() = runTest {
+        val source =
+            KnowledgeSource(
+                provider = "Exa Web Search",
+                title = "Release",
+                canonicalUrl = "https://example.com/release",
+                language = "en",
+                retrievedAtMillis = 42L,
+            )
+        val bridge =
+            RecordingBridge(
+                chunks =
+                listOf(
+                    LiteRtLmChunk(
+                        knowledgeToolEvent = KnowledgeToolExecutionEvent.Started,
+                        knowledgeToolName = "web_search",
+                        knowledgeToolDisplayName = "Exa",
+                    ),
+                    LiteRtLmChunk(
+                        knowledgeToolEvent =
+                        KnowledgeToolExecutionEvent.Succeeded(listOf(source)),
+                        knowledgeToolName = "web_search",
+                    ),
+                ),
+            )
+        val engine =
+            LiteRtLmLocalLlmEngine(
+                bridge = bridge,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
+        engine.load(
+            model.copy(
+                knowledgeToolCapabilities =
+                ModelKnowledgeToolCapabilities(setOf("web_search")),
+            ),
+            config,
+        )
+
+        engine
+            .generate(
+                PromptRequest(
+                    content = MessageContent.TextPrompt("What shipped?"),
+                    advertisedToolNames = setOf("web_search"),
+                ),
+            ).test {
+                assertEquals(
+                    GenerationEvent.KnowledgeToolStarted("web_search", "Exa"),
+                    awaitItem(),
+                )
+                assertEquals(
+                    GenerationEvent.KnowledgeToolFinished(
+                        toolName = "web_search",
+                        sources = listOf(source),
+                    ),
+                    awaitItem(),
+                )
                 assertEquals(GenerationEvent.Completed, awaitItem())
                 awaitComplete()
             }

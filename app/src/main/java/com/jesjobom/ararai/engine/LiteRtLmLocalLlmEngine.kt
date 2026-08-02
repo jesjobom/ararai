@@ -17,9 +17,11 @@ import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.tool
 import com.jesjobom.ararai.chat.MessageContent
+import com.jesjobom.ararai.chat.WEB_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.knowledge.KnowledgeTool
 import com.jesjobom.ararai.knowledge.KnowledgeToolExecutionEvent
+import com.jesjobom.ararai.knowledge.WebSearchOpenApiTool
 import com.jesjobom.ararai.knowledge.WikipediaKnowledgeTool
 import com.jesjobom.ararai.knowledge.WikipediaOpenApiTool
 import com.jesjobom.ararai.model.InferenceConfig
@@ -247,20 +249,22 @@ class LiteRtLmLocalLlmEngine(
         if (text.isNotEmpty()) add(GenerationEvent.Token(text))
         if (reasoning.isNotEmpty()) add(GenerationEvent.ReasoningToken(reasoning))
         metrics?.let { add(GenerationEvent.Metrics(it)) }
+        val eventToolName = knowledgeToolName ?: WIKIPEDIA_SEARCH_TOOL_NAME
+        val eventToolDisplayName = knowledgeToolDisplayName ?: eventToolName
         when (val event = knowledgeToolEvent) {
             KnowledgeToolExecutionEvent.Started ->
-                add(GenerationEvent.KnowledgeToolStarted(WIKIPEDIA_SEARCH_TOOL_NAME))
+                add(GenerationEvent.KnowledgeToolStarted(eventToolName, eventToolDisplayName))
             is KnowledgeToolExecutionEvent.Succeeded ->
                 add(
                     GenerationEvent.KnowledgeToolFinished(
-                        toolName = WIKIPEDIA_SEARCH_TOOL_NAME,
+                        toolName = eventToolName,
                         sources = event.sources,
                     ),
                 )
             is KnowledgeToolExecutionEvent.Failed ->
                 add(
                     GenerationEvent.KnowledgeToolFinished(
-                        toolName = WIKIPEDIA_SEARCH_TOOL_NAME,
+                        toolName = eventToolName,
                         failureReason = event.reason,
                     ),
                 )
@@ -311,12 +315,20 @@ data class LiteRtLmChunk(
     val reasoning: String = "",
     val metrics: GenerationMetrics? = null,
     val knowledgeToolEvent: KnowledgeToolExecutionEvent? = null,
+    val knowledgeToolName: String? = null,
+    val knowledgeToolDisplayName: String? = null,
 )
+
+fun interface WebSearchKnowledgeToolResolver {
+    fun resolve(): KnowledgeTool?
+}
 
 @OptIn(ExperimentalApi::class)
 class AndroidLiteRtLmBridge(
     private val cacheDir: String? = null,
     private val wikipediaKnowledgeTool: KnowledgeTool = WikipediaKnowledgeTool(),
+    private val webSearchKnowledgeToolResolver: WebSearchKnowledgeToolResolver =
+        WebSearchKnowledgeToolResolver { null },
 ) : LiteRtLmBridge {
     override suspend fun load(
         modelPath: String,
@@ -347,7 +359,12 @@ class AndroidLiteRtLmBridge(
                 LOG_TAG,
                 "Engine initialized: profile=$profile, elapsed=${startedAt.elapsedMillis()} ms",
             )
-            AndroidLiteRtLmSession(engine, wikipediaKnowledgeTool, knowledgeToolNames)
+            AndroidLiteRtLmSession(
+                engine,
+                wikipediaKnowledgeTool,
+                webSearchKnowledgeToolResolver,
+                knowledgeToolNames,
+            )
         } catch (error: Throwable) {
             engine.close()
             throw error
@@ -365,6 +382,7 @@ class AndroidLiteRtLmBridge(
 private class AndroidLiteRtLmSession(
     private val engine: Engine,
     private val wikipediaKnowledgeTool: KnowledgeTool,
+    private val webSearchKnowledgeToolResolver: WebSearchKnowledgeToolResolver,
     private val supportedKnowledgeToolNames: Set<String>,
 ) : LiteRtLmSession {
     private val conversations =
@@ -406,14 +424,33 @@ private class AndroidLiteRtLmSession(
                 )
         val created =
             if (canReuse) {
-                ProductionConversation(retained.resource, retained.state.wikipediaTool)
+                ProductionConversation(
+                    retained.resource,
+                    retained.state.wikipediaTool,
+                    retained.state.webSearchTool,
+                )
             } else {
                 retained?.resource?.let { conversations.invalidate(it, cancelFirst = false) }
                 createProductionConversation(request, historyBeforeCurrent, samplerConfig)
             }
         val conversation = created.conversation
         created.wikipediaTool?.beginTurn { event ->
-            trySend(LiteRtLmChunk(knowledgeToolEvent = event))
+            trySend(
+                LiteRtLmChunk(
+                    knowledgeToolEvent = event,
+                    knowledgeToolName = WIKIPEDIA_SEARCH_TOOL_NAME,
+                    knowledgeToolDisplayName = created.wikipediaTool.displayName,
+                ),
+            )
+        }
+        created.webSearchTool?.beginTurn { event ->
+            trySend(
+                LiteRtLmChunk(
+                    knowledgeToolEvent = event,
+                    knowledgeToolName = WEB_SEARCH_TOOL_NAME,
+                    knowledgeToolDisplayName = created.webSearchTool.displayName,
+                ),
+            )
         }
         Log.d(
             LOG_TAG,
@@ -476,6 +513,7 @@ private class AndroidLiteRtLmSession(
                                     key = key,
                                     transcript = request.transcriptAfter(previousText),
                                     wikipediaTool = created.wikipediaTool,
+                                    webSearchTool = created.webSearchTool,
                                 ),
                             )
                         }
@@ -518,7 +556,21 @@ private class AndroidLiteRtLmSession(
             } else {
                 null
             }
-        val configuredTools = listOfNotNull(wikipediaTool?.let(::tool))
+        val webSearchTool =
+            if (WEB_SEARCH_TOOL_NAME in requested) {
+                WebSearchOpenApiTool(
+                    checkNotNull(webSearchKnowledgeToolResolver.resolve()) {
+                        "Selected web-search provider is unavailable"
+                    },
+                )
+            } else {
+                null
+            }
+        val configuredTools =
+            listOfNotNull(
+                wikipediaTool?.let(::tool),
+                webSearchTool?.let(::tool),
+            )
         if (configuredTools.isNotEmpty()) {
             ExperimentalFlags.enableConversationConstrainedDecoding = true
         }
@@ -535,6 +587,7 @@ private class AndroidLiteRtLmSession(
                     ),
                 ),
                 wikipediaTool = wikipediaTool,
+                webSearchTool = webSearchTool,
             )
         } finally {
             if (configuredTools.isNotEmpty()) {
@@ -546,6 +599,7 @@ private class AndroidLiteRtLmSession(
     private data class ProductionConversation(
         val conversation: Conversation,
         val wikipediaTool: WikipediaOpenApiTool?,
+        val webSearchTool: WebSearchOpenApiTool?,
     )
 
     override fun cancel() {
@@ -578,6 +632,7 @@ private class AndroidLiteRtLmSession(
         val key: LiteRtLmConversationKey,
         val transcript: List<PromptChatMessage>,
         val wikipediaTool: WikipediaOpenApiTool? = null,
+        val webSearchTool: WebSearchOpenApiTool? = null,
     )
 }
 

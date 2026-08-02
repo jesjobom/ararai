@@ -34,6 +34,7 @@ android {
         versionCode = 2
         versionName = buildTimestampVersion()
         buildConfigField("String", "LITERT_LM_VERSION", "\"$liteRtLmVersion\"")
+        buildConfigField("boolean", "EXPERIMENTAL_WEB_SEARCH", "false")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -45,6 +46,7 @@ android {
     buildTypes {
         debug {
             isDebuggable = true
+            buildConfigField("boolean", "EXPERIMENTAL_WEB_SEARCH", "true")
             configuredDebugKeystore?.let { persistentKeystore ->
                 signingConfig =
                     signingConfigs.getByName("debug").apply {

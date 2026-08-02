@@ -138,11 +138,13 @@ internal fun VoiceChatScreen(
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(phaseLabel(state.phase), style = MaterialTheme.typography.headlineSmall)
-                if (state.researchInProgress) {
-                    Text(
-                        "Researching Wikipedia…",
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                Box(modifier = Modifier.height(24.dp), contentAlignment = Alignment.Center) {
+                    if (state.researchInProgress) {
+                        Text(
+                            "${knowledgeToolStatusText(state.activeKnowledgeToolName)}…",
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
                 if (state.isLoadingModel) Text("Loading model…")
                 if (!state.modelSupportsAudio && !state.transcriptionAvailable) {

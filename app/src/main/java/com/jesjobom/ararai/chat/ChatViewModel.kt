@@ -187,6 +187,7 @@ class ChatViewModel(
                 imageAttachments = emptyList(),
                 audioPrompt = null,
                 researchInProgress = false,
+                activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 error = null,
             )
@@ -207,6 +208,7 @@ class ChatViewModel(
                 imageAttachments = emptyList(),
                 audioPrompt = null,
                 researchInProgress = false,
+                activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 error = null,
             )
@@ -284,6 +286,7 @@ class ChatViewModel(
                 imageAttachments = emptyList(),
                 audioPrompt = null,
                 researchInProgress = false,
+                activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 error = null,
             )
@@ -450,6 +453,7 @@ class ChatViewModel(
                 isLoadingModel = true,
                 isGenerating = true,
                 researchInProgress = false,
+                activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 error = null,
             )
@@ -519,20 +523,23 @@ class ChatViewModel(
                                 is GenerationEvent.ReasoningToken -> appendAssistantReasoningToken(event.text)
                                 is GenerationEvent.Metrics -> generationMetricsConsumer(modelForRequest, event.value)
                                 is GenerationEvent.KnowledgeToolStarted -> {
-                                    pendingResearchSources = emptyList()
                                     _uiState.update {
                                         it.copy(
                                             researchInProgress = true,
-                                            researchSources = emptyList(),
+                                            activeKnowledgeToolName = event.displayName,
+                                            researchSources = pendingResearchSources,
                                         )
                                     }
                                 }
                                 is GenerationEvent.KnowledgeToolFinished -> {
-                                    pendingResearchSources = event.sources
+                                    pendingResearchSources =
+                                        (pendingResearchSources + event.sources)
+                                            .distinctBy { source -> source.canonicalUrl }
                                     _uiState.update {
                                         it.copy(
                                             researchInProgress = false,
-                                            researchSources = event.sources,
+                                            activeKnowledgeToolName = null,
+                                            researchSources = pendingResearchSources,
                                         )
                                     }
                                 }
@@ -545,6 +552,7 @@ class ChatViewModel(
                                             isLoadingModel = false,
                                             isGenerating = false,
                                             researchInProgress = false,
+                                            activeKnowledgeToolName = null,
                                             error = event.message,
                                         )
                                     }
@@ -559,6 +567,7 @@ class ChatViewModel(
                                             isLoadingModel = false,
                                             isGenerating = false,
                                             researchInProgress = false,
+                                            activeKnowledgeToolName = null,
                                             prompt = "",
                                             imageAttachments = emptyList(),
                                             audioPrompt = null,
@@ -688,6 +697,7 @@ class ChatViewModel(
                 isLoadingModel = false,
                 isGenerating = false,
                 researchInProgress = false,
+                activeKnowledgeToolName = null,
                 researchSources = emptyList(),
             )
         }
@@ -717,6 +727,7 @@ class ChatViewModel(
                 isLoadingModel = false,
                 isGenerating = false,
                 researchInProgress = false,
+                activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 error = null,
             )

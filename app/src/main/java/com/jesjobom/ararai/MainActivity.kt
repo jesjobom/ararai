@@ -17,12 +17,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import com.jesjobom.ararai.chat.DeferredNewChatSessionStore
 import com.jesjobom.ararai.chat.FileChatMediaRepository
 import com.jesjobom.ararai.chat.SharedPreferencesChatPreferences
 import com.jesjobom.ararai.chat.SharedPreferencesInstructionPreferences
 import com.jesjobom.ararai.chat.SqliteChatSessionStore
 import com.jesjobom.ararai.chat.WhisperCppAudioTranscriber
 import com.jesjobom.ararai.engine.prepareLiteRtLmCacheDir
+import com.jesjobom.ararai.knowledge.EncryptedWebSearchPreferences
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.model.SharedPreferencesGenerationPreferences
 import com.jesjobom.ararai.settings.SharedPreferencesThemePreferenceStore
@@ -46,12 +48,13 @@ class MainActivity : ComponentActivity() {
         val app = application as ArarAiApplication
         val modelCatalog = app.modelCatalog
         val modelController = app.modelController
-        val chatSessionStore = SqliteChatSessionStore(this)
+        val chatSessionStore = DeferredNewChatSessionStore(SqliteChatSessionStore(this))
         val chatMediaRepository = FileChatMediaRepository(java.io.File(filesDir, "chat_media"))
         val chatMediaServices = androidChatMediaServices(chatMediaRepository)
         val chatPreferences = SharedPreferencesChatPreferences(this)
         val instructionPreferences = SharedPreferencesInstructionPreferences(this)
         val generationPreferences = SharedPreferencesGenerationPreferences(this)
+        val webSearchPreferences = EncryptedWebSearchPreferences(this)
         val audioTranscriber = WhisperCppAudioTranscriber(
             models = { modelController.state.value.models },
         )
@@ -92,6 +95,7 @@ class MainActivity : ComponentActivity() {
                         chatPreferences = chatPreferences,
                         instructionPreferences = instructionPreferences,
                         generationPreferences = generationPreferences,
+                        webSearchPreferences = webSearchPreferences,
                         audioTranscriber = audioTranscriber,
                         chatTextToSpeechServiceFactory = { AndroidChatTextToSpeechService(this) },
                         chatLanguageIdentifierFactory = { MlKitChatLanguageIdentifier() },

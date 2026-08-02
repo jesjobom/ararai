@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-07-30
+goal: Select and validate a token-efficient web-search mechanism for ArarAI
+  without embedding vendor-owned credentials.

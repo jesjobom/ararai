@@ -1,5 +1,6 @@
 package com.jesjobom.ararai.chat
 
+import com.jesjobom.ararai.knowledge.WebSearchProvider
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelKnowledgeToolCapabilities
 import org.junit.Assert.assertEquals
@@ -35,6 +36,46 @@ class InstructionPreferencesTest {
         assertEquals(
             emptySet<String>(),
             eligibleKnowledgeToolNames(InstructionSettings(wikipediaEnabled = true), null),
+        )
+    }
+
+    @Test
+    fun `advertises experimental web search only for configured gate and capability`() {
+        val supported =
+            LocalModel(
+                id = "supported",
+                name = "Supported",
+                filePath = "/tmp/model",
+                knowledgeToolCapabilities =
+                ModelKnowledgeToolCapabilities(setOf(WEB_SEARCH_TOOL_NAME)),
+            )
+
+        assertEquals(
+            setOf(WEB_SEARCH_TOOL_NAME),
+            eligibleKnowledgeToolNames(
+                InstructionSettings(),
+                supported,
+                selectedWebProvider = WebSearchProvider.Tavily,
+                experimentalWebSearchEnabled = true,
+            ),
+        )
+        assertEquals(
+            emptySet<String>(),
+            eligibleKnowledgeToolNames(
+                InstructionSettings(),
+                supported,
+                selectedWebProvider = WebSearchProvider.Tavily,
+                experimentalWebSearchEnabled = false,
+            ),
+        )
+        assertEquals(
+            emptySet<String>(),
+            eligibleKnowledgeToolNames(
+                InstructionSettings(),
+                supported,
+                selectedWebProvider = null,
+                experimentalWebSearchEnabled = true,
+            ),
         )
     }
 
@@ -102,6 +143,9 @@ class InstructionPreferencesTest {
 
         assertEquals(setOf("calendar_lookup", "wikipedia_search"), turn.advertisedToolNames)
         assertTrue(turn.systemInstruction.contains("Use wikipedia_search"))
+        assertTrue(turn.systemInstruction.contains("birth date"))
+        assertTrue(turn.systemInstruction.contains("Do not use it for current news"))
+        assertTrue(turn.systemInstruction.contains("use web_search for those when available"))
         assertTrue(turn.systemInstruction.contains("at most three calls"))
         assertTrue(turn.systemInstruction.contains("Search in English first"))
         assertTrue(turn.systemInstruction.contains("detect the language"))
@@ -117,6 +161,21 @@ class InstructionPreferencesTest {
             )
 
         assertFalse(turn.systemInstruction.contains("wikipedia_search"))
+    }
+
+    @Test
+    fun `web search instruction identifies provider and final synthesis limit`() {
+        val turn =
+            conversationTurnSettings(
+                settings = InstructionSettings(),
+                mode = InteractionMode.Chat,
+                advertisedToolNames = setOf(WEB_SEARCH_TOOL_NAME),
+                webSearchProvider = WebSearchProvider.Exa,
+            )
+
+        assertTrue(turn.systemInstruction.contains("Use web_search through Exa"))
+        assertTrue(turn.systemInstruction.contains("at most two calls"))
+        assertTrue(turn.systemInstruction.contains("synthesize"))
     }
 
     @Test

@@ -72,6 +72,7 @@ data class VoiceChatUiState(
     val diagnostics: List<VoiceDiagnostic> = emptyList(),
     val responsePreview: String = "",
     val researchInProgress: Boolean = false,
+    val activeKnowledgeToolName: String? = null,
     val researchSources: List<KnowledgeSource> = emptyList(),
     val spokenRange: IntRange? = null,
     val readingAnchor: Int = 0,

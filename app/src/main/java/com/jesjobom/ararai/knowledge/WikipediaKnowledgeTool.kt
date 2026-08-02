@@ -32,6 +32,8 @@ class WikipediaKnowledgeTool(
     private val clock: () -> Long = System::currentTimeMillis,
     private val totalTimeoutMillis: Long = DEFAULT_TOTAL_TIMEOUT_MILLIS,
 ) : KnowledgeTool {
+    override val displayName: String = "Wikipedia"
+
     init {
         require(totalTimeoutMillis > 0)
     }

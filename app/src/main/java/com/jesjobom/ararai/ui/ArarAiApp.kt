@@ -30,8 +30,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -57,6 +59,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -82,8 +85,23 @@ import com.jesjobom.ararai.engine.AndroidLiteRtLmBridge
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.LiteRtLmLocalLlmEngine
 import com.jesjobom.ararai.engine.LocalLlmEngine
+import com.jesjobom.ararai.engine.WebSearchKnowledgeToolResolver
+import com.jesjobom.ararai.knowledge.AndroidWebSearchComparisonRunner
+import com.jesjobom.ararai.knowledge.FallbackKnowledgeTool
+import com.jesjobom.ararai.knowledge.InMemoryWebSearchPreferences
+import com.jesjobom.ararai.knowledge.RecordingComparisonKnowledgeTool
 import com.jesjobom.ararai.knowledge.ToolSmokeTestResult
+import com.jesjobom.ararai.knowledge.WebSearchComparisonCheckpointStore
+import com.jesjobom.ararai.knowledge.WebSearchComparisonEngineFactory
+import com.jesjobom.ararai.knowledge.WebSearchComparisonUiState
+import com.jesjobom.ararai.knowledge.WebSearchComparisonViewModel
+import com.jesjobom.ararai.knowledge.WebSearchPreferences
+import com.jesjobom.ararai.knowledge.WebSearchProvider
+import com.jesjobom.ararai.knowledge.WebSearchSettings
+import com.jesjobom.ararai.knowledge.WebSearchSmokeTest
+import com.jesjobom.ararai.knowledge.WebSearchToolFactory
 import com.jesjobom.ararai.knowledge.WikipediaSmokeTest
+import com.jesjobom.ararai.knowledge.redactedProviderError
 import com.jesjobom.ararai.model.GenerationPreferences
 import com.jesjobom.ararai.model.InMemoryGenerationPreferences
 import com.jesjobom.ararai.model.ManagedModelItem
@@ -132,6 +150,7 @@ internal fun ArarAiApp(
     chatPreferences: ChatPreferences,
     instructionPreferences: InstructionPreferences = InMemoryInstructionPreferences(),
     generationPreferences: GenerationPreferences = InMemoryGenerationPreferences(),
+    webSearchPreferences: WebSearchPreferences = InMemoryWebSearchPreferences(),
     audioTranscriber: AudioTranscriber,
     chatTextToSpeechServiceFactory: () -> ChatTextToSpeechService,
     chatLanguageIdentifierFactory: () -> ChatLanguageIdentifier,
@@ -143,9 +162,24 @@ internal fun ArarAiApp(
     voiceTemporaryDirectory: File,
     openModelManagementRequest: Int = 0,
     liteRtLmCacheDir: String? = null,
+    webSearchToolFactory: WebSearchToolFactory = WebSearchToolFactory(),
     localLlmEngineFactory: () -> LocalLlmEngine = {
         LiteRtLmLocalLlmEngine(
-            bridge = AndroidLiteRtLmBridge(cacheDir = liteRtLmCacheDir),
+            bridge =
+            AndroidLiteRtLmBridge(
+                cacheDir = liteRtLmCacheDir,
+                webSearchKnowledgeToolResolver =
+                WebSearchKnowledgeToolResolver {
+                    webSearchPreferences.settings.value.orderedEnabledProviders
+                        .map { provider ->
+                            webSearchToolFactory.create(provider) {
+                                webSearchPreferences.token(provider)
+                            }
+                        }
+                        .takeIf(List<*>::isNotEmpty)
+                        ?.let(::FallbackKnowledgeTool)
+                },
+            ),
         )
     },
 ) {
@@ -153,6 +187,7 @@ internal fun ArarAiApp(
     val modelCatalogState by modelController.state.collectAsState()
     val instructionSettings by instructionPreferences.settings.collectAsState()
     val generationSettings by generationPreferences.state.collectAsState()
+    val webSearchSettings by webSearchPreferences.settings.collectAsState()
     val startupState = modelCatalogState.selectedStartupState
     val modelConfig = modelCatalogState.selectedConfig
     var destination by remember { mutableStateOf(AppDestination.Home) }
@@ -161,6 +196,9 @@ internal fun ArarAiApp(
     var toolSmokeResult by remember { mutableStateOf<ToolSmokeTestResult?>(null) }
     var toolSmokeError by remember { mutableStateOf<String?>(null) }
     val toolSmokeTest = remember { WikipediaSmokeTest() }
+    var webSmokeRunning by remember { mutableStateOf<WebSearchProvider?>(null) }
+    var webSmokeResults by remember { mutableStateOf<Map<WebSearchProvider, ToolSmokeTestResult>>(emptyMap()) }
+    var webSmokeErrors by remember { mutableStateOf<Map<WebSearchProvider, String>>(emptyMap()) }
     val coroutineScope = rememberCoroutineScope()
     val localLlmRuntime = remember(localLlmEngineFactory) {
         AppLocalLlmRuntime(localLlmEngineFactory)
@@ -184,7 +222,15 @@ internal fun ArarAiApp(
                 conversationTurnSettings(
                     settings,
                     InteractionMode.Chat,
-                    eligibleKnowledgeToolNames(settings, activeModel),
+                    eligibleKnowledgeToolNames(
+                        settings,
+                        activeModel,
+                        webSearchPreferences.settings.value.preferredProvider,
+                        com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH,
+                    ),
+                    webSearchProvider = webSearchPreferences.settings.value.preferredProvider,
+                    webSearchFallbackProvider =
+                    webSearchPreferences.settings.value.orderedEnabledProviders.getOrNull(1),
                 )
             },
             generationConfigProvider = { activeModel, catalog ->
@@ -208,6 +254,49 @@ internal fun ArarAiApp(
             initialState = startupState,
         )
     }
+    val webSearchComparisonViewModel = remember {
+        val checkpointStore =
+            WebSearchComparisonCheckpointStore(
+                File(appContext.filesDir, "diagnostics/web-search-comparison"),
+            )
+        val runner =
+            AndroidWebSearchComparisonRunner(
+                availableModels = {
+                    modelController.state.value.models.mapNotNull { item ->
+                        (item.state as? ModelStartupState.Available)?.model?.let { item.config.id to it }
+                    }.toMap()
+                },
+                engineFactory =
+                WebSearchComparisonEngineFactory { provider, telemetry ->
+                    LiteRtLmLocalLlmEngine(
+                        bridge =
+                        AndroidLiteRtLmBridge(
+                            cacheDir = liteRtLmCacheDir,
+                            webSearchKnowledgeToolResolver =
+                            WebSearchKnowledgeToolResolver {
+                                RecordingComparisonKnowledgeTool(
+                                    delegate =
+                                    webSearchToolFactory.create(provider) {
+                                        webSearchPreferences.token(provider)
+                                    },
+                                    telemetry = telemetry,
+                                )
+                            },
+                        ),
+                    )
+                },
+                reviewSink = checkpointStore::writeReview,
+            )
+        WebSearchComparisonViewModel(
+            models = { modelController.state.value.models },
+            runner = runner,
+            checkpointStore = checkpointStore,
+            providerConfigured = { provider ->
+                provider in webSearchPreferences.settings.value.configuredProviders
+            },
+            prepareExclusiveRuntime = { localLlmRuntime.engine.unload() },
+        )
+    }
     val voiceChatViewModel = remember {
         VoiceChatViewModel(
             engine = localLlmRuntime.engine,
@@ -217,7 +306,15 @@ internal fun ArarAiApp(
                 conversationTurnSettings(
                     settings,
                     InteractionMode.Voice,
-                    eligibleKnowledgeToolNames(settings, activeModel),
+                    eligibleKnowledgeToolNames(
+                        settings,
+                        activeModel,
+                        webSearchPreferences.settings.value.preferredProvider,
+                        com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH,
+                    ),
+                    webSearchProvider = webSearchPreferences.settings.value.preferredProvider,
+                    webSearchFallbackProvider =
+                    webSearchPreferences.settings.value.orderedEnabledProviders.getOrNull(1),
                 )
             },
             generationConfigProvider = { activeModel, catalog ->
@@ -250,7 +347,10 @@ internal fun ArarAiApp(
         when (destination) {
             AppDestination.Chat -> chatViewModel.onLeavingChat()
             AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
-            AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
+            AppDestination.Diagnostics -> {
+                benchmarkViewModel.onLeavingBenchmark()
+                webSearchComparisonViewModel.cancel()
+            }
             AppDestination.Home,
             AppDestination.ModelStatus,
             AppDestination.WhisperBenchmark,
@@ -264,6 +364,7 @@ internal fun ArarAiApp(
     BackHandler(enabled = destination != AppDestination.Home) {
         if (destination == AppDestination.WhisperBenchmark || destination == AppDestination.Diagnostics) {
             benchmarkViewModel.onLeavingBenchmark()
+            webSearchComparisonViewModel.cancel()
             destination = AppDestination.ModelStatus
         } else {
             returnHome()
@@ -275,7 +376,10 @@ internal fun ArarAiApp(
             when (destination) {
                 AppDestination.Chat -> chatViewModel.onLeavingChat()
                 AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
-                AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
+                AppDestination.Diagnostics -> {
+                    benchmarkViewModel.onLeavingBenchmark()
+                    webSearchComparisonViewModel.cancel()
+                }
                 AppDestination.Home,
                 AppDestination.ModelStatus,
                 AppDestination.WhisperBenchmark,
@@ -295,6 +399,9 @@ internal fun ArarAiApp(
     LaunchedEffect(modelConfig, startupState) {
         benchmarkViewModel.onSelectedModelState(modelConfig, startupState)
     }
+
+    LaunchedEffect(modelCatalogState.models) { webSearchComparisonViewModel.refresh() }
+    LaunchedEffect(webSearchSettings) { webSearchComparisonViewModel.refresh() }
 
     when (destination) {
         AppDestination.Home -> HomeScreen(
@@ -340,8 +447,10 @@ internal fun ArarAiApp(
         }
         AppDestination.Diagnostics -> BenchmarkScreen(
             viewModel = benchmarkViewModel,
+            comparisonViewModel = webSearchComparisonViewModel,
             onBack = {
                 benchmarkViewModel.onLeavingBenchmark()
+                webSearchComparisonViewModel.cancel()
                 destination = AppDestination.ModelStatus
             },
         )
@@ -409,6 +518,12 @@ internal fun ArarAiApp(
                 ?.model
                 ?.knowledgeToolCapabilities
                 ?.supports(com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME) == true,
+            webSearchCompatible =
+            com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH &&
+                (startupState as? ModelStartupState.Available)
+                    ?.model
+                    ?.knowledgeToolCapabilities
+                    ?.supports(com.jesjobom.ararai.chat.WEB_SEARCH_TOOL_NAME) == true,
             onInstructionChange = instructionPreferences::setInstruction,
             onRestoreDefault = instructionPreferences::restoreDefault,
             onWikipediaEnabledChange = instructionPreferences::setWikipediaEnabled,
@@ -418,6 +533,45 @@ internal fun ArarAiApp(
             toolSmokeRunning = toolSmokeRunning,
             toolSmokeResult = toolSmokeResult,
             toolSmokeError = toolSmokeError,
+            webSearchSettings = webSearchSettings,
+            webSmokeRunning = webSmokeRunning,
+            webSmokeResults = webSmokeResults,
+            webSmokeErrors = webSmokeErrors,
+            onVerifyWebProvider = { provider, token ->
+                if (webSmokeRunning == null) {
+                    webSmokeRunning = provider
+                    webSmokeResults = webSmokeResults - provider
+                    webSmokeErrors = webSmokeErrors - provider
+                    coroutineScope.launch {
+                        try {
+                            val result =
+                                WebSearchSmokeTest(
+                                    provider,
+                                    webSearchToolFactory.create(provider) { token },
+                                ).run()
+                            webSmokeResults = webSmokeResults + (provider to result)
+                            if (result.passed) {
+                                webSearchPreferences.saveToken(provider, token)
+                                webSearchPreferences.setProviderEnabled(provider, true)
+                            }
+                        } catch (error: RuntimeException) {
+                            webSmokeErrors =
+                                webSmokeErrors +
+                                (provider to redactedProviderError(error, listOf(token)))
+                        } finally {
+                            webSmokeRunning = null
+                        }
+                    }
+                }
+            },
+            onWebProviderEnabledChange = { provider, enabled ->
+                webSearchPreferences.setProviderEnabled(provider, enabled)
+            },
+            onRemoveWebProvider = { provider ->
+                webSearchPreferences.removeToken(provider)
+                webSmokeResults = webSmokeResults - provider
+                webSmokeErrors = webSmokeErrors - provider
+            },
             onRunWikipediaSmoke = {
                 if (!toolSmokeRunning) {
                     toolSmokeRunning = true
@@ -644,6 +798,7 @@ internal fun InstructionsAndToolsScreen(
     settings: com.jesjobom.ararai.chat.InstructionSettings,
     generationModel: GenerationModelUiState? = null,
     wikipediaCompatible: Boolean,
+    webSearchCompatible: Boolean = false,
     onInstructionChange: (InteractionMode, String) -> Unit,
     onRestoreDefault: (InteractionMode) -> Unit,
     onWikipediaEnabledChange: (Boolean) -> Unit,
@@ -653,6 +808,13 @@ internal fun InstructionsAndToolsScreen(
     toolSmokeRunning: Boolean = false,
     toolSmokeResult: ToolSmokeTestResult? = null,
     toolSmokeError: String? = null,
+    webSearchSettings: WebSearchSettings = WebSearchSettings(),
+    webSmokeRunning: WebSearchProvider? = null,
+    webSmokeResults: Map<WebSearchProvider, ToolSmokeTestResult> = emptyMap(),
+    webSmokeErrors: Map<WebSearchProvider, String> = emptyMap(),
+    onVerifyWebProvider: (WebSearchProvider, String) -> Unit = { _, _ -> },
+    onWebProviderEnabledChange: (WebSearchProvider, Boolean) -> Unit = { _, _ -> },
+    onRemoveWebProvider: (WebSearchProvider) -> Unit = {},
     onRunWikipediaSmoke: () -> Unit = {},
     onBack: () -> Unit,
 ) {
@@ -663,7 +825,7 @@ internal fun InstructionsAndToolsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             PrimaryTabRow(selectedTabIndex = selectedTab) {
-                listOf("Instructions", "Tools", "Generation").forEachIndexed { index, label ->
+                listOf("Prompts", "Tools", "Generation").forEachIndexed { index, label ->
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
@@ -690,6 +852,14 @@ internal fun InstructionsAndToolsScreen(
                         smokeResult = toolSmokeResult,
                         smokeError = toolSmokeError,
                         onRunSmoke = onRunWikipediaSmoke,
+                        webSearchSettings = webSearchSettings,
+                        webSearchCompatible = webSearchCompatible,
+                        webSmokeRunning = webSmokeRunning,
+                        webSmokeResults = webSmokeResults,
+                        webSmokeErrors = webSmokeErrors,
+                        onVerifyWebProvider = onVerifyWebProvider,
+                        onWebProviderEnabledChange = onWebProviderEnabledChange,
+                        onRemoveWebProvider = onRemoveWebProvider,
                     )
                     else -> GenerationTab(
                         model = generationModel,
@@ -727,80 +897,43 @@ private fun GenerationTab(
         Text("The selected model does not expose generation settings.")
         return
     }
-    var contextText by remember(model.modelId, model.effectiveContextTokens) {
-        mutableStateOf(model.effectiveContextTokens.toString())
-    }
-    var temperatureText by remember(model.modelId, model.effectiveTemperature) {
-        mutableStateOf(model.effectiveTemperature.toString())
-    }
-    val contextValue = contextText.toIntOrNull()
-    val temperatureValue = temperatureText.toFloatOrNull()
     Text(model.modelName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
     Text(
         "Settings are saved separately for each model and apply to future Chat and Voice Chat turns.",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    OutlinedTextField(
-        value = contextText,
-        onValueChange = { contextText = it },
-        label = { Text("Context window") },
-        supportingText = {
-            Text(
-                if (contextValue == null || contextValue <= 0) {
-                    "Enter a positive token count."
-                } else {
-                    "Total input + output capacity. Catalog default: ${model.catalogContextTokens}."
-                },
+    Text("Context window", style = MaterialTheme.typography.titleMedium)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(1024, 2048, 4096, 6144, 8192).forEach { tokens ->
+            FilterChip(
+                selected = model.effectiveContextTokens == tokens,
+                onClick = { onContextTokensChange(tokens) },
+                label = { Text(tokens.toString()) },
+                modifier = Modifier.testTag("generation-context-$tokens"),
             )
-        },
-        isError = contextValue == null || contextValue <= 0,
-        modifier = Modifier.fillMaxWidth().testTag("generation-context"),
-    )
-    Button(
-        onClick = { contextValue?.takeIf { it > 0 }?.let(onContextTokensChange) },
-        enabled = contextValue != null && contextValue > 0,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text("Apply context window")
+        }
     }
+    Text(
+        "Selected: ${model.effectiveContextTokens} tokens. Catalog default: ${model.catalogContextTokens}.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     Text("Temperature", style = MaterialTheme.typography.titleMedium)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TemperaturePreset.entries.forEach { preset ->
-            OutlinedButton(onClick = {
-                temperatureText = preset.value.toString()
-                onTemperatureChange(preset.value)
-            }) {
-                Text(preset.displayName)
-            }
+            FilterChip(
+                selected = model.effectiveTemperature == preset.value,
+                onClick = { onTemperatureChange(preset.value) },
+                label = { Text(preset.displayName) },
+                modifier = Modifier.testTag("generation-temperature-${preset.name.lowercase()}"),
+            )
         }
     }
-    OutlinedTextField(
-        value = temperatureText,
-        onValueChange = { temperatureText = it },
-        label = { Text("Manual temperature") },
-        supportingText = {
-            Text(
-                if (temperatureValue == null || !temperatureValue.isFinite() || temperatureValue < 0f) {
-                    "Enter a finite non-negative number."
-                } else {
-                    "Effective: $temperatureValue. Catalog default: ${model.catalogTemperature}."
-                },
-            )
-        },
-        isError = temperatureValue == null || !temperatureValue.isFinite() || temperatureValue < 0f,
-        modifier = Modifier.fillMaxWidth().testTag("generation-temperature"),
+    Text(
+        "Selected: ${model.effectiveTemperature}. Catalog default: ${model.catalogTemperature}.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Button(
-        onClick = {
-            temperatureValue
-                ?.takeIf { it.isFinite() && it >= 0f }
-                ?.let(onTemperatureChange)
-        },
-        enabled = temperatureValue != null && temperatureValue.isFinite() && temperatureValue >= 0f,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text("Apply temperature")
-    }
     OutlinedButton(
         onClick = onRestoreDefaults,
         enabled = model.hasOverrides,
@@ -865,44 +998,54 @@ private fun ToolsTab(
     smokeResult: ToolSmokeTestResult?,
     smokeError: String?,
     onRunSmoke: () -> Unit,
+    webSearchSettings: WebSearchSettings,
+    webSearchCompatible: Boolean,
+    webSmokeRunning: WebSearchProvider?,
+    webSmokeResults: Map<WebSearchProvider, ToolSmokeTestResult>,
+    webSmokeErrors: Map<WebSearchProvider, String>,
+    onVerifyWebProvider: (WebSearchProvider, String) -> Unit,
+    onWebProviderEnabledChange: (WebSearchProvider, Boolean) -> Unit,
+    onRemoveWebProvider: (WebSearchProvider) -> Unit,
 ) {
-    Text("Wikipedia", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-    Text(
-        "When enabled for a compatible model, eligible search queries and results use the external " +
-            "Wikipedia/MediaWiki service. Inference and conversation storage remain local.",
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text("Enable Wikipedia")
-            Text(
-                if (wikipediaCompatible) {
-                    "Available for the selected model."
-                } else {
-                    "Unavailable for the selected model."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(
-            checked = settings.wikipediaEnabled,
-            onCheckedChange = onWikipediaEnabledChange,
-            modifier = Modifier.testTag("wikipedia-enabled"),
-        )
-    }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            Text("Wikipedia", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Uses Wikipedia/MediaWiki for eligible factual searches. " +
+                    "Inference and conversation storage remain local.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Use Wikipedia")
+                    Text(
+                        if (wikipediaCompatible) {
+                            "Available for the selected model."
+                        } else {
+                            "Unavailable for the selected model."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = settings.wikipediaEnabled,
+                    onCheckedChange = onWikipediaEnabledChange,
+                    enabled = wikipediaCompatible || settings.wikipediaEnabled,
+                    modifier = Modifier.testTag("wikipedia-enabled"),
+                )
+            }
             Text("Smoke test", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "Calls the Wikipedia tool directly with a fixed query. The model is not loaded or prompted.",
+                "Calls Wikipedia directly with a fixed query without loading or prompting the model.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -913,9 +1056,174 @@ private fun ToolsTab(
             ) {
                 Text(if (smokeRunning) "Running smoke test" else "Run smoke test")
             }
-            if (smokeRunning) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (smokeRunning) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            smokeResult?.let { result ->
+                Text(
+                    if (result.passed) "PASS — ${result.detail}" else "FAIL — ${result.detail}",
+                    color =
+                    if (result.passed) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
             }
+            smokeError?.let { Text("FAIL — $it", color = MaterialTheme.colorScheme.error) }
+        }
+    }
+    Text("Focused web search", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    Text(
+        "Experimental providers send the query and retrieval metadata directly from this device. " +
+            "Your own provider token and provider terms, retention, quota, and charges apply. " +
+            "When both are enabled, Exa runs first and Tavily is used only after a " +
+            "controlled provider failure. A fallback can send the same request to both services and " +
+            "consume quota from both.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    val orderedCards =
+        webSearchSettings.orderedEnabledProviders +
+            WebSearchProvider.entries.filterNot(webSearchSettings.enabledProviders::contains)
+    orderedCards.forEach { provider ->
+        WebSearchProviderCard(
+            provider = provider,
+            configured = webSearchSettings.isConfigured(provider),
+            enabled = webSearchSettings.isEnabled(provider),
+            preferred = webSearchSettings.isPreferred(provider),
+            compatible = webSearchCompatible,
+            verifying = webSmokeRunning == provider,
+            anotherVerificationRunning = webSmokeRunning != null && webSmokeRunning != provider,
+            smokeResult = webSmokeResults[provider],
+            smokeError = webSmokeErrors[provider],
+            onVerify = { onVerifyWebProvider(provider, it) },
+            onEnabledChange = { onWebProviderEnabledChange(provider, it) },
+            onRemove = { onRemoveWebProvider(provider) },
+        )
+    }
+}
+
+@Composable
+@Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod")
+private fun WebSearchProviderCard(
+    provider: WebSearchProvider,
+    configured: Boolean,
+    enabled: Boolean,
+    preferred: Boolean,
+    compatible: Boolean,
+    verifying: Boolean,
+    anotherVerificationRunning: Boolean,
+    smokeResult: ToolSmokeTestResult?,
+    smokeError: String?,
+    onVerify: (String) -> Unit,
+    onEnabledChange: (Boolean) -> Unit,
+    onRemove: () -> Unit,
+) {
+    var token by remember(provider, configured) { mutableStateOf("") }
+    var disclosureAccepted by remember(provider, configured) { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(provider.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            TextButton(onClick = { uriHandler.openUri(provider.accountUrl) }) {
+                Text("Create account / API token ↗")
+            }
+            Text(
+                if (configured) {
+                    "Credential configured. The stored token is never displayed again."
+                } else {
+                    "Enter a user-owned token. It is saved only after a successful verification."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!configured) {
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it },
+                    label = { Text("${provider.displayName} API token") },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions =
+                    androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                    ),
+                    modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("web-provider-token-${provider.name.lowercase()}"),
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Checkbox(
+                        checked = disclosureAccepted,
+                        onCheckedChange = { disclosureAccepted = it },
+                        modifier =
+                        Modifier.testTag(
+                            "web-provider-disclosure-${provider.name.lowercase()}",
+                        ),
+                    )
+                    Text(
+                        "I understand that my query and retrieval metadata are sent to " +
+                            "${provider.displayName} under my account.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Button(
+                    onClick = { onVerify(token) },
+                    enabled =
+                    token.isNotBlank() &&
+                        disclosureAccepted &&
+                        !verifying &&
+                        !anotherVerificationRunning,
+                    modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("web-provider-verify-${provider.name.lowercase()}"),
+                ) {
+                    Text(if (verifying) "Verifying" else "Verify and enable")
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Use for focused web search")
+                        Text(
+                            when {
+                                !compatible -> "Unavailable for the selected model or build."
+                                preferred && provider == WebSearchProvider.Exa -> "Enabled as preferred provider."
+                                preferred -> "Enabled for focused web search."
+                                enabled -> "Enabled as fallback provider."
+                                else -> "Configured but disabled."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = onEnabledChange,
+                        enabled = compatible || enabled,
+                        modifier = Modifier.testTag("web-provider-enabled-${provider.name.lowercase()}"),
+                    )
+                }
+                OutlinedButton(
+                    onClick = onRemove,
+                    modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("web-provider-remove-${provider.name.lowercase()}"),
+                ) {
+                    Text("Remove credential")
+                }
+            }
+            if (verifying) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             smokeResult?.let { result ->
                 Text(
                     if (result.passed) "PASS — ${result.detail}" else "FAIL — ${result.detail}",
@@ -931,6 +1239,12 @@ private fun ToolsTab(
         }
     }
 }
+
+private val WebSearchProvider.accountUrl: String
+    get() = when (this) {
+        WebSearchProvider.Tavily -> "https://app.tavily.com/home"
+        WebSearchProvider.Exa -> "https://dashboard.exa.ai/api-keys"
+    }
 
 @Composable
 private fun InstructionEditor(
@@ -1053,9 +1367,11 @@ private fun StatusCard(
 @Suppress("LongMethod")
 private fun BenchmarkScreen(
     viewModel: BenchmarkViewModel,
+    comparisonViewModel: WebSearchComparisonViewModel,
     onBack: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsState()
+    val comparisonState by comparisonViewModel.state.collectAsState()
 
     ArarAiScaffold(
         title = "Diagnostics",
@@ -1102,6 +1418,58 @@ private fun BenchmarkScreen(
             state.result?.let { result ->
                 BenchmarkResultCard(result)
             }
+
+            if (com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH) {
+                WebSearchComparisonCard(comparisonState, comparisonViewModel)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WebSearchComparisonCard(
+    state: WebSearchComparisonUiState,
+    viewModel: WebSearchComparisonViewModel,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("Lean Tavily × Exa comparison", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "5 bilingual questions, Tavily and Exa, E2B and E4B, 2 repetitions (40 runs). " +
+                    "Wikipedia and provider fallback remain disabled.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            LabeledValue("Status", state.status)
+            LabeledValue("Progress", "${state.completedRuns}/${state.totalRuns}")
+            if (state.isRunning || state.completedRuns > 0) {
+                LinearProgressIndicator(
+                    progress = { state.completedRuns.toFloat() / state.totalRuns },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Button(
+                onClick = viewModel::start,
+                enabled = state.canRun && !state.isRunning,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (state.completedRuns > 0) "Resume comparison" else "Run lean comparison")
+            }
+            if (state.isRunning) {
+                OutlinedButton(onClick = viewModel::cancel, modifier = Modifier.fillMaxWidth()) {
+                    Text("Pause and keep checkpoint")
+                }
+            } else if (state.completedRuns > 0) {
+                TextButton(onClick = viewModel::restart, modifier = Modifier.fillMaxWidth()) {
+                    Text("Clear comparison checkpoint")
+                }
+            }
+            state.reportPath?.let { LabeledValue("Private report", it) }
+            state.error?.let { ErrorCard(it) }
         }
     }
 }

@@ -254,7 +254,10 @@ class ModelConfigParserTest {
             assertEquals(ModelRuntime.LiteRtLm, model.runtime)
             assertEquals(ModelArtifactFormat.LiteRtLmBundle, model.artifactFormat)
             assertEquals("gemma-4", model.family)
-            assertEquals(setOf("wikipedia_search"), model.knowledgeToolCapabilities.toolNames)
+            assertEquals(
+                setOf("wikipedia_search", "web_search"),
+                model.knowledgeToolCapabilities.toolNames,
+            )
         }
         val candidates = catalog.models.filter { it.supportsTask(ModelTask.Transcription) }
         assertEquals(2, candidates.size)

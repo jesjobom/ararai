@@ -121,6 +121,7 @@ sealed interface GenerationEvent {
 
     data class KnowledgeToolStarted(
         val toolName: String,
+        val displayName: String = toolName,
     ) : GenerationEvent
 
     data class KnowledgeToolFinished(

@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.chat
 
 import android.content.Context
+import com.jesjobom.ararai.knowledge.WebSearchProvider
 import com.jesjobom.ararai.model.LocalModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -133,10 +134,13 @@ fun effectiveSystemInstruction(
         .joinToString("\n\n")
 }
 
+@Suppress("LongParameterList")
 fun conversationTurnSettings(
     settings: InstructionSettings,
     mode: InteractionMode,
     advertisedToolNames: Set<String> = emptySet(),
+    webSearchProvider: WebSearchProvider? = null,
+    webSearchFallbackProvider: WebSearchProvider? = null,
     temporalContext: TemporalContext = SystemTemporalContextProvider.current(),
 ): ConversationTurnSettings {
     val normalizedTools =
@@ -146,15 +150,36 @@ fun conversationTurnSettings(
             .filter(String::isNotEmpty)
             .toSortedSet()
     val toolInstruction =
-        if (WIKIPEDIA_SEARCH_TOOL_NAME in normalizedTools) {
-            "Use wikipedia_search when Wikipedia reference material would materially improve the answer. " +
-                "Use at most three calls per user turn. Search in English first. " +
-                "If the English result is missing or unsatisfactory, automatically detect the language " +
-                "of the user's question and retry in that language when a Wikipedia edition exists. " +
-                "Never expose tool protocol or JSON."
-        } else {
-            ""
+        buildList {
+            if (WIKIPEDIA_SEARCH_TOOL_NAME in normalizedTools) {
+                add(
+                    "Use wikipedia_search only for a direct, stable encyclopedic lookup, such as a person's " +
+                        "birth date, a country's capital or currency, a short biography, or a concise summary " +
+                        "of a concept or notable work. Do not use it for current news, changing facts, " +
+                        "comparisons, recommendations, troubleshooting, broad research, or claims that require " +
+                        "multiple independent sources; use web_search for those when available. " +
+                        "Use at most three calls per user turn. Search in English first. " +
+                        "If the English result is missing or unsatisfactory, automatically detect the language " +
+                        "of the user's question and retry in that language when a Wikipedia edition exists. " +
+                        "Never expose tool protocol or JSON.",
+                )
+            }
+            if (WEB_SEARCH_TOOL_NAME in normalizedTools && webSearchProvider != null) {
+                add(
+                    "Use web_search through ${webSearchProvider.displayName} for current, comparative, or " +
+                        "multi-source facts that encyclopedic knowledge cannot answer reliably. Provide a " +
+                        "specific focus, use at most two calls, then synthesize from the available evidence. " +
+                        (
+                            webSearchFallbackProvider?.let {
+                                "If ${webSearchProvider.displayName} fails, the application may automatically " +
+                                    "retry through ${it.displayName}. "
+                            } ?: ""
+                            ) +
+                        "Never expose tool protocol or JSON.",
+                )
+            }
         }
+            .joinToString("\n")
     return ConversationTurnSettings(
         systemInstruction =
         listOf(
@@ -171,15 +196,24 @@ fun conversationTurnSettings(
 fun eligibleKnowledgeToolNames(
     settings: InstructionSettings,
     model: LocalModel?,
+    selectedWebProvider: WebSearchProvider? = null,
+    experimentalWebSearchEnabled: Boolean = false,
 ): Set<String> = buildSet {
     if (settings.wikipediaEnabled &&
         model?.knowledgeToolCapabilities?.supports(WIKIPEDIA_SEARCH_TOOL_NAME) == true
     ) {
         add(WIKIPEDIA_SEARCH_TOOL_NAME)
     }
+    if (selectedWebProvider != null &&
+        experimentalWebSearchEnabled &&
+        model?.knowledgeToolCapabilities?.supports(WEB_SEARCH_TOOL_NAME) == true
+    ) {
+        add(WEB_SEARCH_TOOL_NAME)
+    }
 }
 
 const val WIKIPEDIA_SEARCH_TOOL_NAME = "wikipedia_search"
+const val WEB_SEARCH_TOOL_NAME = "web_search"
 
 fun normalizeEditableInstruction(value: String): String = value
     .take(InstructionDefaults.MAX_LENGTH)

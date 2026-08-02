@@ -1011,6 +1011,14 @@ class ChatViewModelTest {
                 language = "en",
                 retrievedAtMillis = 42L,
             )
+        val webSource =
+            KnowledgeSource(
+                provider = "Exa Web Search",
+                title = "Current reference",
+                canonicalUrl = "https://example.com/current",
+                language = "en",
+                retrievedAtMillis = 43L,
+            )
         val store = CountingChatSessionStore()
         val viewModel =
             streamingViewModel(
@@ -1021,6 +1029,11 @@ class ChatViewModelTest {
                         GenerationEvent.KnowledgeToolFinished(
                             toolName = "wikipedia_search",
                             sources = listOf(source),
+                        ),
+                        GenerationEvent.KnowledgeToolStarted("web_search"),
+                        GenerationEvent.KnowledgeToolFinished(
+                            toolName = "web_search",
+                            sources = listOf(webSource),
                         ),
                         GenerationEvent.Token("Final answer"),
                         GenerationEvent.Completed,
@@ -1034,10 +1047,10 @@ class ChatViewModelTest {
         runCurrent()
 
         assertFalse(viewModel.uiState.value.researchInProgress)
-        assertEquals(listOf(source), viewModel.uiState.value.researchSources)
+        assertEquals(listOf(source, webSource), viewModel.uiState.value.researchSources)
         assertEquals("Final answer", store.latestAssistantText())
         assertEquals(
-            listOf(source),
+            listOf(source, webSource),
             store.latestAssistantContent().sources,
         )
     }

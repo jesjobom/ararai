@@ -24,6 +24,8 @@ class WikipediaOpenApiToolTest {
                 .asString,
         )
         assertTrue(schema["description"].asString.contains("Search English first"))
+        assertTrue(schema["description"].asString.contains("birth date"))
+        assertTrue(schema["description"].asString.contains("Do not use for current news"))
     }
 
     @Test

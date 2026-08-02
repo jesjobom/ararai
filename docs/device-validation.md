@@ -114,6 +114,30 @@ downloading a production model.
   content enters TTS; the incomplete message is visible in shared normal Chat
   history and the voice loop returns to a valid state.
 
+## Experimental focused web search
+
+- Use a debug build. Confirm Tavily and Exa begin unconfigured and disabled,
+  the token field is obscured, and a failed verification does not select the
+  provider.
+- Supply a user-owned Tavily token, run verification, restart the process, and
+  confirm the UI reports configured without displaying the token. Repeat with
+  Exa.
+- Select Tavily, then Exa. Confirm only one provider is selected, the next
+  native conversation is recreated, and no request reaches the previous
+  provider.
+- Ask current, comparative, and technical questions. Confirm `web_search`
+  returns at most three sources and the final answer appears without tool JSON
+  or raw evidence. Repeat in Voice Chat and confirm only the final answer is
+  spoken.
+- Trigger invalid credentials, exhausted quota, rate limiting, offline mode,
+  timeout, and cancellation. Confirm controlled recovery and no automatic call
+  to the competing provider.
+- Remove each credential and verify the provider is disabled immediately.
+  Inspect sanitized logs and application data; no plaintext token,
+  authorization header, query result body, or tool protocol may be retained.
+- Release-build check: confirm unapproved `web_search` is not advertised even
+  when a credential and selection remain stored.
+
 ## Media, permissions, storage, and privacy
 
 - Deny microphone permission, retry, grant it, record, cancel, record again, and send.

@@ -87,6 +87,119 @@ interface ChatSessionStore {
     fun referencedMediaUris(): Set<String>
 }
 
+/**
+ * Keeps the single untitled conversation in memory until its first meaningful title is assigned.
+ * This prevents abandoned "New chat" rows while still allowing voice turns to stage audio before
+ * transcription produces the title.
+ */
+@Suppress("TooManyFunctions", "MaxLineLength")
+class DeferredNewChatSessionStore(
+    private val delegate: ChatSessionStore,
+) : ChatSessionStore {
+    private var pendingSession: ChatSession? = null
+    private val pendingMessages = linkedMapOf<String, StoredChatMessage>()
+    private val promotedSessionIds = linkedMapOf<String, String>()
+
+    @Synchronized
+    override fun ensureSession(): ChatSession = pendingSession ?: delegate.listSessions().firstOrNull()?.let(::withPublicSessionId) ?: createSession("New chat")
+
+    @Synchronized
+    override fun listSessions(): List<ChatSession> = (listOfNotNull(pendingSession) + delegate.listSessions().map(::withPublicSessionId))
+        .sortedWith(compareByDescending<ChatSession> { it.updatedAtMillis }.thenBy { it.title })
+
+    @Synchronized
+    override fun getMessages(sessionId: String): List<StoredChatMessage> = if (pendingSession?.id == sessionId) {
+        pendingMessages.values.toList()
+    } else {
+        delegate.getMessages(resolveSessionId(sessionId)).map { it.copy(sessionId = sessionId) }
+    }
+
+    @Synchronized
+    override fun createSession(title: String): ChatSession {
+        if (title.cleanTitle() != "New chat") return delegate.createSession(title)
+        return pendingSession ?: ChatSession(
+            id = UUID.randomUUID().toString(),
+            title = "New chat",
+            createdAtMillis = System.currentTimeMillis(),
+            updatedAtMillis = System.currentTimeMillis(),
+        ).also { pendingSession = it }
+    }
+
+    @Synchronized
+    @Suppress("ReturnCount")
+    override fun renameSession(sessionId: String, title: String): ChatSession {
+        if (pendingSession?.id != sessionId) return delegate.renameSession(resolveSessionId(sessionId), title).let(::withPublicSessionId)
+        val cleanTitle = title.cleanTitle()
+        if (cleanTitle == "New chat") return pendingSession!!
+        val persisted = delegate.createSession(cleanTitle)
+        pendingMessages.values.forEach { message ->
+            delegate.appendMessage(persisted.id, message.role, message.content)
+        }
+        promotedSessionIds[sessionId] = persisted.id
+        pendingMessages.clear()
+        pendingSession = null
+        return persisted
+    }
+
+    @Synchronized
+    override fun deleteSession(sessionId: String) {
+        if (pendingSession?.id == sessionId) {
+            pendingSession = null
+            pendingMessages.clear()
+        } else {
+            delegate.deleteSession(resolveSessionId(sessionId))
+            promotedSessionIds.remove(sessionId)
+        }
+    }
+
+    @Synchronized
+    override fun clearSessions() {
+        pendingSession = null
+        pendingMessages.clear()
+        promotedSessionIds.clear()
+        delegate.clearSessions()
+    }
+
+    @Synchronized
+    override fun appendMessage(
+        sessionId: String,
+        role: ChatRole,
+        content: MessageContent,
+    ): StoredChatMessage {
+        if (pendingSession?.id != sessionId) return delegate.appendMessage(resolveSessionId(sessionId), role, content)
+        val message = StoredChatMessage(
+            id = UUID.randomUUID().toString(),
+            sessionId = sessionId,
+            role = role,
+            content = content,
+            createdAtMillis = System.currentTimeMillis(),
+        )
+        pendingMessages[message.id] = message
+        pendingSession = pendingSession?.copy(updatedAtMillis = message.createdAtMillis)
+        return message
+    }
+
+    @Synchronized
+    override fun updateMessage(messageId: String, content: MessageContent) {
+        val pending = pendingMessages[messageId]
+        if (pending != null) {
+            pendingMessages[messageId] = pending.copy(content = content)
+        } else {
+            delegate.updateMessage(messageId, content)
+        }
+    }
+
+    @Synchronized
+    override fun referencedMediaUris(): Set<String> = delegate.referencedMediaUris() + pendingMessages.values.flatMap { it.content.mediaUris() }
+
+    private fun resolveSessionId(sessionId: String): String = promotedSessionIds[sessionId] ?: sessionId
+
+    private fun withPublicSessionId(session: ChatSession): ChatSession {
+        val publicId = promotedSessionIds.entries.firstOrNull { it.value == session.id }?.key ?: session.id
+        return session.copy(id = publicId)
+    }
+}
+
 fun MessageContent.mediaUris(): Set<String> = when (this) {
     is MessageContent.TextPrompt -> imageAttachments.mapTo(linkedSetOf()) { it.uri }
     is MessageContent.AudioPromptContent -> setOf(audio.uri)

@@ -17,6 +17,8 @@ import java.util.concurrent.atomic.AtomicReference
 class WikipediaOpenApiTool(
     knowledgeTool: KnowledgeTool,
 ) : OpenApiTool {
+    val displayName: String = knowledgeTool.displayName
+
     private val turn = WikipediaToolTurn(knowledgeTool)
 
     override fun getToolDescriptionJsonString(): String = WikipediaToolTurn.TOOL_DESCRIPTION
@@ -166,6 +168,9 @@ internal class WikipediaToolTurn(
     private fun ToolFailureReason.toAdapterFailure(): ToolAdapterFailure = when (this) {
         ToolFailureReason.InvalidArguments -> ToolAdapterFailure.InvalidArguments
         ToolFailureReason.NoResults -> ToolAdapterFailure.NoResults
+        ToolFailureReason.AuthenticationFailed -> ToolAdapterFailure.Unavailable
+        ToolFailureReason.QuotaExceeded -> ToolAdapterFailure.Unavailable
+        ToolFailureReason.RateLimited -> ToolAdapterFailure.Unavailable
         ToolFailureReason.Unavailable -> ToolAdapterFailure.Unavailable
         ToolFailureReason.MalformedResponse -> ToolAdapterFailure.MalformedResponse
         ToolFailureReason.TimedOut -> ToolAdapterFailure.TimedOut
@@ -189,9 +194,12 @@ internal class WikipediaToolTurn(
         const val MAX_CALLS_PER_TURN = 3
         val EXPECTED_ARGUMENTS = setOf("query", "language")
         const val TOOL_DESCRIPTION =
-            """{"name":"wikipedia_search","description":"Search a Wikipedia language edition for """ +
-                """encyclopedic facts. Search English first; if its result is unsatisfactory, use the """ +
-                """detected language of the user's question.","parameters":""" +
+            """{"name":"wikipedia_search","description":"Use only for direct, stable encyclopedic """ +
+                """lookups such as a birth date, country capital or currency, short biography, or concise """ +
+                """concept or notable-work summary. Do not use for current news, changing facts, comparisons, """ +
+                """recommendations, troubleshooting, broad research, or multi-source evidence. Search English """ +
+                """first; if its result is unsatisfactory, use the detected language of the user's """ +
+                """question.","parameters":""" +
                 """{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string"},""" +
                 """"language":{"type":"string","pattern":"^[a-z]{2,3}$","description":"Lowercase ISO """ +
                 """language code for the Wikipedia edition."}},"required":["query","language"]}}"""

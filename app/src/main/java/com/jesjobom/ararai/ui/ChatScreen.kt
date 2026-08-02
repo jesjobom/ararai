@@ -71,7 +71,7 @@ internal fun ChatScreen(
     var followLatestMessages by remember { mutableStateOf(true) }
     val currentSessionTitle = state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title ?: "Chat"
     val modelStatusText = when {
-        state.researchInProgress -> "Researching Wikipedia"
+        state.researchInProgress -> knowledgeToolStatusText(state.activeKnowledgeToolName)
         state.isLoadingModel -> "Loading model"
         state.isGenerating -> "Generating"
         else -> state.modelStatus
@@ -322,6 +322,11 @@ internal fun ChatScreen(
         )
     }
 }
+
+internal fun knowledgeToolStatusText(toolName: String?): String = toolName
+    ?.takeIf { it.isNotBlank() }
+    ?.let { "Using $it" }
+    ?: "Using tool"
 
 @Composable
 internal fun FollowLatestMessagesEffect(

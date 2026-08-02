@@ -125,10 +125,8 @@ internal class VoiceChatViewModel(
 
     fun onEnteringVoiceChat() {
         if (modelLoadJob?.isActive == true) return
-        val session =
-            conversationSelection.currentSessionId
-                ?.let { selected -> sessionStore.listSessions().firstOrNull { it.id == selected } }
-                ?: sessionStore.ensureSession().also { conversationSelection.select(it.id) }
+        val session = sessionStore.createSession("New chat")
+        conversationSelection.select(session.id)
         currentSessionId = session.id
         refreshSessions(session.id)
         val activeModel = model ?: return
@@ -266,6 +264,7 @@ internal class VoiceChatViewModel(
                 spokenRange = null,
                 readingAnchor = 0,
                 researchInProgress = false,
+                activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 notice = null,
             )
@@ -361,20 +360,23 @@ internal class VoiceChatViewModel(
                         is GenerationEvent.ReasoningToken -> reasoning.append(event.text)
                         is GenerationEvent.Metrics -> generationMetricsConsumer(activeModel, event.value)
                         is GenerationEvent.KnowledgeToolStarted -> {
-                            answerSources = emptyList()
                             mutableState.update {
                                 it.copy(
                                     researchInProgress = true,
-                                    researchSources = emptyList(),
+                                    activeKnowledgeToolName = event.displayName,
+                                    researchSources = answerSources,
                                 )
                             }
                         }
                         is GenerationEvent.KnowledgeToolFinished -> {
-                            answerSources = event.sources
+                            answerSources =
+                                (answerSources + event.sources)
+                                    .distinctBy { source -> source.canonicalUrl }
                             mutableState.update {
                                 it.copy(
                                     researchInProgress = false,
-                                    researchSources = event.sources,
+                                    activeKnowledgeToolName = null,
+                                    researchSources = answerSources,
                                 )
                             }
                         }
@@ -538,6 +540,7 @@ internal class VoiceChatViewModel(
                 spokenRange = null,
                 readingAnchor = 0,
                 researchInProgress = false,
+                activeKnowledgeToolName = null,
                 notice = null,
                 error = null,
             )
@@ -556,6 +559,7 @@ internal class VoiceChatViewModel(
             it.copy(
                 phase = VoiceChatPhase.Error,
                 researchInProgress = false,
+                activeKnowledgeToolName = null,
                 error = message,
             )
         }

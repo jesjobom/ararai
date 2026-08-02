@@ -160,6 +160,25 @@ timeout, cancellation, and provider failures remain controlled outcomes.
 The current networking and storage contract, automated evidence, and extension
 rules for future skills are documented in `docs/wikipedia-skill.md`.
 
+Debug builds also expose experimental **Tavily** and **Exa** cards under
+**Assistant configuration → Tools**. Each provider is disabled and
+unconfigured by default. The user must supply their own provider token and pass
+a direct smoke test before the provider is selected. ArarAI encrypts these
+tokens with an Android Keystore key, never displays them again, and excludes
+them from model context, conversation history, logs, diagnostics, backup, and
+export. Clearing app data or removing the credential deletes the stored token.
+
+Either or both experimental web providers can be enabled. When both are
+enabled, Exa runs first and Tavily is used only after a controlled provider
+failure. Both implement the same
+model-visible `web_search` schema and return untrusted query-focused excerpts,
+not a provider-generated final answer: at most three HTTPS sources, two
+500-character excerpts per source, 1,800 characters for the complete reference
+envelope, and two calls per user turn. Tavily and Exa remain experimental until
+the checked-in comparison produces an explicit approval verdict. Release builds
+do not advertise unapproved web search to the model. See
+`docs/web-search-providers.md`.
+
 Chat audio transcription uses only the bundled whisper.cpp runtime with an
 explicitly downloaded local model; there is no hosted or Android
 speech-recognizer fallback. The Model Manager offers Base Q5_1 (256 MB free RAM

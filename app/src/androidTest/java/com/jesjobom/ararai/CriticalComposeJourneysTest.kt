@@ -6,7 +6,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -18,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
@@ -32,6 +35,8 @@ import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.chat.NoOpChatMediaRepository
 import com.jesjobom.ararai.engine.FakeLocalLlmEngine
 import com.jesjobom.ararai.knowledge.KnowledgeSource
+import com.jesjobom.ararai.knowledge.WebSearchProvider
+import com.jesjobom.ararai.knowledge.WebSearchSettings
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ManagedModelItem
@@ -64,6 +69,7 @@ import com.jesjobom.ararai.ui.VoiceChatScreen
 import com.jesjobom.ararai.voice.VadProvider
 import com.jesjobom.ararai.voice.VoiceChatUiState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -77,6 +83,7 @@ class CriticalComposeJourneysTest {
         var compatible by mutableStateOf(true)
         var contextTokens by mutableStateOf(2_048)
         var temperature by mutableStateOf(0.7f)
+        var webSearchSettings by mutableStateOf(WebSearchSettings())
         composeRule.setContent {
             MaterialTheme {
                 InstructionsAndToolsScreen(
@@ -94,6 +101,7 @@ class CriticalComposeJourneysTest {
                         hasOverrides = contextTokens != 2_048 || temperature != 0.7f,
                     ),
                     wikipediaCompatible = compatible,
+                    webSearchCompatible = true,
                     onInstructionChange = { mode, value ->
                         settings =
                             when (mode) {
@@ -109,6 +117,32 @@ class CriticalComposeJourneysTest {
                             }
                     },
                     onWikipediaEnabledChange = { settings = settings.copy(wikipediaEnabled = it) },
+                    webSearchSettings = webSearchSettings,
+                    onVerifyWebProvider = { provider, _ ->
+                        webSearchSettings =
+                            webSearchSettings.copy(
+                                enabledProviders = webSearchSettings.enabledProviders + provider,
+                                configuredProviders = webSearchSettings.configuredProviders + provider,
+                            )
+                    },
+                    onWebProviderEnabledChange = { provider, enabled ->
+                        webSearchSettings =
+                            webSearchSettings.copy(
+                                enabledProviders =
+                                if (enabled) {
+                                    webSearchSettings.enabledProviders + provider
+                                } else {
+                                    webSearchSettings.enabledProviders - provider
+                                },
+                            )
+                    },
+                    onRemoveWebProvider = { provider ->
+                        webSearchSettings =
+                            webSearchSettings.copy(
+                                enabledProviders = webSearchSettings.enabledProviders - provider,
+                                configuredProviders = webSearchSettings.configuredProviders - provider,
+                            )
+                    },
                     onContextTokensChange = { contextTokens = it },
                     onTemperatureChange = { temperature = it },
                     onRestoreGenerationDefaults = {
@@ -127,27 +161,54 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithText(InstructionDefaults.CHAT).assertIsDisplayed()
         composeRule.onNodeWithText("Tools").performClick()
         composeRule.onNodeWithText(
-            "When enabled for a compatible model, eligible search queries and results use the external " +
-                "Wikipedia/MediaWiki service. Inference and conversation storage remain local.",
+            "Uses Wikipedia/MediaWiki for eligible factual searches. Inference and conversation storage remain local.",
         ).assertIsDisplayed()
         composeRule.onNodeWithTag("wikipedia-enabled").assertIsOff().performClick().assertIsOn()
-        composeRule.onNodeWithTag("wikipedia-smoke-test").assertIsDisplayed()
         composeRule.onNodeWithText("Available for the selected model.").assertIsDisplayed()
+        composeRule
+            .onNodeWithTag("web-provider-token-tavily")
+            .performScrollTo()
+            .performTextInput("tvly-user-token")
+        composeRule.onNodeWithTag("web-provider-disclosure-tavily").performScrollTo().performClick().assertIsOn()
+        composeRule.onNodeWithTag("web-provider-verify-tavily").performScrollTo().assertIsEnabled().performClick()
+        composeRule.runOnIdle { assertTrue(webSearchSettings.isConfigured(WebSearchProvider.Tavily)) }
+        composeRule.onNodeWithTag("web-provider-enabled-tavily").assertIsOn()
+        composeRule.onNodeWithText(
+            "Credential configured. The stored token is never displayed again.",
+        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("web-provider-token-exa").performScrollTo().performTextInput("exa-user-token")
+        composeRule.onNodeWithTag("web-provider-disclosure-exa").performScrollTo().performClick().assertIsOn()
+        composeRule.onNodeWithTag("web-provider-verify-exa").performScrollTo().assertIsEnabled().performClick()
+        composeRule.runOnIdle {
+            assertEquals(
+                listOf(WebSearchProvider.Exa, WebSearchProvider.Tavily),
+                webSearchSettings.orderedEnabledProviders,
+            )
+        }
+        composeRule.onNodeWithText("Enabled as preferred provider.").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Enabled as fallback provider.").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("web-provider-enabled-exa").performClick().assertIsOff()
+        composeRule.onNodeWithTag("web-provider-remove-exa").performClick()
+        composeRule.onNodeWithTag("web-provider-token-exa").assertIsDisplayed()
+        composeRule.onNodeWithTag("web-provider-remove-tavily").performClick()
+        composeRule.onNodeWithTag("web-provider-token-tavily").assertIsDisplayed()
 
         compatible = false
         composeRule.waitForIdle()
         composeRule.onNodeWithText(
             "Unavailable for the selected model.",
-        ).assertIsDisplayed()
+        ).performScrollTo().assertIsDisplayed()
 
         composeRule.onNodeWithText("Generation").performClick()
-        composeRule.onNodeWithText("Gemma E2B").assertIsDisplayed()
-        composeRule.onNodeWithText("Response limit: controlled by model/runtime.").assertIsDisplayed()
-        composeRule.onNodeWithTag("generation-context").performTextClearance()
-        composeRule.onNodeWithTag("generation-context").performTextInput("4096")
-        composeRule.onNodeWithText("Apply context window").performClick()
+        composeRule.onNodeWithText("Gemma E2B").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Response limit: controlled by model/runtime.").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("generation-context-2048").assertIsSelected()
+        composeRule.onNodeWithTag("generation-context-4096").assertIsNotSelected()
+        composeRule.onNodeWithTag("generation-context-4096").performClick()
         assertEquals(4_096, contextTokens)
-        composeRule.onNodeWithText("Precise").performClick()
+        composeRule.onNodeWithTag("generation-context-4096").assertIsSelected()
+        composeRule.onNodeWithTag("generation-temperature-balanced").assertIsSelected()
+        composeRule.onNodeWithTag("generation-temperature-precise").performClick().assertIsSelected()
         assertEquals(0.2f, temperature)
     }
 
@@ -159,8 +220,10 @@ class CriticalComposeJourneysTest {
                 sources =
                 listOf(
                     KnowledgeSource(
-                        provider = "Wikipedia",
-                        title = "Ada Lovelace",
+                        provider = "Tavily Web Search",
+                        title =
+                        "A deliberately long source title that wraps across multiple lines " +
+                            "without being clipped by a button container",
                         canonicalUrl = "https://en.wikipedia.org/wiki/Ada_Lovelace",
                         language = "en",
                         retrievedAtMillis = 1L,
@@ -180,7 +243,12 @@ class CriticalComposeJourneysTest {
         }
 
         composeRule.onNodeWithText("Sources").assertIsDisplayed()
-        composeRule.onNodeWithText("Ada Lovelace · EN").assertIsDisplayed()
+        composeRule
+            .onNodeWithText(
+                "A deliberately long source title that wraps across multiple lines " +
+                    "without being clipped by a button container · EN",
+            ).assertIsDisplayed()
+            .assertHasClickAction()
         composeRule.onAllNodesWithText("wikipedia_search").assertCountEquals(0)
     }
 
@@ -405,7 +473,7 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithText("Sessions").performClick()
         composeRule.onNodeWithTag("delete-chat-${original.id}").performClick()
         composeRule.onNodeWithText("Renamed").assertDoesNotExist()
-        composeRule.onNodeWithText("Keep").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Keep").assertCountEquals(2)
     }
 
     @Test
@@ -454,7 +522,7 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithText("Voice Chat").assertIsDisplayed()
         composeRule.onNodeWithText("Local diagnostics", substring = true).assertDoesNotExist()
         composeRule.onNodeWithText("Response").assertIsDisplayed()
-        composeRule.onNodeWithText(response).assertIsDisplayed()
+        composeRule.onAllNodesWithText(response).assertCountEquals(2)
     }
 
     @Test
