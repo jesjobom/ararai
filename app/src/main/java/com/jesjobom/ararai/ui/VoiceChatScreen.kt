@@ -51,12 +51,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.jesjobom.ararai.R
 import com.jesjobom.ararai.voice.VadMode
 import com.jesjobom.ararai.voice.VadProvider
 import com.jesjobom.ararai.voice.VoiceCaptureSource
@@ -92,7 +94,8 @@ internal fun VoiceChatScreen(
     var renameText by remember { mutableStateOf("") }
     var renameSessionId by remember { mutableStateOf<String?>(null) }
     val currentSessionTitle =
-        state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title ?: "New chat"
+        state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title
+            ?: stringResource(R.string.voice_new_chat)
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) onStart()
     }
@@ -105,14 +108,14 @@ internal fun VoiceChatScreen(
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        text = "Voice Chat",
+                        text = stringResource(R.string.voice_title),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back))
                     }
                 },
                 actions = {
@@ -120,7 +123,7 @@ internal fun VoiceChatScreen(
                         onClick = { showSettings = true },
                         enabled = !state.isActive,
                     ) {
-                        Icon(Icons.Filled.Settings, "Voice Chat settings")
+                        Icon(Icons.Filled.Settings, stringResource(R.string.voice_settings))
                     }
                 },
             )
@@ -141,18 +144,25 @@ internal fun VoiceChatScreen(
                 Box(modifier = Modifier.height(24.dp), contentAlignment = Alignment.Center) {
                     if (state.researchInProgress) {
                         Text(
-                            "${knowledgeToolStatusText(state.activeKnowledgeToolName)}…",
+                            state.activeKnowledgeToolName
+                                ?.takeIf(String::isNotBlank)
+                                ?.let { stringResource(R.string.chat_using_named_tool, it) }
+                                ?: stringResource(R.string.chat_using_tool),
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
                 }
-                if (state.isLoadingModel) Text("Loading model…")
+                if (state.isLoadingModel) Text(stringResource(R.string.voice_loading_model))
                 if (!state.modelSupportsAudio && !state.transcriptionAvailable) {
-                    Text("Install a transcription model or select an audio-capable model.")
-                    OutlinedButton(onClick = onOpenModels) { Text("Manage models") }
+                    Text(stringResource(R.string.voice_model_requirement))
+                    OutlinedButton(onClick = onOpenModels) { Text(stringResource(R.string.voice_manage_models)) }
                 }
-                state.notice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                (state.noticeKey?.localizedText() ?: state.notice)?.let {
+                    Text(it, color = MaterialTheme.colorScheme.primary)
+                }
+                (state.errorKey?.localizedText() ?: state.error)?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
                 if (state.responsePreview.isNotBlank()) {
                     ResponseReadingViewport(
                         text = state.responsePreview,
@@ -180,13 +190,21 @@ internal fun VoiceChatScreen(
                     modifier = Modifier.size(176.dp),
                 ) {
                     Icon(if (state.isActive) Icons.Filled.Close else Icons.Filled.Mic, null, Modifier.size(48.dp))
-                    Text(if (state.isActive) "Stop" else "Start", modifier = Modifier.padding(start = 8.dp))
+                    Text(
+                        stringResource(if (state.isActive) R.string.voice_stop else R.string.voice_start),
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
                 }
             }
         }
     }
     if (state.phase == VoiceChatPhase.Error) {
-        AlertDialog(onDismissRequest = onDismissError, confirmButton = { TextButton(onClick = onDismissError) { Text("Close") } }, title = { Text("Voice Chat stopped") }, text = { Text(state.error.orEmpty()) })
+        AlertDialog(
+            onDismissRequest = onDismissError,
+            confirmButton = { TextButton(onClick = onDismissError) { Text(stringResource(R.string.action_close)) } },
+            title = { Text(stringResource(R.string.voice_stopped_title)) },
+            text = { Text(state.errorKey?.localizedText() ?: state.error.orEmpty()) },
+        )
     }
     if (showSettings) {
         VoiceChatSettingsDialog(
@@ -289,7 +307,7 @@ private fun ExpandedResponseDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Response") },
+        title = { Text(stringResource(R.string.voice_response)) },
         text = {
             FollowingResponseText(
                 text = text,
@@ -298,7 +316,7 @@ private fun ExpandedResponseDialog(
                 modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
             )
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } },
     )
 }
 
@@ -359,7 +377,7 @@ private fun VoiceChatSettingsDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Voice Chat settings") },
+        title = { Text(stringResource(R.string.voice_settings)) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -367,10 +385,10 @@ private fun VoiceChatSettingsDialog(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Enable reasoning")
+                        Text(stringResource(R.string.voice_enable_reasoning))
                         if (!canEnableReasoning) {
                             Text(
-                                "Unavailable for this model",
+                                stringResource(R.string.chat_unavailable_for_model),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -383,7 +401,7 @@ private fun VoiceChatSettingsDialog(
                         modifier = Modifier.testTag("voice-reasoning-switch"),
                     )
                 }
-                Text("Reading speed: ${value.speechRateMultiplier.asRateLabel()}")
+                Text(stringResource(R.string.voice_reading_speed, value.speechRateMultiplier.asRateLabel()))
                 Slider(
                     value = value.speechRateMultiplier,
                     modifier = Modifier.testTag("voice-speech-rate-slider"),
@@ -404,9 +422,9 @@ private fun VoiceChatSettingsDialog(
                             VoiceChatSettings.SPEECH_RATE_STEP
                         ).roundToInt() - 1,
                 )
-                Text("Pause before answer: ${value.pauseMillis} ms")
+                Text(stringResource(R.string.voice_pause_before_answer, value.pauseMillis))
                 Text(
-                    "How long trailing silence must last before your speech is sent to the model.",
+                    stringResource(R.string.voice_pause_description),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -414,57 +432,57 @@ private fun VoiceChatSettingsDialog(
                     val step = ((raw.toInt() - 500) / 250) * 250 + 500
                     updateValue(value.copy(pauseMillis = step.coerceIn(500, 5_000)))
                 }, valueRange = 500f..5_000f, steps = 17)
-                Text("Minimum response words: ${value.minimumWords}")
+                Text(stringResource(R.string.voice_minimum_response_words, value.minimumWords))
                 Slider(value = value.minimumWords.toFloat(), onValueChange = { updateValue(value.copy(minimumWords = it.toInt().coerceIn(1, 100))) }, valueRange = 1f..100f, steps = 98)
                 SettingsDropdown(
-                    label = "Experimental VAD",
+                    label = stringResource(R.string.voice_experimental_vad),
                     selected = value.vadProvider,
                     options = VadProvider.entries,
-                    optionLabel = { it.displayName },
+                    optionLabel = { it.displayName() },
                     onSelect = { updateValue(value.copy(vadProvider = it)) },
                 )
                 SettingsDropdown(
-                    label = "VAD sensitivity",
+                    label = stringResource(R.string.voice_vad_sensitivity),
                     selected = value.vadMode,
                     options = VadMode.entries,
-                    optionLabel = { it.displayName },
+                    optionLabel = { it.displayName() },
                     onSelect = { updateValue(value.copy(vadMode = it)) },
                 )
                 AudioTimingSlider(
-                    label = "Speech confirmation",
+                    label = stringResource(R.string.voice_speech_confirmation),
                     value = value.speechConfirmationMillis,
                     range = VoiceChatSettings.MIN_SPEECH_CONFIRMATION_MILLIS..VoiceChatSettings.MAX_SPEECH_CONFIRMATION_MILLIS,
                     onValue = { updateValue(value.copy(speechConfirmationMillis = it)) },
                 )
                 AudioTimingSlider(
-                    label = "Pre-roll",
+                    label = stringResource(R.string.voice_pre_roll),
                     value = value.preRollMillis,
                     range = VoiceChatSettings.MIN_PRE_ROLL_MILLIS..VoiceChatSettings.MAX_PRE_ROLL_MILLIS,
                     onValue = { updateValue(value.copy(preRollMillis = it)) },
                 )
                 AudioTimingSlider(
-                    label = "Minimum speech",
+                    label = stringResource(R.string.voice_minimum_speech),
                     value = value.minimumSpeechMillis,
                     range = VoiceChatSettings.MIN_SPEECH_MILLIS..VoiceChatSettings.MAX_SPEECH_MILLIS,
                     onValue = { updateValue(value.copy(minimumSpeechMillis = it)) },
                 )
                 SettingsDropdown(
-                    label = "Experimental capture source",
+                    label = stringResource(R.string.voice_capture_source),
                     selected = value.captureSource,
                     options = VoiceCaptureSource.entries,
-                    optionLabel = { it.displayName },
+                    optionLabel = { it.displayName() },
                     onSelect = { updateValue(value.copy(captureSource = it)) },
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Request noise suppression", modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.voice_noise_suppression), modifier = Modifier.weight(1f))
                     Switch(checked = value.noiseSuppressionRequested, onCheckedChange = { updateValue(value.copy(noiseSuppressionRequested = it)) })
                 }
-                Text("Experimental audio changes apply after restarting the loop.", style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.voice_experimental_restart_note), style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } },
         dismissButton = {
-            TextButton(onClick = { updateValue(VoiceChatSettings()) }) { Text("Reset") }
+            TextButton(onClick = { updateValue(VoiceChatSettings()) }) { Text(stringResource(R.string.action_reset)) }
         },
     )
 }
@@ -474,7 +492,7 @@ private fun <T> SettingsDropdown(
     label: String,
     selected: T,
     options: List<T>,
-    optionLabel: (T) -> String,
+    optionLabel: @Composable (T) -> String,
     onSelect: (T) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -508,29 +526,29 @@ private fun <T> SettingsDropdown(
 
 private fun Float.asRateLabel(): String = String.format(Locale.US, "%.1fx", this)
 
-private val VadProvider.displayName: String
-    get() = when (this) {
-        VadProvider.WebRtc -> "WebRTC"
-        VadProvider.Silero -> "Silero"
-    }
+@Composable
+private fun VadProvider.displayName(): String = when (this) {
+    VadProvider.WebRtc -> "WebRTC"
+    VadProvider.Silero -> "Silero"
+}
 
-private val VadMode.displayName: String
-    get() = when (this) {
-        VadMode.Normal -> "Normal"
-        VadMode.Aggressive -> "Aggressive"
-        VadMode.VeryAggressive -> "Very aggressive"
-    }
+@Composable
+private fun VadMode.displayName(): String = when (this) {
+    VadMode.Normal -> stringResource(R.string.voice_vad_normal)
+    VadMode.Aggressive -> stringResource(R.string.voice_vad_aggressive)
+    VadMode.VeryAggressive -> stringResource(R.string.voice_vad_very_aggressive)
+}
 
-private val VoiceCaptureSource.displayName: String
-    get() = when (this) {
-        VoiceCaptureSource.Microphone -> "Microphone"
-        VoiceCaptureSource.VoiceRecognition -> "Voice recognition"
-        VoiceCaptureSource.VoiceCommunication -> "Voice communication"
-    }
+@Composable
+private fun VoiceCaptureSource.displayName(): String = when (this) {
+    VoiceCaptureSource.Microphone -> stringResource(R.string.voice_capture_microphone)
+    VoiceCaptureSource.VoiceRecognition -> stringResource(R.string.voice_capture_recognition)
+    VoiceCaptureSource.VoiceCommunication -> stringResource(R.string.voice_capture_communication)
+}
 
 @Composable
 private fun AudioTimingSlider(label: String, value: Int, range: IntRange, onValue: (Int) -> Unit) {
-    Text("$label: $value ms")
+    Text(stringResource(R.string.voice_timing_millis, label, value))
     Slider(
         value = value.toFloat(),
         onValueChange = { raw ->
@@ -543,10 +561,11 @@ private fun AudioTimingSlider(label: String, value: Int, range: IntRange, onValu
     )
 }
 
+@Composable
 private fun phaseLabel(phase: VoiceChatPhase) = when (phase) {
-    VoiceChatPhase.Idle -> "Ready"
-    VoiceChatPhase.Listening -> "Listening…"
-    VoiceChatPhase.Processing -> "Thinking…"
-    VoiceChatPhase.Speaking -> "Speaking…"
-    VoiceChatPhase.Error -> "Stopped"
+    VoiceChatPhase.Idle -> stringResource(R.string.voice_phase_ready)
+    VoiceChatPhase.Listening -> stringResource(R.string.voice_phase_listening)
+    VoiceChatPhase.Processing -> stringResource(R.string.voice_phase_thinking)
+    VoiceChatPhase.Speaking -> stringResource(R.string.voice_phase_speaking)
+    VoiceChatPhase.Error -> stringResource(R.string.voice_phase_stopped)
 }

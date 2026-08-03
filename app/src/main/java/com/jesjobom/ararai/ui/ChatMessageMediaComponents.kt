@@ -72,7 +72,10 @@ internal fun AttachmentRow(
             modifier = Modifier.weight(1f),
         )
         IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
-            Icon(imageVector = Icons.Filled.Close, contentDescription = "Remove")
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = stringResource(R.string.action_remove),
+            )
         }
     }
 }
@@ -83,6 +86,7 @@ internal fun AudioPlaybackRow(
     compact: Boolean = false,
     mediaServices: ChatMediaServices,
 ) {
+    val playbackFailed = stringResource(R.string.chat_playback_failed)
     val secondaryTextColor = LocalContentColor.current.copy(alpha = 0.74f)
     val playerState = remember(audio.uri) { mutableStateOf<ChatAudioPlayer?>(null) }
     var isPlaying by remember(audio.uri) { mutableStateOf(false) }
@@ -99,7 +103,7 @@ internal fun AudioPlaybackRow(
                 playerState.value = it
             }
         } catch (error: Throwable) {
-            playbackError = error.message ?: "Unable to play audio"
+            playbackError = error.message ?: playbackFailed
             releasePlayer()
             null
         }
@@ -131,18 +135,21 @@ internal fun AudioPlaybackRow(
             ) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause audio" else "Play audio",
+                    contentDescription =
+                    stringResource(
+                        if (isPlaying) R.string.chat_pause_audio else R.string.chat_play_audio,
+                    ),
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
                 if (!compact) {
                     Text(
-                        text = audio.displayName ?: "Audio prompt",
+                        text = audio.displayName ?: stringResource(R.string.chat_audio_prompt),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
                 Text(
-                    text = audio.durationMillis?.let(::formatDuration) ?: "Audio",
+                    text = audio.durationMillis?.let(::formatDuration) ?: stringResource(R.string.chat_audio),
                     style = MaterialTheme.typography.labelMedium,
                     color = secondaryTextColor,
                 )
@@ -182,7 +189,7 @@ internal fun MessageRow(
         MaterialTheme.colorScheme.onSurface
     }
     val alignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
-    val label = if (isUser) "You" else "ArarAI"
+    val label = if (isUser) stringResource(R.string.chat_you) else stringResource(R.string.app_name)
     val selectionColors = if (isUser) {
         TextSelectionColors(
             handleColor = MaterialTheme.colorScheme.onPrimary,
@@ -270,7 +277,7 @@ internal fun MessageContentView(
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
                             Text(
-                                text = "Reasoning",
+                                text = stringResource(R.string.chat_reasoning),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -282,7 +289,7 @@ internal fun MessageContentView(
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         ImageThumbnail(uri = image.uri, sizeDp = 156, mediaServices = mediaServices)
                         Text(
-                            text = image.displayName ?: "Image",
+                            text = image.displayName ?: stringResource(R.string.chat_attachment_image),
                             style = MaterialTheme.typography.labelMedium,
                         )
                     }
@@ -294,9 +301,12 @@ internal fun MessageContentView(
                         shape = MaterialTheme.shapes.medium,
                     ) {
                         Column(Modifier.padding(10.dp)) {
-                            Text("Incomplete response", fontWeight = FontWeight.SemiBold)
                             Text(
-                                "The model finished before producing a final answer.",
+                                stringResource(R.string.chat_incomplete_response),
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                stringResource(R.string.chat_no_final_answer),
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
@@ -309,7 +319,7 @@ internal fun MessageContentView(
                 }
                 if (content.sources.isNotEmpty()) {
                     Text(
-                        text = "Sources",
+                        text = stringResource(R.string.chat_sources),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -347,7 +357,7 @@ private fun AudioPromptContentView(
         AudioPlaybackRow(audio = content.audio, mediaServices = mediaServices)
         when (content.transcriptionStatus) {
             AudioTranscriptionStatus.Pending -> Text(
-                "Transcribing…",
+                stringResource(R.string.chat_transcribing),
                 style = MaterialTheme.typography.labelMedium,
             )
             AudioTranscriptionStatus.Completed -> CompletedTranscriptionView(content, showAudioTranscriptions)
@@ -365,7 +375,7 @@ private fun CompletedTranscriptionView(
     if (showAudioTranscriptions) MarkdownText(content.transcript.orEmpty())
     if (content.transcriptionMayBeIncomplete) {
         Text(
-            "Transcription may be incomplete",
+            stringResource(R.string.chat_transcription_incomplete),
             color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.labelMedium,
         )
@@ -375,7 +385,7 @@ private fun CompletedTranscriptionView(
 @Composable
 private fun TranscriptionFailureView(content: MessageContent.AudioPromptContent) {
     Text(
-        content.transcriptionError ?: "Audio transcription failed",
+        content.transcriptionError ?: stringResource(R.string.chat_transcription_failed),
         color = MaterialTheme.colorScheme.error,
         style = MaterialTheme.typography.labelMedium,
     )

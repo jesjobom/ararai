@@ -220,7 +220,7 @@ private class CompletingSpeechQueueFactory {
         onStarted: (IntRange) -> Unit,
         onRange: (IntRange) -> Unit,
         onComplete: () -> Unit,
-        onError: (String) -> Unit,
+        onError: (com.jesjobom.ararai.ui.UserMessageKey) -> Unit,
     ): VoiceSpeechQueue = object : VoiceSpeechQueue {
         override fun enqueue(segment: VoiceSpeechSegment) {
             segments += segment.speechText

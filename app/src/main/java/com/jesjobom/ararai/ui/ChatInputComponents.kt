@@ -38,8 +38,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jesjobom.ararai.R
 import com.jesjobom.ararai.chat.AudioPrompt
 import com.jesjobom.ararai.chat.ImageAttachment
 import kotlinx.coroutines.Dispatchers
@@ -67,6 +69,9 @@ internal fun ChatInputBar(
     onCancelGeneration: () -> Unit,
     mediaServices: ChatMediaServices,
 ) {
+    val recordingStartFailed = stringResource(R.string.chat_recording_start_failed)
+    val recordingTooShort = stringResource(R.string.chat_recording_too_short)
+    val microphonePermissionDenied = stringResource(R.string.chat_microphone_permission_denied)
     Surface(
         tonalElevation = 3.dp,
         shadowElevation = 3.dp,
@@ -108,7 +113,7 @@ internal fun ChatInputBar(
                 activeRecorder = null
                 activeRecordingFile?.absolutePath?.let(mediaServices.draftCleaner::delete)
                 activeRecordingFile = null
-                recordingError = error.message ?: "Unable to start recording"
+                recordingError = error.message ?: recordingStartFailed
             }
         }
         fun stopAudioRecording() {
@@ -124,7 +129,7 @@ internal fun ChatInputBar(
                 recordingError = null
             } else {
                 mediaServices.draftCleaner.delete(file.absolutePath)
-                recordingError = "Recording was too short"
+                recordingError = recordingTooShort
             }
         }
         val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
@@ -133,7 +138,7 @@ internal fun ChatInputBar(
             if (granted) {
                 startAudioRecording()
             } else {
-                recordingError = "Microphone permission denied"
+                recordingError = microphonePermissionDenied
             }
         }
         fun openAudioRecorder() {
@@ -204,7 +209,7 @@ internal fun ChatInputBar(
                 ) {
                     Icon(imageVector = Icons.Filled.Close, contentDescription = null)
                     Text(
-                        text = "Cancel generation",
+                        text = stringResource(R.string.chat_cancel_generation),
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
@@ -213,7 +218,7 @@ internal fun ChatInputBar(
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         imageAttachments.forEach { image ->
                             AttachmentRow(
-                                label = image.displayName ?: "Image",
+                                label = image.displayName ?: stringResource(R.string.chat_attachment_image),
                                 imageUri = image.uri,
                                 onRemove = { onRemoveImage(image.uri) },
                                 mediaServices = mediaServices,
@@ -221,7 +226,7 @@ internal fun ChatInputBar(
                         }
                         audioPrompt?.let { audio ->
                             AttachmentRow(
-                                label = audio.displayName ?: "Audio prompt",
+                                label = audio.displayName ?: stringResource(R.string.chat_audio_prompt),
                                 onRemove = onClearAudioPrompt,
                                 mediaServices = mediaServices,
                             )
@@ -238,7 +243,7 @@ internal fun ChatInputBar(
                             ) {
                                 Icon(imageVector = Icons.Filled.AttachFile, contentDescription = null)
                                 Text(
-                                    text = "Image",
+                                    text = stringResource(R.string.chat_attachment_image),
                                     modifier = Modifier.padding(start = 6.dp),
                                 )
                             }
@@ -247,7 +252,7 @@ internal fun ChatInputBar(
                             OutlinedButton(onClick = ::openAudioRecorder) {
                                 Icon(imageVector = Icons.Filled.GraphicEq, contentDescription = null)
                                 Text(
-                                    text = "Audio",
+                                    text = stringResource(R.string.chat_attachment_audio),
                                     modifier = Modifier.padding(start = 6.dp),
                                 )
                             }
@@ -261,7 +266,7 @@ internal fun ChatInputBar(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 1,
                     maxLines = 5,
-                    label = { Text("Message") },
+                    label = { Text(stringResource(R.string.chat_message_label)) },
                     enabled = audioPrompt == null,
                     trailingIcon = {
                         FilledIconButton(
@@ -271,7 +276,7 @@ internal fun ChatInputBar(
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Send",
+                                contentDescription = stringResource(R.string.action_send),
                             )
                         }
                     },
@@ -320,7 +325,7 @@ internal fun AudioRecorderDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Audio prompt") },
+        title = { Text(stringResource(R.string.chat_audio_prompt)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 error?.let {
@@ -338,7 +343,7 @@ internal fun AudioRecorderDialog(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = "Recording",
+                            text = stringResource(R.string.chat_recording),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -362,7 +367,7 @@ internal fun AudioRecorderDialog(
                     }
                     else -> {
                         Text(
-                            text = "Preparing microphone.",
+                            text = stringResource(R.string.chat_preparing_microphone),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -374,24 +379,28 @@ internal fun AudioRecorderDialog(
             when {
                 isRecording -> {
                     TextButton(onClick = onStopRecording) {
-                        Text("Stop")
+                        Text(stringResource(R.string.chat_stop_recording))
                     }
                 }
                 recordedAudio != null -> {
                     TextButton(onClick = onUseRecording) {
-                        Text("Send")
+                        Text(stringResource(R.string.action_send))
                     }
                 }
                 else -> {
                     TextButton(onClick = onStartRecording) {
-                        Text("Record")
+                        Text(stringResource(R.string.chat_record_audio))
                     }
                 }
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss, enabled = !isRecording) {
-                Text(if (recordedAudio != null) "Cancel" else "Close")
+                Text(
+                    stringResource(
+                        if (recordedAudio != null) R.string.action_cancel else R.string.action_close,
+                    ),
+                )
             }
         },
     )

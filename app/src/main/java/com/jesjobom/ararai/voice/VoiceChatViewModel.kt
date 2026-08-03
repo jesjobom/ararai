@@ -35,6 +35,7 @@ import com.jesjobom.ararai.engine.PromptRequest
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelStartupState
+import com.jesjobom.ararai.ui.UserMessageKey
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +60,7 @@ internal class VoiceChatViewModel(
     private val generationMetricsConsumer: (LocalModel, GenerationMetrics) -> Unit = { _, _ -> },
     private val preferences: VoiceChatPreferences,
     private val captureFactory: (VoiceChatSettings) -> VoiceTurnCapture,
-    speechQueueFactory: ((IntRange) -> Unit, (IntRange) -> Unit, () -> Unit, (String) -> Unit) -> VoiceSpeechQueue,
+    speechQueueFactory: ((IntRange) -> Unit, (IntRange) -> Unit, () -> Unit, (UserMessageKey) -> Unit) -> VoiceSpeechQueue,
     private val sessionStore: ChatSessionStore = InMemoryChatSessionStore(),
     private val mediaRepository: ChatMediaRepository = NoOpChatMediaRepository,
     private val audioTranscriber: AudioTranscriber = UnavailableAudioTranscriber,
@@ -142,7 +143,9 @@ internal class VoiceChatViewModel(
             val activeModel = model ?: return@launch
             val activeInference = inference?.let { generationConfigProvider(activeModel, it) } ?: return@launch
             if (!activeModel.inputCapabilities.audio && !audioTranscriber.isAvailable) return@launch
-            mutableState.update { it.copy(isLoadingModel = true, isModelLoaded = false, error = null) }
+            mutableState.update {
+                it.copy(isLoadingModel = true, isModelLoaded = false, error = null, errorKey = null)
+            }
             try {
                 val loadStartedAt = System.nanoTime()
                 engine.load(activeModel, activeInference)
@@ -167,7 +170,8 @@ internal class VoiceChatViewModel(
                             isLoadingModel = false,
                             isModelLoaded = false,
                             phase = VoiceChatPhase.Error,
-                            error = error.message ?: "Model loading failed",
+                            error = error.message,
+                            errorKey = if (error.message == null) UserMessageKey.ModelLoadingFailed else null,
                         )
                     }
                 }
@@ -268,7 +272,9 @@ internal class VoiceChatViewModel(
                 spokenRange = null,
                 readingAnchor = 0,
                 notice = null,
+                noticeKey = null,
                 error = null,
+                errorKey = null,
             )
         }
         startCapture(runId)
@@ -283,7 +289,7 @@ internal class VoiceChatViewModel(
                 onError = { message -> scope.launch { fail(message) } },
             )
         }
-        mutableState.update { it.copy(phase = VoiceChatPhase.Listening, error = null) }
+        mutableState.update { it.copy(phase = VoiceChatPhase.Listening, error = null, errorKey = null) }
     }
 
     @Suppress("LongMethod", "CyclomaticComplexMethod")
@@ -309,6 +315,7 @@ internal class VoiceChatViewModel(
                 activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 notice = null,
+                noticeKey = null,
             )
         }
         val activeModel = model ?: return fail("Model unavailable")
@@ -442,8 +449,9 @@ internal class VoiceChatViewModel(
                             if (incomplete) {
                                 mutableState.update {
                                     it.copy(
-                                        responsePreview = "Incomplete response",
-                                        notice = "The model finished before producing a final answer.",
+                                        responsePreview = "",
+                                        notice = null,
+                                        noticeKey = UserMessageKey.NoFinalAnswer,
                                     )
                                 }
                             } else {
@@ -587,7 +595,9 @@ internal class VoiceChatViewModel(
                 researchInProgress = false,
                 activeKnowledgeToolName = null,
                 notice = null,
+                noticeKey = null,
                 error = null,
+                errorKey = null,
             )
         }
     }
@@ -606,12 +616,32 @@ internal class VoiceChatViewModel(
                 researchInProgress = false,
                 activeKnowledgeToolName = null,
                 error = message,
+                errorKey = null,
+            )
+        }
+    }
+
+    private fun fail(messageKey: UserMessageKey) {
+        capture?.cancel()
+        capture = null
+        generationJob?.cancel()
+        generationJob = null
+        speechQueue.stop()
+        recordDiagnostic("failed")
+        deleteCurrentAudio()
+        mutableState.update {
+            it.copy(
+                phase = VoiceChatPhase.Error,
+                researchInProgress = false,
+                activeKnowledgeToolName = null,
+                error = null,
+                errorKey = messageKey,
             )
         }
     }
 
     fun dismissError() {
-        mutableState.update { it.copy(phase = VoiceChatPhase.Idle, error = null) }
+        mutableState.update { it.copy(phase = VoiceChatPhase.Idle, error = null, errorKey = null) }
     }
 
     private fun deleteCurrentAudio() {

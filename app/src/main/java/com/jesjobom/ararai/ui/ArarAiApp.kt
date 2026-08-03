@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -61,10 +62,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jesjobom.ararai.R
 import com.jesjobom.ararai.benchmark.BenchmarkResult
 import com.jesjobom.ararai.benchmark.BenchmarkUiState
 import com.jesjobom.ararai.benchmark.BenchmarkViewModel
@@ -107,6 +110,7 @@ import com.jesjobom.ararai.model.requireInference
 import com.jesjobom.ararai.model.resolve
 import com.jesjobom.ararai.model.supportsPurpose
 import com.jesjobom.ararai.model.supportsTask
+import com.jesjobom.ararai.settings.ApplicationLanguage
 import com.jesjobom.ararai.settings.ThemeMode
 import com.jesjobom.ararai.voice.AndroidVoiceTurnCapture
 import com.jesjobom.ararai.voice.SequentialVoiceSpeechQueue
@@ -152,6 +156,13 @@ internal fun ArarAiApp(
     appVersionLabel: String,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
+    applicationLanguage: ApplicationLanguage = ApplicationLanguage.System,
+    appliedApplicationLanguage: ApplicationLanguage = applicationLanguage,
+    onApplicationLanguageChange: (ApplicationLanguage) -> Unit = {},
+    onRestartApplication: () -> Unit = {},
+    shouldConfirmExit: Boolean = true,
+    onDisableExitConfirmation: () -> Unit = {},
+    onExitApplication: () -> Unit = {},
     voiceChatPreferences: VoiceChatPreferences,
     voiceTemporaryDirectory: File,
     openModelManagementRequest: Int = 0,
@@ -185,6 +196,8 @@ internal fun ArarAiApp(
     val startupState = modelCatalogState.selectedStartupState
     val modelConfig = modelCatalogState.selectedConfig
     var destination by remember { mutableStateOf(AppDestination.Home) }
+    var showExitConfirmation by remember { mutableStateOf(false) }
+    var disableExitConfirmation by remember { mutableStateOf(false) }
     var whisperBenchmarkModelId by remember { mutableStateOf<String?>(null) }
     var webSmokeRunning by remember { mutableStateOf<WebSearchProvider?>(null) }
     var webSmokeResults by remember { mutableStateOf<Map<WebSearchProvider, ToolSmokeTestResult>>(emptyMap()) }
@@ -234,6 +247,50 @@ internal fun ArarAiApp(
         } else {
             returnHome()
         }
+    }
+
+    BackHandler(enabled = destination == AppDestination.Home) {
+        if (shouldConfirmExit) {
+            disableExitConfirmation = false
+            showExitConfirmation = true
+        } else {
+            onExitApplication()
+        }
+    }
+
+    if (showExitConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showExitConfirmation = false },
+            title = { Text(stringResource(R.string.exit_confirmation_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(stringResource(R.string.exit_confirmation_description))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = disableExitConfirmation,
+                            onCheckedChange = { disableExitConfirmation = it },
+                        )
+                        Text(stringResource(R.string.exit_confirmation_do_not_ask_again))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (disableExitConfirmation) onDisableExitConfirmation()
+                        showExitConfirmation = false
+                        onExitApplication()
+                    },
+                ) {
+                    Text(stringResource(R.string.action_exit))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitConfirmation = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
     }
 
     LaunchedEffect(openModelManagementRequest) {
@@ -351,6 +408,10 @@ internal fun ArarAiApp(
         AppDestination.Settings -> SettingsScreen(
             themeMode = themeMode,
             onThemeModeChange = onThemeModeChange,
+            applicationLanguage = applicationLanguage,
+            appliedApplicationLanguage = appliedApplicationLanguage,
+            onApplicationLanguageChange = onApplicationLanguageChange,
+            onRestartApplication = onRestartApplication,
             onBack = { returnHome() },
         )
         AppDestination.InstructionsTools -> InstructionsAndToolsScreen(
@@ -465,7 +526,7 @@ internal fun ArarAiScaffold(
                         IconButton(onClick = onBack) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
+                                contentDescription = stringResource(R.string.action_back),
                             )
                         }
                     }
@@ -494,7 +555,7 @@ internal fun HomeScreen(
     onOpenSettings: () -> Unit,
 ) {
     ArarAiScaffold(
-        title = "ArarAI",
+        title = stringResource(R.string.app_name),
         subtitle = appVersionLabel,
     ) { modifier ->
         Column(
@@ -504,56 +565,56 @@ internal fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Local AI for everyday work",
+                text = stringResource(R.string.home_headline),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Use a private on-device model for chat, with model files and runtimes managed locally.",
+                text = stringResource(R.string.home_description),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             HomeConversationCard(
-                title = "Chat",
-                detail = "Start a local conversation with the selected model.",
+                title = stringResource(R.string.home_chat_title),
+                detail = stringResource(R.string.home_chat_description),
                 icon = Icons.AutoMirrored.Filled.Chat,
                 onClick = onOpenChat,
             )
 
             HomeConversationCard(
-                title = "Voice Chat",
-                detail = "Start a stateless local voice conversation with the selected model.",
+                title = stringResource(R.string.home_voice_chat_title),
+                detail = stringResource(R.string.home_voice_chat_description),
                 icon = Icons.Filled.Mic,
                 onClick = onOpenVoiceChat,
             )
 
             StatusCard(
-                title = "Model Manager",
+                title = stringResource(R.string.home_model_manager_title),
                 value = modelStatus.modelName,
-                detail = modelStatus.title,
-                tags = modelStatus.capabilities,
+                detail = modelStatus.localizedTitle(),
+                tags = modelStatus.localizedCapabilities(),
                 icon = when {
                     modelStatus.progressPercent != null -> Icons.Filled.CloudDownload
                     modelStatus.canRetry -> Icons.Filled.Error
-                    modelStatus.title.contains("ready", ignoreCase = true) -> Icons.Filled.CheckCircle
+                    modelStatus.isReady -> Icons.Filled.CheckCircle
                     else -> Icons.Filled.Storage
                 },
                 onAction = onOpenModelStatus,
             )
 
             StatusCard(
-                title = "Assistant configuration",
-                value = "Customize assistant behavior",
-                detail = "Manage instructions, tools, and model generation.",
+                title = stringResource(R.string.home_assistant_configuration_title),
+                value = stringResource(R.string.home_assistant_configuration_value),
+                detail = stringResource(R.string.home_assistant_configuration_description),
                 icon = Icons.Filled.Bolt,
                 onAction = onOpenInstructionsTools,
             )
 
             StatusCard(
-                title = "Settings",
-                value = "Appearance and preferences",
-                detail = "Choose how ArarAI looks and manage future application options.",
+                title = stringResource(R.string.settings_title),
+                value = stringResource(R.string.home_settings_value),
+                detail = stringResource(R.string.home_settings_description),
                 icon = Icons.Filled.Settings,
                 onAction = onOpenSettings,
             )
@@ -566,9 +627,13 @@ internal fun HomeScreen(
 internal fun SettingsScreen(
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
+    applicationLanguage: ApplicationLanguage = ApplicationLanguage.System,
+    appliedApplicationLanguage: ApplicationLanguage = applicationLanguage,
+    onApplicationLanguageChange: (ApplicationLanguage) -> Unit = {},
+    onRestartApplication: () -> Unit = {},
     onBack: () -> Unit,
 ) {
-    ArarAiScaffold(title = "Settings", onBack = onBack) { modifier ->
+    ArarAiScaffold(title = stringResource(R.string.settings_title), onBack = onBack) { modifier ->
         Column(
             modifier = modifier
                 .verticalScroll(rememberScrollState())
@@ -576,55 +641,65 @@ internal fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "Appearance",
+                text = stringResource(R.string.settings_general),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(text = "Theme", style = MaterialTheme.typography.titleMedium)
             Text(
-                text = "Choose a theme or follow your device setting.",
+                text = stringResource(R.string.settings_language),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.settings_language_description),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ApplicationLanguage.entries.forEach { language ->
+                SettingsOptionCard(
+                    selected = applicationLanguage == language,
+                    tag = "language-option-${language.name.lowercase(Locale.ROOT)}",
+                    title = language.displayName(),
+                    description = language.description(),
+                    onClick = { onApplicationLanguageChange(language) },
+                )
+            }
+            if (applicationLanguage != appliedApplicationLanguage) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_language_restart_required),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Button(onClick = onRestartApplication) {
+                            Text(stringResource(R.string.settings_language_restart_now))
+                        }
+                    }
+                }
+            }
+            Text(
+                text = stringResource(R.string.settings_theme),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.settings_theme_description),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ThemeMode.entries.forEach { mode ->
-                Card(
+                SettingsOptionCard(
+                    selected = themeMode == mode,
+                    tag = "theme-option-${mode.name.lowercase(Locale.ROOT)}",
+                    title = mode.displayName(),
+                    description = mode.description(),
                     onClick = { onThemeModeChange(mode) },
-                    modifier = Modifier
-                        .testTag("theme-option-${mode.name.lowercase(Locale.ROOT)}")
-                        .semantics { selected = themeMode == mode },
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (themeMode == mode) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surface
-                        },
-                    ),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        RadioButton(
-                            selected = themeMode == mode,
-                            onClick = { onThemeModeChange(mode) },
-                        )
-                        Column {
-                            Text(
-                                text = mode.displayName,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium,
-                            )
-                            Text(
-                                text = mode.description,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
+                )
             }
         }
     }
@@ -653,18 +728,22 @@ internal fun InstructionsAndToolsScreen(
     onBack: () -> Unit,
 ) {
     var selectedTab by remember { mutableStateOf(0) }
-    ArarAiScaffold(title = "Assistant configuration", onBack = onBack) { modifier ->
+    ArarAiScaffold(title = stringResource(R.string.assistant_configuration_title), onBack = onBack) { modifier ->
         Column(
             modifier = modifier.padding(vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             PrimaryTabRow(selectedTabIndex = selectedTab) {
-                listOf("Prompts", "Tools", "Generation").forEachIndexed { index, label ->
+                listOf(
+                    "prompts" to stringResource(R.string.assistant_tab_prompts),
+                    "tools" to stringResource(R.string.assistant_tab_tools),
+                    "generation" to stringResource(R.string.assistant_tab_generation),
+                ).forEachIndexed { index, (tag, label) ->
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
                         text = { Text(label) },
-                        modifier = Modifier.testTag("instructions-tools-tab-${label.lowercase()}"),
+                        modifier = Modifier.testTag("instructions-tools-tab-$tag"),
                     )
                 }
             }
@@ -716,6 +795,13 @@ internal data class GenerationModelUiState(
 )
 
 @Composable
+private fun TemperaturePreset.localizedDisplayName(): String = when (this) {
+    TemperaturePreset.Precise -> stringResource(R.string.generation_precise)
+    TemperaturePreset.Balanced -> stringResource(R.string.generation_balanced)
+    TemperaturePreset.Creative -> stringResource(R.string.generation_creative)
+}
+
+@Composable
 @Suppress("LongMethod", "CyclomaticComplexMethod")
 private fun GenerationTab(
     model: GenerationModelUiState?,
@@ -724,15 +810,15 @@ private fun GenerationTab(
     onRestoreDefaults: () -> Unit,
 ) {
     if (model == null) {
-        Text("The selected model does not expose generation settings.")
+        Text(stringResource(R.string.generation_unavailable))
         return
     }
     Text(model.modelName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
     Text(
-        "Settings are saved separately for each model and apply to future Chat and Voice Chat turns.",
+        stringResource(R.string.generation_scope_description),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Text("Context window", style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.generation_context_window), style = MaterialTheme.typography.titleMedium)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(1024, 2048, 4096, 6144, 8192).forEach { tokens ->
             FilterChip(
@@ -744,23 +830,27 @@ private fun GenerationTab(
         }
     }
     Text(
-        "Selected: ${model.effectiveContextTokens} tokens. Catalog default: ${model.catalogContextTokens}.",
+        stringResource(R.string.generation_context_selection, model.effectiveContextTokens, model.catalogContextTokens),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Text("Temperature", style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.generation_temperature), style = MaterialTheme.typography.titleMedium)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TemperaturePreset.entries.forEach { preset ->
             FilterChip(
                 selected = model.effectiveTemperature == preset.value,
                 onClick = { onTemperatureChange(preset.value) },
-                label = { Text(preset.displayName) },
+                label = { Text(preset.localizedDisplayName()) },
                 modifier = Modifier.testTag("generation-temperature-${preset.name.lowercase()}"),
             )
         }
     }
     Text(
-        "Selected: ${model.effectiveTemperature}. Catalog default: ${model.catalogTemperature}.",
+        stringResource(
+            R.string.generation_temperature_selection,
+            model.effectiveTemperature.toString(),
+            model.catalogTemperature.toString(),
+        ),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -769,26 +859,34 @@ private fun GenerationTab(
         enabled = model.hasOverrides,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text("Restore catalog defaults")
+        Text(stringResource(R.string.generation_restore_defaults))
     }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Runtime limits", fontWeight = FontWeight.SemiBold)
-            Text("Response limit: controlled by model/runtime.")
-            Text("Reasoning and the final answer share the total context capacity.")
-            Text(if (model.supportsReasoning) "Reasoning supported." else "Reasoning unavailable.")
+            Text(stringResource(R.string.generation_runtime_limits), fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.generation_response_limit))
+            Text(stringResource(R.string.generation_shared_capacity))
+            Text(
+                stringResource(
+                    if (model.supportsReasoning) {
+                        R.string.generation_reasoning_supported
+                    } else {
+                        R.string.generation_reasoning_unavailable
+                    },
+                ),
+            )
         }
     }
-    Text("Last conversational turn", style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.generation_last_turn), style = MaterialTheme.typography.titleMedium)
     val metrics = model.metrics
     if (metrics == null) {
-        Text("Metrics unavailable.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.generation_metrics_unavailable), color = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
-        LabeledValue("Time to first token", "${metrics.timeToFirstTokenMillis} ms")
-        LabeledValue("Prefill tokens", metrics.prefillTokenCount.toString())
-        LabeledValue("Prefill speed", String.format(Locale.US, "%.2f tokens/s", metrics.prefillTokensPerSecond))
-        LabeledValue("Decode tokens", metrics.decodeTokenCount.toString())
-        LabeledValue("Decode speed", String.format(Locale.US, "%.2f tokens/s", metrics.decodeTokensPerSecond))
+        LabeledValue(stringResource(R.string.generation_time_first_token), stringResource(R.string.diagnostics_millis, metrics.timeToFirstTokenMillis))
+        LabeledValue(stringResource(R.string.diagnostics_prefill_tokens), metrics.prefillTokenCount.toString())
+        LabeledValue(stringResource(R.string.generation_prefill_speed), stringResource(R.string.diagnostics_tokens_per_second, String.format(Locale.US, "%.2f", metrics.prefillTokensPerSecond)))
+        LabeledValue(stringResource(R.string.diagnostics_decode_tokens), metrics.decodeTokenCount.toString())
+        LabeledValue(stringResource(R.string.generation_decode_speed), stringResource(R.string.diagnostics_tokens_per_second, String.format(Locale.US, "%.2f", metrics.decodeTokensPerSecond)))
     }
 }
 
@@ -799,18 +897,18 @@ private fun InstructionsTab(
     onRestoreDefault: (InteractionMode) -> Unit,
 ) {
     Text(
-        "These instructions customize behavior. ArarAI's application and safety rules remain active.",
+        stringResource(R.string.instructions_description),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     InstructionEditor(
-        title = "Chat instruction",
+        title = stringResource(R.string.instructions_chat),
         value = settings.chatInstruction,
         tag = "chat-instruction",
         onValueChange = { onInstructionChange(InteractionMode.Chat, it) },
         onRestore = { onRestoreDefault(InteractionMode.Chat) },
     )
     InstructionEditor(
-        title = "Voice Chat instruction",
+        title = stringResource(R.string.instructions_voice_chat),
         value = settings.voiceInstruction,
         tag = "voice-instruction",
         onValueChange = { onInstructionChange(InteractionMode.Voice, it) },
@@ -838,10 +936,13 @@ private fun ToolsTab(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Wikipedia", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "Uses Wikipedia/MediaWiki for eligible factual searches. " +
-                    "Inference and conversation storage remain local.",
+                stringResource(R.string.wikipedia_name),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                stringResource(R.string.tools_wikipedia_description),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -851,12 +952,12 @@ private fun ToolsTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Use Wikipedia")
+                    Text(stringResource(R.string.tools_use_wikipedia))
                     Text(
                         if (wikipediaCompatible) {
-                            "Available for the selected model."
+                            stringResource(R.string.tools_available_model)
                         } else {
-                            "Unavailable for the selected model."
+                            stringResource(R.string.tools_unavailable_model)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -871,13 +972,9 @@ private fun ToolsTab(
             }
         }
     }
-    Text("Focused web search", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    Text(stringResource(R.string.tools_web_search), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
     Text(
-        "Experimental providers send the query and retrieval metadata directly from this device. " +
-            "Your own provider token and provider terms, retention, quota, and charges apply. " +
-            "When both are enabled, Exa runs first and Tavily is used only after a " +
-            "controlled provider failure. A fallback can send the same request to both services and " +
-            "consume quota from both.",
+        stringResource(R.string.tools_web_search_description),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     val orderedCards =
@@ -927,13 +1024,13 @@ private fun WebSearchProviderCard(
         ) {
             Text(provider.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             TextButton(onClick = { uriHandler.openUri(provider.accountUrl) }) {
-                Text("Create account / API token ↗")
+                Text(stringResource(R.string.tools_create_token))
             }
             Text(
                 if (configured) {
-                    "Credential configured. The stored token is never displayed again."
+                    stringResource(R.string.tools_credential_configured)
                 } else {
-                    "Enter a user-owned token. It is saved only after a successful verification."
+                    stringResource(R.string.tools_enter_token)
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -942,7 +1039,7 @@ private fun WebSearchProviderCard(
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },
-                    label = { Text("${provider.displayName} API token") },
+                    label = { Text(stringResource(R.string.tools_api_token_label, provider.displayName)) },
                     singleLine = true,
                     visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                     keyboardOptions =
@@ -967,8 +1064,7 @@ private fun WebSearchProviderCard(
                         ),
                     )
                     Text(
-                        "I understand that my query and retrieval metadata are sent to " +
-                            "${provider.displayName} under my account.",
+                        stringResource(R.string.tools_disclosure, provider.displayName),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -984,7 +1080,11 @@ private fun WebSearchProviderCard(
                         .fillMaxWidth()
                         .testTag("web-provider-verify-${provider.name.lowercase()}"),
                 ) {
-                    Text(if (verifying) "Verifying" else "Verify and enable")
+                    Text(
+                        stringResource(
+                            if (verifying) R.string.tools_verifying else R.string.tools_verify_enable,
+                        ),
+                    )
                 }
             } else {
                 Row(
@@ -993,14 +1093,14 @@ private fun WebSearchProviderCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("Use for focused web search")
+                        Text(stringResource(R.string.tools_use_web_search))
                         Text(
                             when {
-                                !compatible -> "Unavailable for the selected model or build."
-                                preferred && provider == WebSearchProvider.Exa -> "Enabled as preferred provider."
-                                preferred -> "Enabled for focused web search."
-                                enabled -> "Enabled as fallback provider."
-                                else -> "Configured but disabled."
+                                !compatible -> stringResource(R.string.tools_unavailable_model_build)
+                                preferred && provider == WebSearchProvider.Exa -> stringResource(R.string.tools_preferred_provider)
+                                preferred -> stringResource(R.string.tools_enabled_search)
+                                enabled -> stringResource(R.string.tools_fallback_provider)
+                                else -> stringResource(R.string.tools_configured_disabled)
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1020,13 +1120,16 @@ private fun WebSearchProviderCard(
                         .fillMaxWidth()
                         .testTag("web-provider-remove-${provider.name.lowercase()}"),
                 ) {
-                    Text("Remove credential")
+                    Text(stringResource(R.string.tools_remove_credential))
                 }
             }
             if (verifying) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             smokeResult?.let { result ->
                 Text(
-                    if (result.passed) "PASS — ${result.detail}" else "FAIL — ${result.detail}",
+                    stringResource(
+                        if (result.passed) R.string.tools_pass_result else R.string.tools_fail_result,
+                        result.detail,
+                    ),
                     color =
                     if (result.passed) {
                         MaterialTheme.colorScheme.primary
@@ -1035,7 +1138,9 @@ private fun WebSearchProviderCard(
                     },
                 )
             }
-            smokeError?.let { Text("FAIL — $it", color = MaterialTheme.colorScheme.error) }
+            smokeError?.let {
+                Text(stringResource(R.string.tools_fail_result, it), color = MaterialTheme.colorScheme.error)
+            }
         }
     }
 }
@@ -1063,23 +1168,79 @@ private fun InstructionEditor(
             minLines = 4,
             supportingText = { Text("${value.length} / 2000") },
         )
-        TextButton(onClick = onRestore) { Text("Restore default") }
+        TextButton(onClick = onRestore) { Text(stringResource(R.string.instructions_restore_default)) }
     }
 }
 
-private val ThemeMode.displayName: String
-    get() = when (this) {
-        ThemeMode.System -> "System"
-        ThemeMode.Light -> "Light"
-        ThemeMode.Dark -> "Dark"
+@Composable
+private fun SettingsOptionCard(
+    selected: Boolean,
+    tag: String,
+    title: String,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.testTag(tag).semantics { this.selected = selected },
+        colors = CardDefaults.cardColors(
+            containerColor =
+            if (selected) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+        ),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            RadioButton(selected = selected, onClick = onClick)
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
+}
 
-private val ThemeMode.description: String
-    get() = when (this) {
-        ThemeMode.System -> "Use your device appearance"
-        ThemeMode.Light -> "Always use the light appearance"
-        ThemeMode.Dark -> "Always use the dark appearance"
-    }
+@Composable
+private fun ThemeMode.displayName(): String = when (this) {
+    ThemeMode.System -> stringResource(R.string.theme_system)
+    ThemeMode.Light -> stringResource(R.string.theme_light)
+    ThemeMode.Dark -> stringResource(R.string.theme_dark)
+}
+
+@Composable
+private fun ThemeMode.description(): String = when (this) {
+    ThemeMode.System -> stringResource(R.string.theme_system_description)
+    ThemeMode.Light -> stringResource(R.string.theme_light_description)
+    ThemeMode.Dark -> stringResource(R.string.theme_dark_description)
+}
+
+@Composable
+private fun ApplicationLanguage.displayName(): String = when (this) {
+    ApplicationLanguage.System -> stringResource(R.string.language_system)
+    ApplicationLanguage.English -> stringResource(R.string.language_english)
+    ApplicationLanguage.PortugueseBrazil -> stringResource(R.string.language_portuguese_brazil)
+}
+
+@Composable
+private fun ApplicationLanguage.description(): String = when (this) {
+    ApplicationLanguage.System -> stringResource(R.string.language_system_description)
+    ApplicationLanguage.English -> stringResource(R.string.language_english_description)
+    ApplicationLanguage.PortugueseBrazil -> stringResource(R.string.language_portuguese_brazil_description)
+}
 
 @Composable
 private fun HomeConversationCard(
@@ -1172,8 +1333,8 @@ private fun BenchmarkScreen(
     val state by viewModel.uiState.collectAsState()
 
     ArarAiScaffold(
-        title = "Diagnostics",
-        subtitle = "On-demand runtime check",
+        title = stringResource(R.string.diagnostics_title),
+        subtitle = stringResource(R.string.diagnostics_subtitle),
         onBack = onBack,
     ) { modifier ->
         Column(
@@ -1183,7 +1344,7 @@ private fun BenchmarkScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Benchmark is a troubleshooting tool for the selected model. It does not compare models or keep history.",
+                text = stringResource(R.string.diagnostics_description),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1197,7 +1358,10 @@ private fun BenchmarkScreen(
             ) {
                 Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null)
                 Text(
-                    text = if (state.isRunning) "Running diagnostic" else "Run diagnostic",
+                    text =
+                    stringResource(
+                        if (state.isRunning) R.string.diagnostics_running else R.string.diagnostics_run,
+                    ),
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
@@ -1206,7 +1370,7 @@ private fun BenchmarkScreen(
                     onClick = viewModel::cancelBenchmark,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.action_cancel))
                 }
             }
 
@@ -1236,11 +1400,11 @@ private fun BenchmarkDetailsCard(state: BenchmarkUiState) {
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            LabeledValue("Status", state.status)
-            LabeledValue("Runtime", state.backendLabel)
-            LabeledValue("Prompt", state.promptLabel)
-            LabeledValue("Context", "${state.contextTokens} tokens")
-            LabeledValue("Max output", "${state.maxTokens} tokens")
+            LabeledValue(stringResource(R.string.diagnostics_status), state.status)
+            LabeledValue(stringResource(R.string.diagnostics_runtime), state.backendLabel)
+            LabeledValue(stringResource(R.string.diagnostics_prompt), state.promptLabel)
+            LabeledValue(stringResource(R.string.diagnostics_context), stringResource(R.string.diagnostics_tokens, state.contextTokens))
+            LabeledValue(stringResource(R.string.diagnostics_max_output), stringResource(R.string.diagnostics_tokens, state.maxTokens))
         }
     }
 }
@@ -1258,29 +1422,29 @@ private fun BenchmarkResultCard(result: BenchmarkResult) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                text = "Diagnostic result",
+                text = stringResource(R.string.diagnostics_result),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            LabeledValue("Load", "${result.loadMillis} ms")
-            LabeledValue("First token", result.firstTokenMillis?.let { "$it ms" } ?: "n/a")
-            LabeledValue("Generation", "${result.generationMillis} ms")
-            LabeledValue("Total", "${result.totalMillis} ms")
-            LabeledValue("Prefill tokens", result.prefillTokens?.toString() ?: "n/a")
+            LabeledValue(stringResource(R.string.diagnostics_load), stringResource(R.string.diagnostics_millis, result.loadMillis))
+            LabeledValue(stringResource(R.string.diagnostics_first_token), result.firstTokenMillis?.let { stringResource(R.string.diagnostics_millis, it) } ?: stringResource(R.string.not_available_abbreviation))
+            LabeledValue(stringResource(R.string.diagnostics_generation), stringResource(R.string.diagnostics_millis, result.generationMillis))
+            LabeledValue(stringResource(R.string.diagnostics_total), stringResource(R.string.diagnostics_millis, result.totalMillis))
+            LabeledValue(stringResource(R.string.diagnostics_prefill_tokens), result.prefillTokens?.toString() ?: stringResource(R.string.not_available_abbreviation))
             LabeledValue(
-                "Prefill throughput",
-                result.prefillTokensPerSecond?.let { "${String.format(Locale.US, "%.2f", it)} tokens/s" } ?: "n/a",
+                stringResource(R.string.diagnostics_prefill_throughput),
+                result.prefillTokensPerSecond?.let { stringResource(R.string.diagnostics_tokens_per_second, String.format(Locale.US, "%.2f", it)) } ?: stringResource(R.string.not_available_abbreviation),
             )
-            LabeledValue("Decode tokens", result.decodeTokens?.toString() ?: "n/a")
+            LabeledValue(stringResource(R.string.diagnostics_decode_tokens), result.decodeTokens?.toString() ?: stringResource(R.string.not_available_abbreviation))
             LabeledValue(
-                "Decode throughput",
-                result.decodeTokensPerSecond?.let { "${String.format(Locale.US, "%.2f", it)} tokens/s" } ?: "n/a",
+                stringResource(R.string.diagnostics_decode_throughput),
+                result.decodeTokensPerSecond?.let { stringResource(R.string.diagnostics_tokens_per_second, String.format(Locale.US, "%.2f", it)) } ?: stringResource(R.string.not_available_abbreviation),
             )
-            LabeledValue("Output chars", result.generatedCharacters.toString())
-            LabeledValue("Stream chunks", result.streamedChunks.toString())
+            LabeledValue(stringResource(R.string.diagnostics_output_chars), result.generatedCharacters.toString())
+            LabeledValue(stringResource(R.string.diagnostics_stream_chunks), result.streamedChunks.toString())
             LabeledValue(
-                label = "Character throughput",
-                value = "${String.format(Locale.US, "%.2f", result.charactersPerSecond)} chars/s",
+                label = stringResource(R.string.diagnostics_character_throughput),
+                value = stringResource(R.string.diagnostics_chars_per_second, String.format(Locale.US, "%.2f", result.charactersPerSecond)),
             )
         }
     }
@@ -1303,8 +1467,8 @@ internal fun ModelStatusScreen(
 ) {
     var selectedTab by remember { mutableStateOf(ModelCatalogTab.Chat) }
     ArarAiScaffold(
-        title = "Models",
-        subtitle = "Local catalog",
+        title = stringResource(R.string.models_title),
+        subtitle = stringResource(R.string.models_subtitle),
         onBack = onBack,
     ) { modifier ->
         Column(
@@ -1318,14 +1482,14 @@ internal fun ModelStatusScreen(
                     Tab(
                         selected = selectedTab == tab,
                         onClick = { selectedTab = tab },
-                        text = { Text(tab.label) },
+                        text = { Text(tab.label()) },
                         modifier = Modifier.testTag("models-tab-${tab.name.lowercase(Locale.ROOT)}"),
                     )
                 }
             }
             availableMemoryBytes?.let {
                 Text(
-                    text = "Recommended models fit the ${it.toStorageSize()} currently available memory.",
+                    text = stringResource(R.string.models_recommendation_description, it.toStorageSize()),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1363,6 +1527,8 @@ private fun ModelCard(
     onBenchmark: () -> Unit,
 ) {
     val status = ModelStatusUiState.from(item.config, item.state)
+    val localizedStatusTitle = status.localizedTitle()
+    val localizedStatusDetail = status.localizedDetail()
     val isAvailable = item.state is ModelStartupState.Available
     val isChatModel = item.config.supportsPurpose(ModelPurpose.Chat)
     val isMissing = item.state is ModelStartupState.Missing
@@ -1399,7 +1565,7 @@ private fun ModelCard(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = if (isSelected) "${status.title} - selected" else status.title,
+                        text = if (isSelected) stringResource(R.string.models_selected_status, localizedStatusTitle) else localizedStatusTitle,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -1410,11 +1576,19 @@ private fun ModelCard(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 MetadataBadge(item.config.runtime.displayName)
-                MetadataBadge(item.config.acceleration.displayName)
+                MetadataBadge(
+                    stringResource(
+                        if (item.config.acceleration == com.jesjobom.ararai.model.ModelAccelerationPolicy.CpuOnly) {
+                            R.string.model_acceleration_cpu_only
+                        } else {
+                            R.string.model_acceleration_gpu_preferred
+                        },
+                    ),
+                )
                 if (isRecommended) {
-                    MetadataBadge("Recommended")
+                    MetadataBadge(stringResource(R.string.models_recommended))
                 }
-                item.config.capabilityLabels().forEach { capability ->
+                status.localizedCapabilities().forEach { capability ->
                     MetadataBadge(capability)
                 }
             }
@@ -1427,16 +1601,16 @@ private fun ModelCard(
                 ?.length()
                 ?.takeIf { it > 0L }
             LabeledValue(
-                label = if (installedBytes != null) "Installed size" else "Approx. download",
-                value = (installedBytes ?: item.config.expectedBytes)?.toStorageSize() ?: "Unknown",
+                label = if (installedBytes != null) stringResource(R.string.models_installed_size) else stringResource(R.string.models_approximate_download),
+                value = (installedBytes ?: item.config.expectedBytes)?.toStorageSize() ?: stringResource(R.string.models_unknown),
             )
             LabeledValue(
-                label = "Recommended free RAM",
-                value = item.config.recommendedFreeRamBytes?.toStorageSize() ?: "Not specified",
+                label = stringResource(R.string.models_recommended_ram),
+                value = item.config.recommendedFreeRamBytes?.toStorageSize() ?: stringResource(R.string.models_not_specified),
             )
 
             Text(
-                text = status.detail,
+                text = localizedStatusDetail,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1456,33 +1630,33 @@ private fun ModelCard(
             ) {
                 if (isChatModel && !isSelected && isAvailable) {
                     Button(onClick = onSelect, enabled = !isDownloading) {
-                        Text("Use this model")
+                        Text(stringResource(R.string.models_use))
                     }
                 }
                 if (isMissing) {
                     Button(onClick = onDownload) {
-                        Text("Download")
+                        Text(stringResource(R.string.models_download))
                     }
                 }
                 if (isFailed) {
                     Button(onClick = onRetry) {
-                        Text("Retry")
+                        Text(stringResource(R.string.models_retry))
                     }
                 }
                 if (isDownloading) {
                     OutlinedButton(onClick = onCancelDownload) {
-                        Text("Cancel download")
+                        Text(stringResource(R.string.models_cancel_download))
                     }
                 }
                 if (isAvailable) {
                     Button(onClick = onBenchmark) {
-                        Text("Run benchmark")
+                        Text(stringResource(R.string.models_run_benchmark))
                     }
                     OutlinedButton(onClick = onRedownload) {
-                        Text("Download again")
+                        Text(stringResource(R.string.models_download_again))
                     }
                     OutlinedButton(onClick = onDelete) {
-                        Text("Delete local file")
+                        Text(stringResource(R.string.models_delete_local_file))
                     }
                 }
             }

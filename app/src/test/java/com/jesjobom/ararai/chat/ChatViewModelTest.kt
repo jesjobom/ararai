@@ -13,6 +13,7 @@ import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelInputCapabilities
 import com.jesjobom.ararai.model.ModelReasoningCapabilities
 import com.jesjobom.ararai.model.ModelStartupState
+import com.jesjobom.ararai.ui.UserMessageKey
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
@@ -69,6 +70,8 @@ class ChatViewModelTest {
             )
 
         viewModel.onModelStartupState(ModelStartupState.Available(model, inferenceConfig))
+
+        assertEquals(UserMessageKey.ModelAvailable, viewModel.uiState.value.modelStatusKey)
         viewModel.onPromptChanged("hello")
 
         assertTrue(viewModel.uiState.value.canSubmit)

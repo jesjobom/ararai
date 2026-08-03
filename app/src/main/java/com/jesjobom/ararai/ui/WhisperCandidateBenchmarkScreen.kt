@@ -22,9 +22,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jesjobom.ararai.R
 import com.jesjobom.ararai.chat.DEFAULT_TRANSCRIPTION_THREADS
 import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelStartupState
@@ -40,6 +42,27 @@ import java.io.File
 import java.io.IOException
 import java.util.Locale
 
+private enum class WhisperBenchmarkStatus {
+    Ready,
+    Transcribing,
+    Completed,
+    Failed,
+    Listening,
+    AudioDeleted,
+    RecordingCanceled,
+}
+
+@Composable
+private fun WhisperBenchmarkStatus.label(): String = when (this) {
+    WhisperBenchmarkStatus.Ready -> stringResource(R.string.whisper_status_ready)
+    WhisperBenchmarkStatus.Transcribing -> stringResource(R.string.whisper_status_transcribing)
+    WhisperBenchmarkStatus.Completed -> stringResource(R.string.whisper_status_completed)
+    WhisperBenchmarkStatus.Failed -> stringResource(R.string.whisper_status_failed)
+    WhisperBenchmarkStatus.Listening -> stringResource(R.string.whisper_status_listening)
+    WhisperBenchmarkStatus.AudioDeleted -> stringResource(R.string.whisper_status_audio_deleted)
+    WhisperBenchmarkStatus.RecordingCanceled -> stringResource(R.string.whisper_status_recording_canceled)
+}
+
 @Composable
 @Suppress("LongMethod")
 internal fun WhisperCandidateBenchmarkScreen(
@@ -51,7 +74,8 @@ internal fun WhisperCandidateBenchmarkScreen(
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var capture by remember { mutableStateOf<AndroidVoiceTurnCapture?>(null) }
-    var status by remember { mutableStateOf("Ready to record") }
+    var status by remember { mutableStateOf(WhisperBenchmarkStatus.Ready) }
+    var statusDetail by remember { mutableStateOf<String?>(null) }
     var report by remember { mutableStateOf<String?>(null) }
     var isBusy by remember { mutableStateOf(false) }
     var benchmarkThreads by remember { mutableStateOf(DEFAULT_TRANSCRIPTION_THREADS) }
@@ -61,7 +85,8 @@ internal fun WhisperCandidateBenchmarkScreen(
 
     fun executeBenchmark(audioFile: File) {
         scope.launch {
-            status = "Transcribing..."
+            status = WhisperBenchmarkStatus.Transcribing
+            statusDetail = null
             isBusy = true
             try {
                 report = runCandidateBenchmark(
@@ -70,13 +95,13 @@ internal fun WhisperCandidateBenchmarkScreen(
                     audioPath = audioFile.absolutePath,
                     threads = benchmarkThreads,
                 )
-                status = "Completed"
+                status = WhisperBenchmarkStatus.Completed
             } catch (error: IllegalStateException) {
-                status = "Benchmark failed"
+                status = WhisperBenchmarkStatus.Failed
                 report = buildString {
                     appendLine("outcome=failure")
                     appendLine("model_id=${item.config.id}")
-                    append("message=${error.message ?: "Unknown error"}")
+                    append("message=${error.message ?: context.getString(R.string.unknown_error)}")
                 }
             } finally {
                 isBusy = false
@@ -91,7 +116,7 @@ internal fun WhisperCandidateBenchmarkScreen(
     }
 
     ArarAiScaffold(
-        title = "Whisper candidate test",
+        title = stringResource(R.string.whisper_benchmark_title),
         subtitle = item.config.name,
         onBack = if (isBusy) null else onBack,
     ) { modifier ->
@@ -102,10 +127,10 @@ internal fun WhisperCandidateBenchmarkScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
-                text = "Record one representative sentence. Recording stops after the configured speech pause.",
+                text = stringResource(R.string.whisper_benchmark_description),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Text(status, fontWeight = FontWeight.SemiBold)
+            Text(statusDetail ?: status.label(), fontWeight = FontWeight.SemiBold)
             BenchmarkThreadSelector(
                 selectedThreads = benchmarkThreads,
                 enabled = !isBusy,
@@ -117,7 +142,8 @@ internal fun WhisperCandidateBenchmarkScreen(
                 onClick = {
                     report = null
                     isBusy = true
-                    status = "Listening..."
+                    status = WhisperBenchmarkStatus.Listening
+                    statusDetail = null
                     val recorder = AndroidVoiceTurnCapture(
                         context = context,
                         directory = temporaryDirectory,
@@ -134,7 +160,7 @@ internal fun WhisperCandidateBenchmarkScreen(
                                     hasSavedSample = true
                                     executeBenchmark(sampleFile)
                                 } catch (error: IOException) {
-                                    status = error.message ?: "Unable to save benchmark audio"
+                                    statusDetail = error.message ?: context.getString(R.string.whisper_save_audio_failed)
                                     isBusy = false
                                     capture?.close()
                                     capture = null
@@ -145,7 +171,7 @@ internal fun WhisperCandidateBenchmarkScreen(
                         },
                         onError = { message ->
                             scope.launch {
-                                status = message
+                                statusDetail = message
                                 isBusy = false
                                 capture?.close()
                                 capture = null
@@ -154,7 +180,7 @@ internal fun WhisperCandidateBenchmarkScreen(
                     )
                 },
             ) {
-                Text("Record benchmark audio")
+                Text(stringResource(R.string.whisper_record_audio))
             }
             if (hasSavedSample) {
                 OutlinedButton(
@@ -165,7 +191,7 @@ internal fun WhisperCandidateBenchmarkScreen(
                         executeBenchmark(sampleFile)
                     },
                 ) {
-                    Text("Run saved audio with this model")
+                    Text(stringResource(R.string.whisper_run_saved_audio))
                 }
                 OutlinedButton(
                     enabled = !isBusy,
@@ -173,23 +199,25 @@ internal fun WhisperCandidateBenchmarkScreen(
                     onClick = {
                         sampleFile.delete()
                         hasSavedSample = false
-                        status = "Saved benchmark audio deleted"
+                        status = WhisperBenchmarkStatus.AudioDeleted
+                        statusDetail = null
                     },
                 ) {
-                    Text("Delete saved benchmark audio")
+                    Text(stringResource(R.string.whisper_delete_saved_audio))
                 }
             }
-            if (isBusy && status == "Listening...") {
+            if (isBusy && status == WhisperBenchmarkStatus.Listening) {
                 OutlinedButton(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
                         capture?.cancel()
                         capture = null
                         isBusy = false
-                        status = "Recording canceled"
+                        status = WhisperBenchmarkStatus.RecordingCanceled
+                        statusDetail = null
                     },
                 ) {
-                    Text("Cancel recording")
+                    Text(stringResource(R.string.whisper_cancel_recording))
                 }
             }
             report?.let { value ->
@@ -198,7 +226,7 @@ internal fun WhisperCandidateBenchmarkScreen(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { clipboard.setText(AnnotatedString(value)) },
                 ) {
-                    Text("Copy comparison report")
+                    Text(stringResource(R.string.whisper_copy_report))
                 }
             }
         }
@@ -211,7 +239,7 @@ private fun BenchmarkThreadSelector(
     enabled: Boolean,
     onSelected: (Int) -> Unit,
 ) {
-    Text("CPU threads", style = MaterialTheme.typography.labelLarge)
+    Text(stringResource(R.string.whisper_cpu_threads), style = MaterialTheme.typography.labelLarge)
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),

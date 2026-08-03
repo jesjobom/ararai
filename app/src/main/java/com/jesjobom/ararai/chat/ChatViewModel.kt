@@ -8,6 +8,7 @@ import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelCatalog
 import com.jesjobom.ararai.model.ModelStartupState
+import com.jesjobom.ararai.ui.UserMessageKey
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -89,6 +90,12 @@ class ChatViewModel(
         MutableStateFlow(
             ChatUiState(
                 modelStatus = initialModelStatus,
+                modelStatusKey =
+                if (initialModelStatus == ChatUiState.MODEL_AVAILABLE) {
+                    UserMessageKey.ModelAvailable
+                } else {
+                    null
+                },
                 canAttachImage = initialModel?.inputCapabilities?.image == true,
                 canUseAudioPrompt = initialModel.canUseRecordedAudio(),
                 canEnableReasoning = initialModel?.reasoningCapabilities?.request == true,
@@ -106,9 +113,9 @@ class ChatViewModel(
     fun onPromptChanged(prompt: String) {
         _uiState.update {
             if (it.audioPrompt != null) {
-                it.copy(error = null)
+                it.copy(error = null, errorKey = null)
             } else {
-                it.copy(prompt = prompt, error = null)
+                it.copy(prompt = prompt, error = null, errorKey = null)
             }
         }
     }
@@ -118,7 +125,7 @@ class ChatViewModel(
             if (!it.canAttachImage || it.audioPrompt != null) {
                 it
             } else {
-                it.copy(imageAttachments = it.imageAttachments + image, error = null)
+                it.copy(imageAttachments = it.imageAttachments + image, error = null, errorKey = null)
             }
         }
     }
@@ -126,7 +133,11 @@ class ChatViewModel(
     fun removeImage(uri: String) {
         val removed = _uiState.value.imageAttachments.any { it.uri == uri }
         _uiState.update {
-            it.copy(imageAttachments = it.imageAttachments.filterNot { image -> image.uri == uri }, error = null)
+            it.copy(
+                imageAttachments = it.imageAttachments.filterNot { image -> image.uri == uri },
+                error = null,
+                errorKey = null,
+            )
         }
         if (removed) mediaRepository.deleteDraft(uri, sessionStore.referencedMediaUris())
     }
@@ -142,6 +153,7 @@ class ChatViewModel(
                     imageAttachments = emptyList(),
                     audioPrompt = audio,
                     error = null,
+                    errorKey = null,
                 )
             }
         }
@@ -157,7 +169,7 @@ class ChatViewModel(
 
     fun clearAudioPrompt() {
         val removedUri = _uiState.value.audioPrompt?.uri
-        _uiState.update { it.copy(audioPrompt = null, error = null) }
+        _uiState.update { it.copy(audioPrompt = null, error = null, errorKey = null) }
         removedUri?.let { mediaRepository.deleteDraft(it, sessionStore.referencedMediaUris()) }
     }
 
@@ -166,7 +178,7 @@ class ChatViewModel(
             if (!it.canEnableReasoning && enabled) {
                 it
             } else {
-                it.copy(reasoningEnabled = enabled && it.canEnableReasoning, error = null)
+                it.copy(reasoningEnabled = enabled && it.canEnableReasoning, error = null, errorKey = null)
             }
         }
     }
@@ -176,7 +188,7 @@ class ChatViewModel(
             if (!it.canShowReasoning && show) {
                 it
             } else {
-                it.copy(showReasoning = show && it.canShowReasoning, error = null)
+                it.copy(showReasoning = show && it.canShowReasoning, error = null, errorKey = null)
             }
         }
     }
@@ -210,6 +222,7 @@ class ChatViewModel(
                 activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 error = null,
+                errorKey = null,
             )
         }
     }
@@ -238,6 +251,7 @@ class ChatViewModel(
                 activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 error = null,
+                errorKey = null,
             )
         }
     }
@@ -261,7 +275,9 @@ class ChatViewModel(
     ) {
         if (_uiState.value.sessions.none { it.id == sessionId }) return
         sessionStore.renameSession(sessionId, title)
-        _uiState.update { it.copy(sessions = sessionStore.listSessions().toUiState(), error = null) }
+        _uiState.update {
+            it.copy(sessions = sessionStore.listSessions().toUiState(), error = null, errorKey = null)
+        }
     }
 
     fun deleteCurrentSession() {
@@ -301,6 +317,7 @@ class ChatViewModel(
                 imageAttachments = if (deletingSelectedSession) emptyList() else it.imageAttachments,
                 audioPrompt = if (deletingSelectedSession) null else it.audioPrompt,
                 error = null,
+                errorKey = null,
             )
         }
     }
@@ -333,6 +350,7 @@ class ChatViewModel(
                 activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 error = null,
+                errorKey = null,
             )
         }
     }
@@ -372,6 +390,7 @@ class ChatViewModel(
                 _uiState.update {
                     it.copy(
                         modelStatus = "Model missing; starting download",
+                        modelStatusKey = null,
                         isLoadingModel = false,
                         isGenerating = false,
                         canRetryModelDownload = false,
@@ -393,6 +412,7 @@ class ChatViewModel(
                 _uiState.update {
                     it.copy(
                         modelStatus = "Model invalid; redownloading",
+                        modelStatusKey = null,
                         isLoadingModel = false,
                         isGenerating = false,
                         canRetryModelDownload = false,
@@ -414,6 +434,7 @@ class ChatViewModel(
                 _uiState.update {
                     it.copy(
                         modelStatus = state.downloadStatusText(),
+                        modelStatusKey = null,
                         isLoadingModel = false,
                         isGenerating = false,
                         canRetryModelDownload = false,
@@ -436,6 +457,7 @@ class ChatViewModel(
                 _uiState.update {
                     it.copy(
                         modelStatus = ChatUiState.MODEL_AVAILABLE,
+                        modelStatusKey = UserMessageKey.ModelAvailable,
                         isLoadingModel = false,
                         canRetryModelDownload = false,
                         canAttachImage = state.model.inputCapabilities.image,
@@ -447,6 +469,7 @@ class ChatViewModel(
                         imageAttachments = if (state.model.inputCapabilities.image) it.imageAttachments else emptyList(),
                         audioPrompt = if (state.model.canUseRecordedAudio()) it.audioPrompt else null,
                         error = null,
+                        errorKey = null,
                     )
                 }
             }
@@ -457,6 +480,7 @@ class ChatViewModel(
                 _uiState.update {
                     it.copy(
                         modelStatus = "Download failed: ${state.message}",
+                        modelStatusKey = null,
                         isLoadingModel = false,
                         isGenerating = false,
                         canRetryModelDownload = true,
@@ -530,6 +554,7 @@ class ChatViewModel(
                 activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 error = null,
+                errorKey = null,
             )
         }
 
@@ -541,7 +566,8 @@ class ChatViewModel(
                         it.copy(
                             isLoadingModel = false,
                             isGenerating = false,
-                            error = "Model unavailable",
+                            error = null,
+                            errorKey = UserMessageKey.ModelUnavailable,
                         )
                     }
                     return@launch
@@ -628,6 +654,7 @@ class ChatViewModel(
                                             researchInProgress = false,
                                             activeKnowledgeToolName = null,
                                             error = event.message,
+                                            errorKey = null,
                                         )
                                     }
                                 }
@@ -660,7 +687,8 @@ class ChatViewModel(
                         it.copy(
                             isLoadingModel = false,
                             isGenerating = false,
-                            error = error.message ?: "Generation failed",
+                            error = error.message,
+                            errorKey = if (error.message == null) UserMessageKey.GenerationFailed else null,
                         )
                     }
                 } finally {
@@ -728,7 +756,9 @@ class ChatViewModel(
         )
         refreshSession(sessionId)
         if (model?.inputCapabilities?.audio != true) {
-            _uiState.update { it.copy(isLoadingModel = false, isGenerating = false, error = message) }
+            _uiState.update {
+                it.copy(isLoadingModel = false, isGenerating = false, error = message, errorKey = null)
+            }
         }
         null
     }
@@ -828,6 +858,7 @@ class ChatViewModel(
                 activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 error = null,
+                errorKey = null,
             )
         }
     }

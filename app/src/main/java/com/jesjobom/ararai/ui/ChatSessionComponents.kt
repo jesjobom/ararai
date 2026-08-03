@@ -31,8 +31,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jesjobom.ararai.R
 import com.jesjobom.ararai.chat.ChatSessionUiState
 
 @Composable
@@ -55,7 +57,7 @@ internal fun SessionListButton(
                 .padding(start = 8.dp)
                 .weight(1f),
         )
-        Text("Sessions")
+        Text(stringResource(R.string.chat_sessions))
     }
 }
 
@@ -79,13 +81,13 @@ internal fun SessionListDialog(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Chat sessions",
+                    text = stringResource(R.string.chat_sessions_title),
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = onCreate) {
                     Icon(imageVector = Icons.Filled.Add, contentDescription = null)
                     Text(
-                        text = "New",
+                        text = stringResource(R.string.chat_new_session),
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }
@@ -113,14 +115,14 @@ internal fun SessionListDialog(
                 TextButton(onClick = onClearAll, enabled = sessions.isNotEmpty()) {
                     Icon(imageVector = Icons.Filled.Delete, contentDescription = null)
                     Text(
-                        text = "Clear all",
+                        text = stringResource(R.string.chat_clear_all),
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }
                 TextButton(onClick = onDismiss) {
                     Icon(imageVector = Icons.Filled.Close, contentDescription = null)
                     Text(
-                        text = "Close",
+                        text = stringResource(R.string.action_close),
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }
@@ -137,20 +139,24 @@ internal fun ClearSessionsConfirmationDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Clear all sessions?") },
+        title = { Text(stringResource(R.string.chat_clear_all_title)) },
         text = {
             Text(
-                "This permanently deletes ${if (sessionCount == 1) "the current session" else "all $sessionCount sessions"} and their messages. A new empty session will be created.",
+                if (sessionCount == 1) {
+                    stringResource(R.string.chat_clear_current_description)
+                } else {
+                    stringResource(R.string.chat_clear_all_description, sessionCount)
+                },
             )
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("Clear all")
+                Text(stringResource(R.string.chat_clear_all))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.action_cancel))
             }
         },
     )
@@ -172,7 +178,7 @@ internal fun SessionListItem(
             .combinedClickable(
                 onClick = onSelect,
                 onLongClick = onRename,
-                onLongClickLabel = "Rename chat",
+                onLongClickLabel = stringResource(R.string.chat_rename),
             ),
         color = if (isSelected) {
             MaterialTheme.colorScheme.primaryContainer
@@ -206,7 +212,7 @@ internal fun SessionListItem(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Delete,
-                    contentDescription = "Delete chat",
+                    contentDescription = stringResource(R.string.chat_delete),
                 )
             }
         }
@@ -229,28 +235,30 @@ internal fun ChatSettingsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Chat settings") },
+        title = { Text(stringResource(R.string.chat_settings)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 ChatSettingSwitch(
-                    title = "Enable reasoning",
-                    status = if (canEnableReasoning) null else "Unavailable for this model",
+                    title = stringResource(R.string.chat_enable_reasoning),
+                    status =
+                    if (canEnableReasoning) null else stringResource(R.string.chat_unavailable_for_model),
                     checked = reasoningEnabled,
                     enabled = canEnableReasoning,
                     onCheckedChange = onReasoningEnabledChange,
                     modifier = Modifier.testTag("chat-reasoning-switch"),
                 )
                 ChatSettingSwitch(
-                    title = "Show reasoning",
-                    status = if (canShowReasoning) null else "Unavailable for this model",
+                    title = stringResource(R.string.chat_show_reasoning),
+                    status =
+                    if (canShowReasoning) null else stringResource(R.string.chat_unavailable_for_model),
                     checked = showReasoning,
                     enabled = canShowReasoning,
                     onCheckedChange = onShowReasoningChange,
                     modifier = Modifier.testTag("chat-show-reasoning-switch"),
                 )
                 ChatSettingSwitch(
-                    title = "Show audio transcriptions",
-                    status = "Transcriptions remain available to conversation context",
+                    title = stringResource(R.string.chat_show_transcriptions),
+                    status = stringResource(R.string.chat_transcriptions_context_note),
                     checked = showAudioTranscriptions,
                     enabled = true,
                     onCheckedChange = onShowAudioTranscriptionsChange,
@@ -260,12 +268,12 @@ internal fun ChatSettingsDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close")
+                Text(stringResource(R.string.action_close))
             }
         },
         dismissButton = {
             TextButton(onClick = onReset) {
-                Text("Reset")
+                Text(stringResource(R.string.action_reset))
             }
         },
     )
@@ -316,23 +324,23 @@ internal fun RenameSessionDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Rename chat") },
+        title = { Text(stringResource(R.string.chat_rename)) },
         text = {
             OutlinedTextField(
                 value = title,
                 onValueChange = onTitleChange,
-                label = { Text("Title") },
+                label = { Text(stringResource(R.string.chat_session_title_label)) },
                 singleLine = true,
             )
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("Save")
+                Text(stringResource(R.string.action_save))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.action_cancel))
             }
         },
     )

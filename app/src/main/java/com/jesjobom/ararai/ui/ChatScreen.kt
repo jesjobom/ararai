@@ -37,8 +37,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jesjobom.ararai.R
 import com.jesjobom.ararai.chat.ChatMessage
 import com.jesjobom.ararai.chat.ChatViewModel
 
@@ -70,12 +72,19 @@ internal fun ChatScreen(
     val bottomRequester = remember { BringIntoViewRequester() }
     val isUserDragging by messageListState.interactionSource.collectIsDraggedAsState()
     var followLatestMessages by remember { mutableStateOf(true) }
-    val currentSessionTitle = state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title ?: "Chat"
+    val currentSessionTitle =
+        state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title
+            ?: stringResource(R.string.chat_title)
+    val localizedError = state.errorKey?.localizedText() ?: state.error
     val modelStatusText = when {
-        state.researchInProgress -> knowledgeToolStatusText(state.activeKnowledgeToolName)
-        state.isLoadingModel -> "Loading model"
-        state.isGenerating -> "Generating"
-        else -> state.modelStatus
+        state.researchInProgress ->
+            state.activeKnowledgeToolName
+                ?.takeIf(String::isNotBlank)
+                ?.let { stringResource(R.string.chat_using_named_tool, it) }
+                ?: stringResource(R.string.chat_using_tool)
+        state.isLoadingModel -> stringResource(R.string.chat_loading_model)
+        state.isGenerating -> stringResource(R.string.chat_generating)
+        else -> state.modelStatusKey?.localizedText() ?: state.modelStatus
     }
 
     DisposableEffect(textToSpeechController) {
@@ -124,7 +133,7 @@ internal fun ChatScreen(
                 title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "Chat",
+                            text = stringResource(R.string.chat_title),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -139,7 +148,7 @@ internal fun ChatScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.action_back),
                         )
                     }
                 },
@@ -147,7 +156,7 @@ internal fun ChatScreen(
                     IconButton(onClick = { settingsOpen = true }) {
                         Icon(
                             imageVector = Icons.Filled.Settings,
-                            contentDescription = "Chat settings",
+                            contentDescription = stringResource(R.string.chat_settings),
                         )
                     }
                 },
@@ -167,7 +176,7 @@ internal fun ChatScreen(
                 onClearAudioPrompt = viewModel::clearAudioPrompt,
                 canSubmit = state.canSubmit,
                 isGenerating = state.isGenerating,
-                error = state.error,
+                error = localizedError,
                 onSubmit = viewModel::submitPrompt,
                 onCancelGeneration = viewModel::cancelGeneration,
                 mediaServices = mediaServices,
@@ -186,7 +195,7 @@ internal fun ChatScreen(
                 onClick = { sessionListOpen = true },
             )
 
-            textToSpeechState.error?.let { error ->
+            textToSpeechState.errorKey?.localizedText()?.let { error ->
                 Text(
                     text = error,
                     color = MaterialTheme.colorScheme.error,
@@ -204,7 +213,7 @@ internal fun ChatScreen(
                 ) {
                     Icon(imageVector = Icons.Filled.Refresh, contentDescription = null)
                     Text(
-                        text = "Retry model download",
+                        text = stringResource(R.string.chat_retry_model_download),
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
@@ -234,9 +243,9 @@ internal fun ChatScreen(
                             ) {
                                 val label =
                                     if (state.isLoadingOlderMessages) {
-                                        "Loading older messages"
+                                        stringResource(R.string.chat_loading_older_messages)
                                     } else {
-                                        "Load older messages"
+                                        stringResource(R.string.chat_load_older_messages)
                                     }
                                 Text(label)
                             }
@@ -346,10 +355,29 @@ internal fun ChatScreen(
     }
 }
 
-internal fun knowledgeToolStatusText(toolName: String?): String = toolName
+internal fun knowledgeToolStatusText(
+    toolName: String?,
+    unnamedToolText: String = "Using tool",
+    namedToolText: (String) -> String = { "Using $it" },
+): String = toolName
     ?.takeIf { it.isNotBlank() }
-    ?.let { "Using $it" }
-    ?: "Using tool"
+    ?.let(namedToolText)
+    ?: unnamedToolText
+
+@Composable
+internal fun UserMessageKey.localizedText(): String = when (this) {
+    UserMessageKey.ModelAvailable -> stringResource(R.string.chat_model_available)
+    UserMessageKey.ModelUnavailable -> stringResource(R.string.error_model_unavailable)
+    UserMessageKey.GenerationFailed -> stringResource(R.string.error_generation_failed)
+    UserMessageKey.ModelLoadingFailed -> stringResource(R.string.error_model_loading_failed)
+    UserMessageKey.NoFinalAnswer -> stringResource(R.string.chat_no_final_answer)
+    UserMessageKey.TextToSpeechUnavailable -> stringResource(R.string.error_tts_unavailable)
+    UserMessageKey.TextToSpeechInitializationFailed -> stringResource(R.string.error_tts_initialization_failed)
+    UserMessageKey.TextToSpeechVoiceUnavailable -> stringResource(R.string.error_tts_voice_unavailable)
+    UserMessageKey.TextToSpeechPlaybackFailed -> stringResource(R.string.error_tts_playback_failed)
+    UserMessageKey.TextToSpeechRateFailed -> stringResource(R.string.error_tts_rate_failed)
+    UserMessageKey.TextToSpeechStartFailed -> stringResource(R.string.error_tts_start_failed)
+}
 
 @Composable
 internal fun FollowLatestMessagesEffect(
@@ -390,12 +418,12 @@ private fun EmptyChatState(modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Start a local conversation",
+                text = stringResource(R.string.chat_empty_title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Your prompt stays on this device and is processed by the selected local model.",
+                text = stringResource(R.string.chat_empty_description),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

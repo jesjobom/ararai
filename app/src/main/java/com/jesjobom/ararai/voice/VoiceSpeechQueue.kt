@@ -3,6 +3,7 @@ package com.jesjobom.ararai.voice
 import com.jesjobom.ararai.ui.ChatLanguageIdentifier
 import com.jesjobom.ararai.ui.ChatTextToSpeechResult
 import com.jesjobom.ararai.ui.ChatTextToSpeechService
+import com.jesjobom.ararai.ui.UserMessageKey
 import java.io.Closeable
 import java.util.ArrayDeque
 
@@ -20,7 +21,7 @@ internal class SequentialVoiceSpeechQueue(
     private val onSpeechStarted: (IntRange) -> Unit,
     private val onSpeechRange: (IntRange) -> Unit,
     private val onQueueComplete: () -> Unit,
-    private val onError: (String) -> Unit,
+    private val onError: (UserMessageKey) -> Unit,
 ) : VoiceSpeechQueue {
     private val pending = ArrayDeque<VoiceSpeechSegment>()
     private var busy = false
@@ -84,7 +85,7 @@ internal class SequentialVoiceSpeechQueue(
                                 completeQueue()
                             }
                         }
-                        is ChatTextToSpeechResult.Failed -> onError(result.message)
+                        is ChatTextToSpeechResult.Failed -> onError(result.messageKey)
                     }
                 }
             },

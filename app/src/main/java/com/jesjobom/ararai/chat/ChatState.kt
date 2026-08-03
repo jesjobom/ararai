@@ -1,9 +1,11 @@
 package com.jesjobom.ararai.chat
 
 import com.jesjobom.ararai.knowledge.KnowledgeSource
+import com.jesjobom.ararai.ui.UserMessageKey
 
 data class ChatUiState(
     val modelStatus: String,
+    val modelStatusKey: UserMessageKey? = null,
     val prompt: String = "",
     val imageAttachments: List<ImageAttachment> = emptyList(),
     val audioPrompt: AudioPrompt? = null,
@@ -29,6 +31,7 @@ data class ChatUiState(
     val researchSources: List<KnowledgeSource> = emptyList(),
     val canRetryModelDownload: Boolean = false,
     val error: String? = null,
+    val errorKey: UserMessageKey? = null,
 ) {
     val canSubmit: Boolean
         get() =

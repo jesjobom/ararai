@@ -1,6 +1,7 @@
 package com.jesjobom.ararai
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -16,6 +17,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.jesjobom.ararai.chat.DeferredNewChatSessionStore
 import com.jesjobom.ararai.chat.FileChatMediaRepository
@@ -27,6 +31,8 @@ import com.jesjobom.ararai.engine.prepareLiteRtLmCacheDir
 import com.jesjobom.ararai.knowledge.EncryptedWebSearchPreferences
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.model.SharedPreferencesGenerationPreferences
+import com.jesjobom.ararai.settings.SharedPreferencesApplicationExitPreferenceStore
+import com.jesjobom.ararai.settings.SharedPreferencesApplicationLanguagePreferenceStore
 import com.jesjobom.ararai.settings.SharedPreferencesThemePreferenceStore
 import com.jesjobom.ararai.ui.AndroidChatTextToSpeechService
 import com.jesjobom.ararai.ui.ArarAiApp
@@ -39,6 +45,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
     private val openModelManagementRequests = MutableStateFlow(0)
+
+    override fun attachBaseContext(newBase: Context) {
+        val language = SharedPreferencesApplicationLanguagePreferenceStore(newBase).language
+        super.attachBaseContext(
+            SharedPreferencesApplicationLanguagePreferenceStore.localizedContext(newBase, language),
+        )
+    }
 
     @Suppress("LongMethod")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,12 +72,17 @@ class MainActivity : ComponentActivity() {
             models = { modelController.state.value.models },
         )
         val themePreferenceStore = SharedPreferencesThemePreferenceStore(this)
+        val languagePreferenceStore = SharedPreferencesApplicationLanguagePreferenceStore(this)
+        val exitPreferenceStore = SharedPreferencesApplicationExitPreferenceStore(this)
+        val appliedApplicationLanguage = languagePreferenceStore.language
         val voiceChatPreferences = SharedPreferencesVoiceChatPreferences(this)
         val voiceTemporaryDirectory = java.io.File(cacheDir, "voice_chat")
         reconcileVoiceTemporaryFiles(voiceTemporaryDirectory)
         chatMediaRepository.reconcile(chatSessionStore.referencedMediaUris())
 
         setContent {
+            var selectedApplicationLanguage by remember { mutableStateOf(appliedApplicationLanguage) }
+            var shouldConfirmExit by remember { mutableStateOf(exitPreferenceStore.shouldConfirmExit) }
             val themeMode by themePreferenceStore.themeMode.collectAsState()
             val modelState by modelController.state.collectAsState()
             val openModelManagementRequest by openModelManagementRequests.collectAsState()
@@ -103,6 +121,19 @@ class MainActivity : ComponentActivity() {
                         appVersionLabel = "v${BuildConfig.VERSION_NAME}",
                         themeMode = themeMode,
                         onThemeModeChange = themePreferenceStore::setThemeMode,
+                        applicationLanguage = selectedApplicationLanguage,
+                        appliedApplicationLanguage = appliedApplicationLanguage,
+                        onApplicationLanguageChange = { language ->
+                            languagePreferenceStore.setLanguage(language)
+                            selectedApplicationLanguage = language
+                        },
+                        onRestartApplication = ::recreate,
+                        shouldConfirmExit = shouldConfirmExit,
+                        onDisableExitConfirmation = {
+                            exitPreferenceStore.disableExitConfirmation()
+                            shouldConfirmExit = false
+                        },
+                        onExitApplication = ::finishAndRemoveTask,
                         voiceChatPreferences = voiceChatPreferences,
                         voiceTemporaryDirectory = voiceTemporaryDirectory,
                         openModelManagementRequest = openModelManagementRequest,

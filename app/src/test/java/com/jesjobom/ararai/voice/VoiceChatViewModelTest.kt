@@ -292,7 +292,7 @@ private class CompletingSpeechQueueFactory {
         onStarted: (IntRange) -> Unit,
         onRange: (IntRange) -> Unit,
         onComplete: () -> Unit,
-        @Suppress("UNUSED_PARAMETER") onError: (String) -> Unit,
+        @Suppress("UNUSED_PARAMETER") onError: (com.jesjobom.ararai.ui.UserMessageKey) -> Unit,
     ): VoiceSpeechQueue = object : VoiceSpeechQueue {
         override fun enqueue(segment: VoiceSpeechSegment) {
             segments += segment.speechText

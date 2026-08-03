@@ -2,6 +2,7 @@ package com.jesjobom.ararai.voice
 
 import com.jesjobom.ararai.chat.ChatSessionUiState
 import com.jesjobom.ararai.knowledge.KnowledgeSource
+import com.jesjobom.ararai.ui.UserMessageKey
 
 enum class VoiceChatPhase { Idle, Listening, Processing, Speaking, Error }
 
@@ -77,7 +78,9 @@ data class VoiceChatUiState(
     val spokenRange: IntRange? = null,
     val readingAnchor: Int = 0,
     val notice: String? = null,
+    val noticeKey: UserMessageKey? = null,
     val error: String? = null,
+    val errorKey: UserMessageKey? = null,
     val sessions: List<ChatSessionUiState> = emptyList(),
     val selectedSessionId: String? = null,
 ) {

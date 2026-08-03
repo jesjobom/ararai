@@ -90,8 +90,8 @@ class ChatTextToSpeechTest {
         identifier.complete(null)
 
         controller.toggle("message", "Response")
-        service.fail("TTS unavailable")
-        assertEquals("TTS unavailable", controller.state.error)
+        service.fail(UserMessageKey.TextToSpeechUnavailable)
+        assertEquals(UserMessageKey.TextToSpeechUnavailable, controller.state.errorKey)
 
         controller.toggle("message", "Response")
         controller.stop()
@@ -152,7 +152,7 @@ class ChatTextToSpeechTest {
 
         fun complete() = listener?.onResult(ChatTextToSpeechResult.Completed) ?: Unit
 
-        fun fail(message: String) = listener?.onResult(ChatTextToSpeechResult.Failed(message)) ?: Unit
+        fun fail(messageKey: UserMessageKey) = listener?.onResult(ChatTextToSpeechResult.Failed(messageKey)) ?: Unit
     }
 
     private class FakeLanguageIdentifier : ChatLanguageIdentifier {

@@ -27,7 +27,7 @@ internal sealed interface ChatTextToSpeechResult {
     data object Completed : ChatTextToSpeechResult
 
     data class Failed(
-        val message: String,
+        val messageKey: UserMessageKey,
     ) : ChatTextToSpeechResult
 }
 
@@ -46,7 +46,7 @@ internal interface ChatTextToSpeechService : AutoCloseable {
 
 internal data class ChatTextToSpeechState(
     val activeMessageId: String? = null,
-    val error: String? = null,
+    val errorKey: UserMessageKey? = null,
     val preparedLanguageTags: Map<String, String?> = emptyMap(),
 )
 
@@ -92,14 +92,14 @@ internal class ChatTextToSpeechController(
 
         service.stop()
         val currentRequest = ++requestId
-        updateState(state.copy(activeMessageId = messageId, error = null))
+        updateState(state.copy(activeMessageId = messageId, errorKey = null))
         service.speak(responseText, state.preparedLanguageTags[messageId]) { result ->
             if (currentRequest != requestId) return@speak
             when (result) {
-                ChatTextToSpeechResult.Completed -> updateState(state.copy(activeMessageId = null, error = null))
+                ChatTextToSpeechResult.Completed -> updateState(state.copy(activeMessageId = null, errorKey = null))
                 is ChatTextToSpeechResult.Failed ->
                     updateState(
-                        state.copy(activeMessageId = null, error = result.message),
+                        state.copy(activeMessageId = null, errorKey = result.messageKey),
                     )
             }
         }
@@ -108,11 +108,11 @@ internal class ChatTextToSpeechController(
     fun stop() {
         requestId++
         service.stop()
-        updateState(state.copy(activeMessageId = null, error = null))
+        updateState(state.copy(activeMessageId = null, errorKey = null))
     }
 
     fun clearError() {
-        if (state.error != null) updateState(state.copy(error = null))
+        if (state.errorKey != null) updateState(state.copy(errorKey = null))
     }
 
     override fun close() {
@@ -152,7 +152,7 @@ internal class AndroidChatTextToSpeechService(
         listener: ChatTextToSpeechListener,
     ) {
         if (closed) {
-            notify(listener, ChatTextToSpeechResult.Failed("Text-to-speech is no longer available"))
+            notify(listener, ChatTextToSpeechResult.Failed(UserMessageKey.TextToSpeechUnavailable))
             return
         }
         stop()
@@ -185,14 +185,14 @@ internal class AndroidChatTextToSpeechService(
     private fun onInitialized(status: Int) {
         if (closed) return
         if (status != TextToSpeech.SUCCESS) {
-            failPending("Unable to initialize text-to-speech")
+            failPending(UserMessageKey.TextToSpeechInitializationFailed)
             engine?.shutdown()
             engine = null
             return
         }
         val currentEngine = engine ?: return
         if (currentEngine.voice == null) {
-            failPending("The default text-to-speech language or voice is unavailable")
+            failPending(UserMessageKey.TextToSpeechVoiceUnavailable)
             currentEngine.shutdown()
             engine = null
             return
@@ -221,14 +221,14 @@ internal class AndroidChatTextToSpeechService(
 
                 @Deprecated("Deprecated in Android")
                 override fun onError(utteranceId: String?) {
-                    finish(utteranceId, ChatTextToSpeechResult.Failed("Unable to play this response"))
+                    finish(utteranceId, ChatTextToSpeechResult.Failed(UserMessageKey.TextToSpeechPlaybackFailed))
                 }
 
                 override fun onError(
                     utteranceId: String?,
                     errorCode: Int,
                 ) {
-                    finish(utteranceId, ChatTextToSpeechResult.Failed("Unable to play this response"))
+                    finish(utteranceId, ChatTextToSpeechResult.Failed(UserMessageKey.TextToSpeechPlaybackFailed))
                 }
             },
         )
@@ -239,11 +239,11 @@ internal class AndroidChatTextToSpeechService(
         val speech = pending ?: return
         pending = null
         if (!configureVoice(speech.languageTag)) {
-            notify(speech.listener, ChatTextToSpeechResult.Failed("The default text-to-speech voice is unavailable"))
+            notify(speech.listener, ChatTextToSpeechResult.Failed(UserMessageKey.TextToSpeechVoiceUnavailable))
             return
         }
         if (engine?.setSpeechRate(speech.speechRate) != TextToSpeech.SUCCESS) {
-            notify(speech.listener, ChatTextToSpeechResult.Failed("Unable to apply the selected speech rate"))
+            notify(speech.listener, ChatTextToSpeechResult.Failed(UserMessageKey.TextToSpeechRateFailed))
             return
         }
         val utteranceId = UUID.randomUUID().toString()
@@ -253,7 +253,7 @@ internal class AndroidChatTextToSpeechService(
         if (result != TextToSpeech.SUCCESS) {
             activeUtteranceId = null
             pending = null
-            notify(speech.listener, ChatTextToSpeechResult.Failed("Unable to start text-to-speech playback"))
+            notify(speech.listener, ChatTextToSpeechResult.Failed(UserMessageKey.TextToSpeechStartFailed))
             return
         }
     }
@@ -310,11 +310,11 @@ internal class AndroidChatTextToSpeechService(
         listener?.let { notify(it, result) }
     }
 
-    private fun failPending(message: String) {
+    private fun failPending(messageKey: UserMessageKey) {
         val listener = pending?.listener
         pending = null
         activeUtteranceId = null
-        listener?.let { notify(it, ChatTextToSpeechResult.Failed(message)) }
+        listener?.let { notify(it, ChatTextToSpeechResult.Failed(messageKey)) }
     }
 
     private fun notify(

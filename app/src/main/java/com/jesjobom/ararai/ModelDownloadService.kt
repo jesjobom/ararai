@@ -115,7 +115,7 @@ class ModelDownloadService : Service() {
     private fun preparingNotification(): Notification = NotificationCompat
         .Builder(this, CHANNEL_ID)
         .setSmallIcon(android.R.drawable.stat_sys_download)
-        .setContentTitle("Preparing model download")
+        .setContentTitle(getString(R.string.model_download_preparing))
         .setOngoing(true)
         .setContentIntent(openAppIntent())
         .build()
@@ -129,11 +129,11 @@ class ModelDownloadService : Service() {
             NotificationCompat
                 .Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentTitle("Downloading $name")
+                .setContentTitle(getString(R.string.model_download_downloading, name))
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setContentIntent(openAppIntent())
-                .addAction(0, "Cancel", cancelPendingIntent(modelId))
+                .addAction(0, getString(R.string.action_cancel), cancelPendingIntent(modelId))
         val total = state.totalBytes
         if (total != null && total > 0L) {
             val percent = progressPercent(state)
@@ -181,8 +181,12 @@ class ModelDownloadService : Service() {
 
     private fun createNotificationChannel() {
         notificationManager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Model downloads", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Progress for model files downloaded by ArarAI"
+            NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.model_download_channel_name),
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = getString(R.string.model_download_channel_description)
             },
         )
     }
