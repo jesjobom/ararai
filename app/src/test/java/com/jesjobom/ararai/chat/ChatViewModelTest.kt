@@ -640,6 +640,23 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `image only first turn uses default description prompt as session title`() = runTest {
+        val viewModel =
+            ChatViewModel(
+                engine = CapturingEngine(),
+                initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true)),
+                inferenceConfig = inferenceConfig,
+                scope = this,
+            )
+
+        viewModel.attachImage(ImageAttachment("file:///tmp/image.png", "image/png"))
+        viewModel.submitPrompt()
+        runCurrent()
+
+        assertEquals("Describe this image.", viewModel.uiState.value.sessions.first().title)
+    }
+
+    @Test
     fun `audio prompt is mutually exclusive with text and images`() = runTest {
         val engine = CapturingEngine()
         val viewModel =

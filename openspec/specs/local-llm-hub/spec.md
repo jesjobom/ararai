@@ -944,7 +944,8 @@ model/runtime combination.
 
 The chat domain SHALL represent user messages as structured prompt content where
 images are attachments to text prompts and audio is an alternative prompt
-modality.
+modality. An image-only first turn SHALL use the default image-description prompt
+as its automatic session title.
 
 #### Scenario: Text-only message remains supported
 
@@ -990,6 +991,13 @@ modality.
   audio prompt
 - **WHEN** the user opens the chat composer
 - **THEN** the send action remains disabled.
+
+#### Scenario: Image-only prompt titles a new session
+
+- **GIVEN** a new Chat session and a model that supports image input
+- **WHEN** the user submits one or more image attachments without typed text
+- **THEN** the request includes the default image-description text prompt
+- **AND** the session title uses that prompt instead of remaining `New chat`.
 
 ### Requirement: Image Input Normalization
 
@@ -3312,3 +3320,22 @@ resources for every explicitly supported application language.
 - **THEN** every user-visible interface string is presented in that language
 - **AND** user content, model output, model names, and technical identifiers are
   not translated
+
+### Requirement: Bounded Multimodal Follow-up Context
+
+Chat SHALL keep the most recent historical image set available to a subsequent
+textual follow-up while avoiding unbounded historical media replay.
+
+#### Scenario: Textual follow-up refers to the recent image
+
+- **GIVEN** Chat history contains a user turn with image attachments
+- **WHEN** the user submits a later text prompt without a new image
+- **THEN** the request includes the attachments from the most recent image turn
+- **AND** retains bounded textual conversation history.
+
+#### Scenario: Current images replace historical image context
+
+- **GIVEN** Chat history contains image attachments
+- **WHEN** the user submits a prompt with new image attachments
+- **THEN** the request includes only the newly submitted images
+- **AND** does not mix them with historical images.

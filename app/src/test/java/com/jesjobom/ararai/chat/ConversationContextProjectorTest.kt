@@ -74,6 +74,54 @@ class ConversationContextProjectorTest {
         assertTrue(projected.messages.contains(PromptChatMessage(PromptChatRole.User, "Continue")))
     }
 
+    @Test
+    fun `reattaches images from the most recent visual turn to a textual follow-up`() {
+        val olderImage = ImageAttachment("/older.jpg", "image/jpeg")
+        val recentImages =
+            listOf(
+                ImageAttachment("/recent-1.jpg", "image/jpeg"),
+                ImageAttachment("/recent-2.jpg", "image/jpeg"),
+            )
+        val projected =
+            ConversationContextProjector("Be useful.").project(
+                history =
+                listOf(
+                    stored(ChatRole.User, MessageContent.TextPrompt("Older", listOf(olderImage))),
+                    stored(ChatRole.Assistant, MessageContent.TextPrompt("Older answer")),
+                    stored(ChatRole.User, MessageContent.TextPrompt("Compare these", recentImages)),
+                    stored(ChatRole.Assistant, MessageContent.TextPrompt("Recent answer")),
+                ),
+                current = MessageContent.TextPrompt("What color is it?"),
+                inferenceConfig = inference,
+            )
+
+        val request = projected.requestContent as MessageContent.TextPrompt
+        assertEquals(recentImages, request.imageAttachments)
+    }
+
+    @Test
+    fun `current images replace historical visual context`() {
+        val currentImage = ImageAttachment("/current.jpg", "image/jpeg")
+        val projected =
+            ConversationContextProjector("Be useful.").project(
+                history =
+                listOf(
+                    stored(
+                        ChatRole.User,
+                        MessageContent.TextPrompt(
+                            "Historical",
+                            listOf(ImageAttachment("/historical.jpg", "image/jpeg")),
+                        ),
+                    ),
+                ),
+                current = MessageContent.TextPrompt("Describe this", listOf(currentImage)),
+                inferenceConfig = inference,
+            )
+
+        val request = projected.requestContent as MessageContent.TextPrompt
+        assertEquals(listOf(currentImage), request.imageAttachments)
+    }
+
     private fun stored(
         role: ChatRole,
         content: MessageContent,

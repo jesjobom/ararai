@@ -533,7 +533,14 @@ class ChatViewModel(
         val inferenceForRequest =
             modelForRequest?.let { generationConfigProvider(it, inferenceConfig) } ?: inferenceConfig
         val submittedContent = current.toSubmittedContent(audioTranscriber.isAvailable)
-        val submittedTitle = submittedContent.displayText
+        val submittedTitle =
+            submittedContent.displayText.ifBlank {
+                if ((submittedContent as? MessageContent.TextPrompt)?.imageAttachments?.isNotEmpty() == true) {
+                    DEFAULT_IMAGE_PROMPT
+                } else {
+                    ""
+                }
+            }
         if (submittedContent !is MessageContent.AudioPromptContent) maybeTitleSession(sessionId, submittedTitle)
         val begunTurn = conversationCoordinator.beginUserTurn(sessionId, submittedContent)
         val history = begunTurn.history
