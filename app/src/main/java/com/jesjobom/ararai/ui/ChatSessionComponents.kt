@@ -224,6 +224,7 @@ internal fun ChatSettingsDialog(
     onReasoningEnabledChange: (Boolean) -> Unit,
     onShowReasoningChange: (Boolean) -> Unit,
     onShowAudioTranscriptionsChange: (Boolean) -> Unit,
+    onReset: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -237,6 +238,7 @@ internal fun ChatSettingsDialog(
                     checked = reasoningEnabled,
                     enabled = canEnableReasoning,
                     onCheckedChange = onReasoningEnabledChange,
+                    modifier = Modifier.testTag("chat-reasoning-switch"),
                 )
                 ChatSettingSwitch(
                     title = "Show reasoning",
@@ -244,6 +246,7 @@ internal fun ChatSettingsDialog(
                     checked = showReasoning,
                     enabled = canShowReasoning,
                     onCheckedChange = onShowReasoningChange,
+                    modifier = Modifier.testTag("chat-show-reasoning-switch"),
                 )
                 ChatSettingSwitch(
                     title = "Show audio transcriptions",
@@ -251,12 +254,18 @@ internal fun ChatSettingsDialog(
                     checked = showAudioTranscriptions,
                     enabled = true,
                     onCheckedChange = onShowAudioTranscriptionsChange,
+                    modifier = Modifier.testTag("chat-audio-transcriptions-switch"),
                 )
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text("Close")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onReset) {
+                Text("Reset")
             }
         },
     )
@@ -269,9 +278,10 @@ internal fun ChatSettingSwitch(
     checked: Boolean,
     enabled: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

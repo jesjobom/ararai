@@ -26,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -181,7 +182,7 @@ internal fun ChatScreen(
         ) {
             SessionListButton(
                 title = currentSessionTitle,
-                isBusy = state.isGenerating || state.isLoadingModel,
+                isBusy = state.isGenerating || state.isLoadingModel || state.isPersistenceBusy,
                 onClick = { sessionListOpen = true },
             )
 
@@ -224,6 +225,23 @@ internal fun ChatScreen(
                     contentPadding = PaddingValues(vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    if (state.hasOlderMessages) {
+                        item(key = "load-older-messages") {
+                            TextButton(
+                                onClick = viewModel::loadOlderMessages,
+                                enabled = !state.isLoadingOlderMessages,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                val label =
+                                    if (state.isLoadingOlderMessages) {
+                                        "Loading older messages"
+                                    } else {
+                                        "Load older messages"
+                                    }
+                                Text(label)
+                            }
+                        }
+                    }
                     items(state.messages) { message ->
                         val isStreaming = state.isGenerating && message.id == state.messages.lastOrNull()?.id
                         MessageRow(
@@ -302,6 +320,11 @@ internal fun ChatScreen(
             onReasoningEnabledChange = viewModel::setReasoningEnabled,
             onShowReasoningChange = viewModel::setShowReasoning,
             onShowAudioTranscriptionsChange = viewModel::setShowAudioTranscriptions,
+            onReset = {
+                viewModel.setReasoningEnabled(false)
+                viewModel.setShowReasoning(false)
+                viewModel.setShowAudioTranscriptions(true)
+            },
             onDismiss = { settingsOpen = false },
         )
     }

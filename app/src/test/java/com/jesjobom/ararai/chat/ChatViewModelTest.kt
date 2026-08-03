@@ -13,6 +13,8 @@ import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelInputCapabilities
 import com.jesjobom.ararai.model.ModelReasoningCapabilities
 import com.jesjobom.ararai.model.ModelStartupState
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -23,6 +25,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
 import kotlin.io.path.createTempDirectory
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -145,11 +149,13 @@ class ChatViewModelTest {
             assertTrue(awaitItem().canSubmit)
             viewModel.submitPrompt()
 
-            val loading = awaitItem()
+            var loading = awaitItem()
+            while (!loading.isGenerating) loading = awaitItem()
             assertTrue(loading.isGenerating)
             assertFalse(loading.canSubmit)
 
-            val loaded = awaitItem()
+            var loaded = awaitItem()
+            while (loaded.isLoadingModel) loaded = awaitItem()
             assertFalse(loaded.isLoadingModel)
             assertTrue(loaded.isGenerating)
 
@@ -179,7 +185,8 @@ class ChatViewModelTest {
             awaitItem()
             viewModel.submitPrompt()
 
-            val loading = awaitItem()
+            var loading = awaitItem()
+            while (!loading.isGenerating) loading = awaitItem()
             assertEquals(2, loading.messages.size)
             assertTrue(loading.isGenerating)
 
@@ -210,7 +217,8 @@ class ChatViewModelTest {
             awaitItem()
             viewModel.submitPrompt()
 
-            val loading = awaitItem()
+            var loading = awaitItem()
+            while (!loading.isGenerating) loading = awaitItem()
             assertTrue(loading.isLoadingModel)
             assertFalse(loading.canSubmit)
 
@@ -344,6 +352,73 @@ class ChatViewModelTest {
 
         assertEquals(1, viewModel.uiState.value.sessions.size)
         assertEquals(firstSession, viewModel.uiState.value.selectedSessionId)
+    }
+
+    @Test
+    fun `loads long conversation history in bounded recent pages`() {
+        val store = InMemoryChatSessionStore()
+        val session = store.ensureSession()
+        repeat(250) { index -> store.appendMessage(session.id, ChatRole.User, "message-$index") }
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(chunks = emptyList()),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+            )
+
+        assertEquals(100, viewModel.uiState.value.messages.size)
+        assertEquals("message-150", viewModel.uiState.value.messages.first().text)
+        assertTrue(viewModel.uiState.value.hasOlderMessages)
+
+        viewModel.loadOlderMessages()
+        assertEquals(200, viewModel.uiState.value.messages.size)
+        assertEquals("message-50", viewModel.uiState.value.messages.first().text)
+        assertTrue(viewModel.uiState.value.hasOlderMessages)
+
+        viewModel.loadOlderMessages()
+        assertEquals(250, viewModel.uiState.value.messages.size)
+        assertEquals("message-0", viewModel.uiState.value.messages.first().text)
+        assertFalse(viewModel.uiState.value.hasOlderMessages)
+    }
+
+    @Test
+    fun `interactive persistence leaves the calling thread`() {
+        val store = ThreadRecordingChatSessionStore()
+        val callerThread = Thread.currentThread().name
+        val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "chat-persistence-test") }
+        val dispatcher = executor.asCoroutineDispatcher()
+        try {
+            val viewModel =
+                ChatViewModel(
+                    engine = FakeLocalLlmEngine(chunks = listOf("answer")),
+                    initialModel = model,
+                    inferenceConfig = inferenceConfig,
+                    sessionStore = store,
+                    persistenceDispatcher = dispatcher,
+                )
+            store.threadNames.clear()
+
+            viewModel.onPromptChanged("hello")
+            viewModel.submitPrompt()
+            waitUntil {
+                !viewModel.uiState.value.isGenerating &&
+                    viewModel.uiState.value.messages.any { it.role == ChatRole.Assistant && it.text == "answer" }
+            }
+
+            assertTrue(store.threadNames.none { it == callerThread })
+            assertTrue(store.threadNames.toString(), store.threadNames.any { it.contains("chat-persistence-test") })
+
+            val previousSession = viewModel.uiState.value.selectedSessionId
+            store.threadNames.clear()
+            viewModel.createSession()
+            waitUntil { viewModel.uiState.value.selectedSessionId != previousSession }
+            assertTrue(store.threadNames.none { it == callerThread })
+            assertTrue(store.threadNames.toString(), store.threadNames.any { it.contains("chat-persistence-test") })
+        } finally {
+            dispatcher.close()
+            executor.shutdownNow()
+        }
     }
 
     @Test
@@ -1146,6 +1221,76 @@ class ChatViewModelTest {
 
         assertEquals(1, engine.unloadCalls)
         assertFalse(viewModel.uiState.value.canSubmit)
+    }
+
+    @Test
+    fun `close cancels owned work without cancelling parent scope and rejects new submissions`() = runTest {
+        val engine = SlowEngine()
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("first")
+        viewModel.submitPrompt()
+        runCurrent()
+        assertEquals(1, engine.generateCalls)
+
+        viewModel.close()
+        viewModel.close()
+        runCurrent()
+
+        assertTrue(currentCoroutineContext()[kotlinx.coroutines.Job]?.isActive == true)
+        assertFalse(viewModel.uiState.value.isGenerating)
+        viewModel.onPromptChanged("second")
+        viewModel.submitPrompt()
+        runCurrent()
+        assertEquals(1, engine.generateCalls)
+    }
+
+    private fun waitUntil(
+        timeoutMillis: Long = 5_000L,
+        condition: () -> Boolean,
+    ) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (!condition() && System.currentTimeMillis() < deadline) Thread.sleep(10L)
+        assertTrue("Condition was not met within ${timeoutMillis}ms", condition())
+    }
+
+    private class ThreadRecordingChatSessionStore(
+        private val delegate: ChatSessionStore = InMemoryChatSessionStore(),
+    ) : ChatSessionStore by delegate {
+        val threadNames = CopyOnWriteArrayList<String>()
+
+        override fun listSessions(): List<ChatSession> = recorded(delegate::listSessions)
+
+        override fun getRecentMessages(
+            sessionId: String,
+            limit: Int,
+        ): List<StoredChatMessage> = recorded { delegate.getRecentMessages(sessionId, limit) }
+
+        override fun countMessages(sessionId: String): Int = recorded { delegate.countMessages(sessionId) }
+
+        override fun createSession(title: String): ChatSession = recorded { delegate.createSession(title) }
+
+        override fun appendMessage(
+            sessionId: String,
+            role: ChatRole,
+            content: MessageContent,
+        ): StoredChatMessage = recorded { delegate.appendMessage(sessionId, role, content) }
+
+        override fun updateMessage(
+            messageId: String,
+            content: MessageContent,
+        ) = recorded { delegate.updateMessage(messageId, content) }
+
+        private fun <T> recorded(block: () -> T): T {
+            threadNames += Thread.currentThread().name
+            return block()
+        }
     }
 
     private class FailingEngine(

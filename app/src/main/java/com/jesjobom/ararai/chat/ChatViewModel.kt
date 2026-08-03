@@ -8,16 +8,20 @@ import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelCatalog
 import com.jesjobom.ararai.model.ModelStartupState
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 @Suppress("LongParameterList")
 class ChatViewModel(
@@ -47,10 +51,15 @@ class ChatViewModel(
         } else {
             ChatUiState.MODEL_AVAILABLE
         },
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
+    private val persistenceDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     private val assistantPersistenceIntervalMillis: Long = DEFAULT_ASSISTANT_PERSISTENCE_INTERVAL_MILLIS,
     private val assistantPresentationIntervalMillis: Long = DEFAULT_ASSISTANT_PRESENTATION_INTERVAL_MILLIS,
 ) {
+    private val lifecycleJob = SupervisorJob()
+    private val scope = CoroutineScope(scope.coroutineContext + lifecycleJob)
+    private val closed = AtomicBoolean(false)
+
     init {
         require(assistantPersistenceIntervalMillis > 0L) {
             "Assistant persistence interval must be positive"
@@ -69,6 +78,9 @@ class ChatViewModel(
     private var assistantBuffer: AssistantMessageBuffer? = null
     private var pendingResearchSources = emptyList<com.jesjobom.ararai.knowledge.KnowledgeSource>()
     private val assistantBufferLock = Any()
+    private val messageWindowSizes = ConcurrentHashMap<String, Int>()
+    private val submissionPending = AtomicBoolean(false)
+    private val sessionMutationPending = AtomicBoolean(false)
     private val initialSession =
         conversationSelection.currentSessionId
             ?.let { selected -> sessionStore.listSessions().firstOrNull { it.id == selected } }
@@ -83,7 +95,8 @@ class ChatViewModel(
                 canShowReasoning = initialModel?.reasoningCapabilities?.output == true,
                 sessions = sessionStore.listSessions().toUiState(),
                 selectedSessionId = initialSession.id,
-                messages = sessionStore.getMessages(initialSession.id).toChatMessages(),
+                messages = displayedMessages(initialSession.id),
+                hasOlderMessages = hasOlderMessages(initialSession.id),
                 showAudioTranscriptions = preferences.showAudioTranscriptions.value,
             ),
         )
@@ -174,15 +187,22 @@ class ChatViewModel(
     }
 
     fun createSession() {
+        if (closed.get()) return
+        runSessionMutation(::createSessionAfterPersistenceDispatch)
+    }
+
+    private fun createSessionAfterPersistenceDispatch() {
         if (generationJob?.isActive == true) return
         deleteCurrentDraftMedia()
         val session = sessionStore.createSession("New chat")
         conversationSelection.select(session.id)
+        messageWindowSizes[session.id] = INITIAL_MESSAGE_WINDOW_SIZE
         _uiState.update {
             it.copy(
                 sessions = sessionStore.listSessions().toUiState(),
                 selectedSessionId = session.id,
                 messages = emptyList(),
+                hasOlderMessages = false,
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
@@ -195,15 +215,22 @@ class ChatViewModel(
     }
 
     fun selectSession(sessionId: String) {
+        if (closed.get()) return
+        runSessionMutation { selectSessionAfterPersistenceDispatch(sessionId) }
+    }
+
+    private fun selectSessionAfterPersistenceDispatch(sessionId: String) {
         if (generationJob?.isActive == true) return
         if (sessionStore.listSessions().none { it.id == sessionId }) return
         deleteCurrentDraftMedia()
         conversationSelection.select(sessionId)
+        messageWindowSizes[sessionId] = INITIAL_MESSAGE_WINDOW_SIZE
         _uiState.update {
             it.copy(
                 selectedSessionId = sessionId,
                 sessions = sessionStore.listSessions().toUiState(),
-                messages = sessionStore.getMessages(sessionId).toChatMessages(),
+                messages = displayedMessages(sessionId),
+                hasOlderMessages = hasOlderMessages(sessionId),
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
@@ -224,6 +251,14 @@ class ChatViewModel(
         sessionId: String,
         title: String,
     ) {
+        if (closed.get()) return
+        runSessionMutation { renameSessionAfterPersistenceDispatch(sessionId, title) }
+    }
+
+    private fun renameSessionAfterPersistenceDispatch(
+        sessionId: String,
+        title: String,
+    ) {
         if (_uiState.value.sessions.none { it.id == sessionId }) return
         sessionStore.renameSession(sessionId, title)
         _uiState.update { it.copy(sessions = sessionStore.listSessions().toUiState(), error = null) }
@@ -235,15 +270,17 @@ class ChatViewModel(
     }
 
     fun deleteSession(sessionId: String) {
+        if (closed.get()) return
+        runSessionMutation { deleteSessionAfterPersistenceDispatch(sessionId) }
+    }
+
+    private fun deleteSessionAfterPersistenceDispatch(sessionId: String) {
         val current = _uiState.value
         if (current.sessions.size <= 1 || generationJob?.isActive == true) return
 
         val deletingSelectedSession = current.selectedSessionId == sessionId
         if (deletingSelectedSession) deleteCurrentDraftMedia()
-        val deletedMedia =
-            sessionStore
-                .getMessages(sessionId)
-                .flatMapTo(linkedSetOf()) { it.content.mediaUris() }
+        val deletedMedia = sessionStore.mediaUrisForSession(sessionId)
         sessionStore.deleteSession(sessionId)
         conversationSelection.clear(sessionId)
         mediaRepository.deleteUnreferenced(deletedMedia, sessionStore.referencedMediaUris())
@@ -258,7 +295,8 @@ class ChatViewModel(
             it.copy(
                 sessions = sessionStore.listSessions().toUiState(),
                 selectedSessionId = next.id,
-                messages = sessionStore.getMessages(next.id).toChatMessages(),
+                messages = displayedMessages(next.id),
+                hasOlderMessages = hasOlderMessages(next.id),
                 prompt = "",
                 imageAttachments = if (deletingSelectedSession) emptyList() else it.imageAttachments,
                 audioPrompt = if (deletingSelectedSession) null else it.audioPrompt,
@@ -268,6 +306,11 @@ class ChatViewModel(
     }
 
     fun clearAllSessions() {
+        if (closed.get()) return
+        runSessionMutation(::clearAllSessionsAfterPersistenceDispatch)
+    }
+
+    private fun clearAllSessionsAfterPersistenceDispatch() {
         if (generationJob?.isActive == true) return
 
         val deletedMedia = sessionStore.referencedMediaUris()
@@ -282,6 +325,7 @@ class ChatViewModel(
                 sessions = sessionStore.listSessions().toUiState(),
                 selectedSessionId = replacement.id,
                 messages = emptyList(),
+                hasOlderMessages = false,
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
@@ -293,7 +337,22 @@ class ChatViewModel(
         }
     }
 
+    private fun runSessionMutation(block: () -> Unit) {
+        if (closed.get()) return
+        if (!sessionMutationPending.compareAndSet(false, true)) return
+        _uiState.update { it.copy(isPersistenceBusy = true) }
+        scope.launch(persistenceDispatcher) {
+            try {
+                block()
+            } finally {
+                sessionMutationPending.set(false)
+                _uiState.update { it.copy(isPersistenceBusy = false) }
+            }
+        }
+    }
+
     fun onModelStartupState(state: ModelStartupState) {
+        if (closed.get()) return
         val current = _uiState.value
         if (state is ModelStartupState.Available) {
             val discardedUris =
@@ -425,10 +484,24 @@ class ChatViewModel(
         return "Downloading configured model: $percent%"
     }
 
-    @Suppress("CyclomaticComplexMethod", "LongMethod", "ReturnCount")
     fun submitPrompt() {
-        val current = _uiState.value
-        if (!current.canSubmit) return
+        if (closed.get()) return
+        val requestedState = _uiState.value
+        if (!requestedState.canSubmit || generationJob?.isActive == true) return
+        if (!submissionPending.compareAndSet(false, true)) return
+        _uiState.update { it.copy(isPersistenceBusy = true) }
+        scope.launch(persistenceDispatcher) {
+            try {
+                submitPromptAfterPersistenceDispatch(requestedState)
+            } finally {
+                submissionPending.set(false)
+                _uiState.update { it.copy(isPersistenceBusy = false) }
+            }
+        }
+    }
+
+    @Suppress("CyclomaticComplexMethod", "LongMethod", "ReturnCount")
+    private fun submitPromptAfterPersistenceDispatch(current: ChatUiState) {
         if (generationJob?.isActive == true) return
 
         val sessionId = current.selectedSessionId ?: return
@@ -449,7 +522,8 @@ class ChatViewModel(
             it.copy(
                 prompt = current.prompt,
                 sessions = sessionStore.listSessions().toUiState(),
-                messages = sessionStore.getMessages(sessionId).toChatMessages(),
+                messages = displayedMessages(sessionId),
+                hasOlderMessages = hasOlderMessages(sessionId),
                 isLoadingModel = true,
                 isGenerating = true,
                 researchInProgress = false,
@@ -666,7 +740,8 @@ class ChatViewModel(
             } else {
                 state.copy(
                     sessions = sessionStore.listSessions().toUiState(),
-                    messages = sessionStore.getMessages(sessionId).toChatMessages(),
+                    messages = displayedMessages(sessionId),
+                    hasOlderMessages = hasOlderMessages(sessionId),
                     messageDisplayRevision = state.messageDisplayRevision + 1,
                 )
             }
@@ -704,6 +779,7 @@ class ChatViewModel(
     }
 
     fun onEnteringChat() {
+        if (closed.get()) return
         if (generationJob?.isActive == true) return
         val session =
             conversationSelection.currentSessionId
@@ -713,13 +789,35 @@ class ChatViewModel(
             it.copy(
                 sessions = sessionStore.listSessions().toUiState(),
                 selectedSessionId = session.id,
-                messages = sessionStore.getMessages(session.id).toChatMessages(),
+                messages = displayedMessages(session.id),
+                hasOlderMessages = hasOlderMessages(session.id),
                 messageDisplayRevision = it.messageDisplayRevision + 1,
             )
         }
     }
 
+    fun loadOlderMessages() {
+        if (closed.get()) return
+        runSessionMutation(::loadOlderMessagesAfterPersistenceDispatch)
+    }
+
+    private fun loadOlderMessagesAfterPersistenceDispatch() {
+        val sessionId = _uiState.value.selectedSessionId ?: return
+        if (!_uiState.value.hasOlderMessages || _uiState.value.isLoadingOlderMessages) return
+        _uiState.update { it.copy(isLoadingOlderMessages = true) }
+        messageWindowSizes[sessionId] = messageWindowSize(sessionId) + MESSAGE_WINDOW_PAGE_SIZE
+        _uiState.update {
+            it.copy(
+                messages = displayedMessages(sessionId),
+                hasOlderMessages = hasOlderMessages(sessionId),
+                isLoadingOlderMessages = false,
+                messageDisplayRevision = it.messageDisplayRevision + 1L,
+            )
+        }
+    }
+
     fun cancelGeneration() {
+        if (closed.get()) return
         stopActiveGeneration()
         unloadEngine()
         _uiState.update {
@@ -730,6 +828,23 @@ class ChatViewModel(
                 activeKnowledgeToolName = null,
                 researchSources = emptyList(),
                 error = null,
+            )
+        }
+    }
+
+    fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        generationJob?.cancel()
+        assistantPersistenceJob?.cancel()
+        assistantPresentationJob?.cancel()
+        scope.cancel()
+        _uiState.update {
+            it.copy(
+                isLoadingModel = false,
+                isGenerating = false,
+                isPersistenceBusy = false,
+                researchInProgress = false,
+                activeKnowledgeToolName = null,
             )
         }
     }
@@ -877,6 +992,21 @@ class ChatViewModel(
 
     private fun List<StoredChatMessage>.toChatMessages(): List<ChatMessage> = map { it.toChatMessage() }
 
+    private fun displayedMessages(sessionId: String): List<ChatMessage> {
+        val limit = messageWindowSize(sessionId)
+        return sessionStore.getRecentMessages(sessionId, limit).toChatMessages()
+    }
+
+    private fun hasOlderMessages(sessionId: String): Boolean {
+        val displayedCount = messageWindowSize(sessionId)
+        return sessionStore.countMessages(sessionId) > displayedCount
+    }
+
+    private fun messageWindowSize(sessionId: String): Int {
+        messageWindowSizes.putIfAbsent(sessionId, INITIAL_MESSAGE_WINDOW_SIZE)
+        return checkNotNull(messageWindowSizes[sessionId])
+    }
+
     private fun StoredChatMessage.toChatMessage(): ChatMessage = ChatMessage(role = role, content = content, id = id)
 
     private class AssistantMessageBuffer(
@@ -899,5 +1029,7 @@ class ChatViewModel(
     private companion object {
         const val DEFAULT_ASSISTANT_PERSISTENCE_INTERVAL_MILLIS = 250L
         const val DEFAULT_ASSISTANT_PRESENTATION_INTERVAL_MILLIS = 50L
+        const val INITIAL_MESSAGE_WINDOW_SIZE = 100
+        const val MESSAGE_WINDOW_PAGE_SIZE = 100
     }
 }

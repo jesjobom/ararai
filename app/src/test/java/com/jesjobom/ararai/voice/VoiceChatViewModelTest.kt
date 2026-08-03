@@ -1,0 +1,321 @@
+package com.jesjobom.ararai.voice
+
+import android.os.Looper
+import com.jesjobom.ararai.chat.AudioPrompt
+import com.jesjobom.ararai.chat.ChatMediaRepository
+import com.jesjobom.ararai.chat.ChatRole
+import com.jesjobom.ararai.chat.FileChatMediaRepository
+import com.jesjobom.ararai.chat.InMemoryChatSessionStore
+import com.jesjobom.ararai.chat.MessageContent
+import com.jesjobom.ararai.engine.GenerationEvent
+import com.jesjobom.ararai.engine.LocalLlmEngine
+import com.jesjobom.ararai.engine.LocalLlmWorkload
+import com.jesjobom.ararai.engine.PromptRequest
+import com.jesjobom.ararai.model.InferenceConfig
+import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.model.ModelInputCapabilities
+import com.jesjobom.ararai.model.ModelStartupState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.io.path.createTempDirectory
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+class VoiceChatViewModelTest {
+    private val model =
+        LocalModel(
+            id = "voice-test-model",
+            name = "Voice Test Model",
+            filePath = "/tmp/voice-test.task",
+            inputCapabilities = ModelInputCapabilities(audio = true),
+        )
+    private val inference = InferenceConfig(contextTokens = 2_048, temperature = 0.2f, topP = 0.9f)
+
+    @Test
+    fun `entering voice chat loads model and prepares audio workload before enabling start`() {
+        val engine = RecordingEngine(flowOf(GenerationEvent.Completed))
+        val harness = harness(engine)
+
+        harness.viewModel.onModelStartupState(ModelStartupState.Available(model, inference))
+        harness.viewModel.onEnteringVoiceChat()
+
+        waitUntil { harness.viewModel.state.value.canStart }
+        assertEquals(listOf(model to inference), engine.loads)
+        assertEquals(listOf(LocalLlmWorkload.Audio), engine.preparedWorkloads)
+        assertFalse(harness.viewModel.state.value.isLoadingModel)
+        assertTrue(harness.viewModel.state.value.isModelLoaded)
+    }
+
+    @Test
+    fun `completed direct audio turn persists owned media and answer then resumes listening`() {
+        val engine =
+            RecordingEngine(
+                flowOf(
+                    GenerationEvent.Token("A local answer."),
+                    GenerationEvent.Completed,
+                ),
+            )
+        val harness = harness(engine)
+        prepareAndStart(harness)
+        val temporaryCapture = harness.captureFactory.latest!!.emitNewTurn()
+
+        waitUntil {
+            harness.viewModel.state.value.phase == VoiceChatPhase.Listening &&
+                harness.store.allMessages().any { it.role == ChatRole.Assistant }
+        }
+
+        val messages = harness.store.allMessages()
+        val userAudio = (messages.first { it.role == ChatRole.User }.content as MessageContent.AudioPromptContent).audio
+        val assistant = messages.last { it.role == ChatRole.Assistant }.content as MessageContent.TextPrompt
+        assertEquals("A local answer.", assistant.text)
+        assertEquals(listOf("A local answer."), harness.speechFactory.segments)
+        assertTrue(File(userAudio.uri).exists())
+        assertEquals(harness.mediaDirectory.canonicalFile, File(userAudio.uri).canonicalFile.parentFile)
+        assertFalse(temporaryCapture.exists())
+        assertEquals(1, harness.viewModel.state.value.diagnostics.size)
+        assertEquals("completed", harness.viewModel.state.value.diagnostics.single().outcome)
+        harness.viewModel.stop()
+    }
+
+    @Test
+    fun `generation failure enters controlled error state and removes temporary capture`() {
+        val harness = harness(RecordingEngine(flowOf(GenerationEvent.Failed("generation failed"))))
+        prepareAndStart(harness)
+        val temporaryCapture = harness.captureFactory.latest!!.emitNewTurn()
+
+        waitUntil { harness.viewModel.state.value.phase == VoiceChatPhase.Error }
+
+        assertEquals("generation failed", harness.viewModel.state.value.error)
+        assertFalse(temporaryCapture.exists())
+        assertEquals("failed", harness.viewModel.state.value.diagnostics.single().outcome)
+        assertTrue(harness.store.allMessages().any { it.role == ChatRole.User })
+    }
+
+    @Test
+    fun `media copy failure stores no user message and never starts generation`() {
+        val engine = RecordingEngine(flowOf(GenerationEvent.Completed))
+        val harness = harness(engine, mediaRepository = FailingChatMediaRepository)
+        prepareAndStart(harness)
+        val temporaryCapture = harness.captureFactory.latest!!.emitNewTurn()
+
+        waitUntil { harness.viewModel.state.value.phase == VoiceChatPhase.Error }
+
+        assertTrue(harness.store.allMessages().isEmpty())
+        assertEquals(0, engine.generateCalls)
+        assertFalse(temporaryCapture.exists())
+    }
+
+    @Test
+    fun `stopping active generation cancels engine and temporary capture then returns idle`() {
+        val engine = CancellableEngine()
+        val harness = harness(engine)
+        prepareAndStart(harness)
+        val temporaryCapture = harness.captureFactory.latest!!.emitNewTurn()
+        waitUntil { engine.started.get() == 1 }
+
+        harness.viewModel.stop()
+
+        waitUntil { engine.cancellations.get() == 1 }
+        assertEquals(VoiceChatPhase.Idle, harness.viewModel.state.value.phase)
+        assertFalse(temporaryCapture.exists())
+        assertFalse(harness.viewModel.state.value.researchInProgress)
+    }
+
+    @Test
+    fun `stopping while listening cancels active capture and returns idle`() {
+        val harness = harness(RecordingEngine(flowOf(GenerationEvent.Completed)))
+        prepareAndStart(harness)
+
+        harness.viewModel.stop()
+
+        assertEquals(1, harness.captureFactory.latest!!.cancellations)
+        assertEquals(VoiceChatPhase.Idle, harness.viewModel.state.value.phase)
+    }
+
+    private fun prepareAndStart(harness: Harness) {
+        harness.viewModel.onModelStartupState(ModelStartupState.Available(model, inference))
+        harness.viewModel.onEnteringVoiceChat()
+        waitUntil { harness.viewModel.state.value.canStart }
+        harness.viewModel.start()
+        waitUntil { harness.captureFactory.latest?.started == true }
+    }
+
+    private fun harness(
+        engine: LocalLlmEngine,
+        mediaRepository: ChatMediaRepository? = null,
+    ): Harness {
+        val root = createTempDirectory("voice-view-model-test").toFile()
+        val mediaDirectory = File(root, "media")
+        val captureDirectory = File(root, "capture").apply { mkdirs() }
+        val store = InMemoryChatSessionStore()
+        val captureFactory = RecordingCaptureFactory(captureDirectory)
+        val speechFactory = CompletingSpeechQueueFactory()
+        val viewModel =
+            VoiceChatViewModel(
+                engine = engine,
+                systemPrompt = "Test",
+                preferences = InMemoryVoiceChatPreferences(VoiceChatSettings(minimumWords = 1)),
+                captureFactory = captureFactory::create,
+                speechQueueFactory = speechFactory::create,
+                sessionStore = store,
+                mediaRepository = mediaRepository ?: FileChatMediaRepository(mediaDirectory),
+            )
+        return Harness(viewModel, store, captureFactory, speechFactory, mediaDirectory)
+    }
+
+    private fun waitUntil(
+        timeoutMillis: Long = 5_000L,
+        condition: () -> Boolean,
+    ) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (!condition() && System.currentTimeMillis() < deadline) {
+            shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(10L)
+        }
+        assertTrue("Condition was not met within ${timeoutMillis}ms", condition())
+    }
+
+    private data class Harness(
+        val viewModel: VoiceChatViewModel,
+        val store: InMemoryChatSessionStore,
+        val captureFactory: RecordingCaptureFactory,
+        val speechFactory: CompletingSpeechQueueFactory,
+        val mediaDirectory: File,
+    )
+}
+
+private class RecordingEngine(
+    private val events: Flow<GenerationEvent>,
+) : LocalLlmEngine {
+    val loads = mutableListOf<Pair<LocalModel, InferenceConfig>>()
+    val preparedWorkloads = mutableListOf<LocalLlmWorkload>()
+    var generateCalls = 0
+
+    override suspend fun load(model: LocalModel, config: InferenceConfig) {
+        loads += model to config
+    }
+
+    override suspend fun prepare(workload: LocalLlmWorkload) {
+        preparedWorkloads += workload
+    }
+
+    override fun generate(request: PromptRequest): Flow<GenerationEvent> {
+        generateCalls++
+        return events
+    }
+
+    override suspend fun unload() = Unit
+}
+
+private class CancellableEngine : LocalLlmEngine {
+    val started = AtomicInteger()
+    val cancellations = AtomicInteger()
+
+    override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+
+    override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
+        started.incrementAndGet()
+        try {
+            awaitCancellation()
+        } catch (error: CancellationException) {
+            cancellations.incrementAndGet()
+            throw error
+        }
+    }
+
+    override suspend fun unload() = Unit
+}
+
+private class RecordingCaptureFactory(
+    private val directory: File,
+) {
+    val requestedSettings = mutableListOf<VoiceChatSettings>()
+    var latest: RecordingCapture? = null
+        private set
+
+    fun create(settings: VoiceChatSettings): VoiceTurnCapture {
+        requestedSettings += settings
+        return RecordingCapture(directory).also { latest = it }
+    }
+}
+
+private class RecordingCapture(
+    private val directory: File,
+) : VoiceTurnCapture {
+    var started = false
+        private set
+    var cancellations = 0
+        private set
+    private var onTurn: ((CapturedVoiceTurn) -> Unit)? = null
+
+    override fun start(onTurn: (CapturedVoiceTurn) -> Unit, onError: (String) -> Unit) {
+        started = true
+        this.onTurn = onTurn
+    }
+
+    fun emitNewTurn(): File {
+        val file = File.createTempFile("voice-capture-", ".wav", directory).apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        checkNotNull(onTurn).invoke(
+            CapturedVoiceTurn(
+                prompt = AudioPrompt(file.absolutePath, "audio/wav", "voice.wav", file.length()),
+                speechMillis = 1_000L,
+                noiseSuppressionActive = true,
+            ),
+        )
+        return file
+    }
+
+    override fun cancel() {
+        cancellations++
+    }
+
+    override fun close() = Unit
+}
+
+private class CompletingSpeechQueueFactory {
+    val segments = mutableListOf<String>()
+
+    fun create(
+        onStarted: (IntRange) -> Unit,
+        onRange: (IntRange) -> Unit,
+        onComplete: () -> Unit,
+        @Suppress("UNUSED_PARAMETER") onError: (String) -> Unit,
+    ): VoiceSpeechQueue = object : VoiceSpeechQueue {
+        override fun enqueue(segment: VoiceSpeechSegment) {
+            segments += segment.speechText
+            onStarted(segment.sourceRange)
+            onRange(segment.sourceRange)
+        }
+
+        override fun markGenerationComplete() = onComplete()
+
+        override fun stop() = Unit
+
+        override fun close() = Unit
+    }
+}
+
+private object FailingChatMediaRepository : ChatMediaRepository {
+    override fun createDraftFile(prefix: String, suffix: String): File = error("media unavailable")
+
+    override fun deleteDraft(uri: String, persistedUris: Set<String>) = Unit
+
+    override fun deleteUnreferenced(candidateUris: Set<String>, persistedUris: Set<String>) = Unit
+
+    override fun reconcile(persistedUris: Set<String>, maxFiles: Int) = Unit
+}
+
+private fun InMemoryChatSessionStore.allMessages() = listSessions().flatMap { getMessages(it.id) }

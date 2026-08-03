@@ -3,7 +3,13 @@ plugins {
     id("com.android.library") version "9.2.1" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.3.21" apply false
     id("com.diffplug.spotless") version "7.2.1"
-    id("io.gitlab.arturbosch.detekt") version "1.23.8" apply false
+    id("dev.detekt") version "2.0.0-alpha.5" apply false
+}
+
+allprojects {
+    dependencyLocking {
+        lockAllConfigurations()
+    }
 }
 
 spotless {

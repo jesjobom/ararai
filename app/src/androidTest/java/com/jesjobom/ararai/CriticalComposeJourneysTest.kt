@@ -165,6 +165,7 @@ class CriticalComposeJourneysTest {
         ).assertIsDisplayed()
         composeRule.onNodeWithTag("wikipedia-enabled").assertIsOff().performClick().assertIsOn()
         composeRule.onNodeWithText("Available for the selected model.").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Smoke test").assertCountEquals(0)
         composeRule
             .onNodeWithTag("web-provider-token-tavily")
             .performScrollTo()
@@ -526,7 +527,7 @@ class CriticalComposeJourneysTest {
     }
 
     @Test
-    fun voiceChatSettingsSelectReadingSpeed() {
+    fun voiceChatSettingsSaveAutomaticallyAndResetToDefaults() {
         var savedSettings: com.jesjobom.ararai.voice.VoiceChatSettings? = null
         composeRule.setContent {
             MaterialTheme {
@@ -549,13 +550,53 @@ class CriticalComposeJourneysTest {
             .performSemanticsAction(SemanticsActions.SetProgress) { setProgress -> setProgress(2.0f) }
         composeRule.onNodeWithText("Silero").performClick()
         composeRule.onNodeWithText("WebRTC").performClick()
-        composeRule.onNodeWithText("Save").performClick()
 
         composeRule.runOnIdle {
             assertEquals(true, savedSettings?.reasoningEnabled)
             assertEquals(2.0f, savedSettings?.speechRateMultiplier)
             assertEquals(VadProvider.WebRtc, savedSettings?.vadProvider)
         }
+
+        composeRule.onNodeWithText("Reset").performClick()
+        composeRule.runOnIdle {
+            assertEquals(com.jesjobom.ararai.voice.VoiceChatSettings(), savedSettings)
+        }
+        composeRule.onNodeWithText("Voice Chat settings").assertIsDisplayed()
+        composeRule.onNodeWithText("Close").performClick()
+        composeRule.onNodeWithText("Voice Chat settings").assertDoesNotExist()
+    }
+
+    @Test
+    fun chatSettingsSaveAutomaticallyAndResetToDefaults() {
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(),
+                initialModel = availableModel(),
+                inferenceConfig = inference,
+                systemPrompt = "Be concise",
+                sessionStore = InMemoryChatSessionStore(),
+            )
+        composeRule.setContent {
+            MaterialTheme {
+                ChatScreen(
+                    viewModel = viewModel,
+                    mediaServices = fakeMediaServices(),
+                    textToSpeechServiceFactory = ::NoOpTextToSpeechService,
+                    languageIdentifierFactory = ::ImmediateLanguageIdentifier,
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Chat settings").performClick()
+        composeRule.onNodeWithTag("chat-audio-transcriptions-switch").assertIsOn().performClick()
+        composeRule.runOnIdle { assertEquals(false, viewModel.uiState.value.showAudioTranscriptions) }
+
+        composeRule.onNodeWithText("Reset").performClick()
+        composeRule.runOnIdle { assertEquals(true, viewModel.uiState.value.showAudioTranscriptions) }
+        composeRule.onNodeWithText("Chat settings").assertIsDisplayed()
+        composeRule.onNodeWithText("Close").performClick()
+        composeRule.onNodeWithText("Chat settings").assertDoesNotExist()
     }
 
     private fun availableModel() = LocalModel(

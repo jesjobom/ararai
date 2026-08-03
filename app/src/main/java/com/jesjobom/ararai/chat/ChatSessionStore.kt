@@ -49,6 +49,21 @@ interface ChatSessionStore {
 
     fun getMessages(sessionId: String): List<StoredChatMessage>
 
+    fun getRecentMessages(
+        sessionId: String,
+        limit: Int,
+    ): List<StoredChatMessage> {
+        require(limit > 0)
+        return getMessages(sessionId).takeLast(limit)
+    }
+
+    fun countMessages(sessionId: String): Int = getMessages(sessionId).size
+
+    fun mediaUrisForSession(sessionId: String): Set<String> {
+        val messages = getMessages(sessionId)
+        return messages.flatMapTo(linkedSetOf()) { it.content.mediaUris() }
+    }
+
     fun createSession(title: String): ChatSession
 
     fun renameSession(
@@ -112,6 +127,29 @@ class DeferredNewChatSessionStore(
         pendingMessages.values.toList()
     } else {
         delegate.getMessages(resolveSessionId(sessionId)).map { it.copy(sessionId = sessionId) }
+    }
+
+    @Synchronized
+    override fun getRecentMessages(
+        sessionId: String,
+        limit: Int,
+    ): List<StoredChatMessage> {
+        require(limit > 0)
+        return if (pendingSession?.id == sessionId) {
+            pendingMessages.values.toList().takeLast(limit)
+        } else {
+            delegate.getRecentMessages(resolveSessionId(sessionId), limit).map { it.copy(sessionId = sessionId) }
+        }
+    }
+
+    @Synchronized
+    override fun countMessages(sessionId: String): Int = if (pendingSession?.id == sessionId) pendingMessages.size else delegate.countMessages(resolveSessionId(sessionId))
+
+    @Synchronized
+    override fun mediaUrisForSession(sessionId: String): Set<String> = if (pendingSession?.id == sessionId) {
+        pendingMessages.values.flatMapTo(linkedSetOf()) { it.content.mediaUris() }
+    } else {
+        delegate.mediaUrisForSession(resolveSessionId(sessionId))
     }
 
     @Synchronized
@@ -409,6 +447,53 @@ class SqliteChatSessionStore(
     }
 
     @Synchronized
+    override fun getRecentMessages(
+        sessionId: String,
+        limit: Int,
+    ): List<StoredChatMessage> {
+        require(limit > 0)
+        readableDatabase
+            .rawQuery(
+                """
+                SELECT id, session_id, role, text, content_kind, content_payload, created_at_millis
+                FROM chat_messages
+                WHERE session_id = ?
+                ORDER BY created_at_millis DESC, id DESC
+                LIMIT ?
+                """.trimIndent(),
+                arrayOf(sessionId, limit.toString()),
+            ).use { cursor ->
+                val result = mutableListOf<StoredChatMessage>()
+                while (cursor.moveToNext()) result += cursor.toStoredChatMessage()
+                return result.asReversed()
+            }
+    }
+
+    @Synchronized
+    override fun countMessages(sessionId: String): Int {
+        readableDatabase
+            .rawQuery(
+                "SELECT COUNT(*) FROM chat_messages WHERE session_id = ?",
+                arrayOf(sessionId),
+            ).use { cursor ->
+                return if (cursor.moveToFirst()) cursor.getInt(0) else 0
+            }
+    }
+
+    @Synchronized
+    override fun mediaUrisForSession(sessionId: String): Set<String> {
+        readableDatabase
+            .rawQuery(
+                "SELECT DISTINCT uri FROM chat_media_references WHERE session_id = ? ORDER BY uri ASC",
+                arrayOf(sessionId),
+            ).use { cursor ->
+                val result = linkedSetOf<String>()
+                while (cursor.moveToNext()) result += cursor.getString(0)
+                return result
+            }
+    }
+
+    @Synchronized
     override fun createSession(title: String): ChatSession {
         val now = nowMillis()
         val session =
@@ -615,6 +700,19 @@ class SqliteChatSessionStore(
             put("created_at_millis", createdAtMillis)
         }
     }
+
+    private fun android.database.Cursor.toStoredChatMessage(): StoredChatMessage = StoredChatMessage(
+        id = getString(0),
+        sessionId = getString(1),
+        role = ChatRole.valueOf(getString(2)),
+        content =
+        MessageContentCodec.decode(
+            kind = getString(4),
+            payload = if (isNull(5)) null else getString(5),
+            legacyText = getString(3),
+        ),
+        createdAtMillis = getLong(6),
+    )
 
     private fun nextMessageTimestamp(
         db: SQLiteDatabase,

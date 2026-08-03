@@ -193,10 +193,7 @@ internal fun VoiceChatScreen(
             initial = state.settings,
             canEnableReasoning = state.canEnableReasoning,
             onDismiss = { showSettings = false },
-            onSave = {
-                onSettings(it)
-                showSettings = false
-            },
+            onSettingsChange = onSettings,
         )
     }
     if (showFullResponse) {
@@ -353,9 +350,13 @@ private fun VoiceChatSettingsDialog(
     initial: VoiceChatSettings,
     canEnableReasoning: Boolean,
     onDismiss: () -> Unit,
-    onSave: (VoiceChatSettings) -> Unit,
+    onSettingsChange: (VoiceChatSettings) -> Unit,
 ) {
     var value by remember(initial) { mutableStateOf(initial) }
+    val updateValue: (VoiceChatSettings) -> Unit = {
+        value = it
+        onSettingsChange(it)
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Voice Chat settings") },
@@ -378,7 +379,7 @@ private fun VoiceChatSettingsDialog(
                     Switch(
                         checked = value.reasoningEnabled && canEnableReasoning,
                         enabled = canEnableReasoning,
-                        onCheckedChange = { value = value.copy(reasoningEnabled = it) },
+                        onCheckedChange = { updateValue(value.copy(reasoningEnabled = it)) },
                         modifier = Modifier.testTag("voice-reasoning-switch"),
                     )
                 }
@@ -388,10 +389,12 @@ private fun VoiceChatSettingsDialog(
                     modifier = Modifier.testTag("voice-speech-rate-slider"),
                     onValueChange = { raw ->
                         val snapped = (raw * 10f).roundToInt() / 10f
-                        value = value.copy(
-                            speechRateMultiplier = snapped.coerceIn(
-                                VoiceChatSettings.MIN_SPEECH_RATE,
-                                VoiceChatSettings.MAX_SPEECH_RATE,
+                        updateValue(
+                            value.copy(
+                                speechRateMultiplier = snapped.coerceIn(
+                                    VoiceChatSettings.MIN_SPEECH_RATE,
+                                    VoiceChatSettings.MAX_SPEECH_RATE,
+                                ),
                             ),
                         )
                     },
@@ -409,58 +412,60 @@ private fun VoiceChatSettingsDialog(
                 )
                 Slider(value = value.pauseMillis.toFloat(), onValueChange = { raw ->
                     val step = ((raw.toInt() - 500) / 250) * 250 + 500
-                    value = value.copy(pauseMillis = step.coerceIn(500, 5_000))
+                    updateValue(value.copy(pauseMillis = step.coerceIn(500, 5_000)))
                 }, valueRange = 500f..5_000f, steps = 17)
                 Text("Minimum response words: ${value.minimumWords}")
-                Slider(value = value.minimumWords.toFloat(), onValueChange = { value = value.copy(minimumWords = it.toInt().coerceIn(1, 100)) }, valueRange = 1f..100f, steps = 98)
+                Slider(value = value.minimumWords.toFloat(), onValueChange = { updateValue(value.copy(minimumWords = it.toInt().coerceIn(1, 100))) }, valueRange = 1f..100f, steps = 98)
                 SettingsDropdown(
                     label = "Experimental VAD",
                     selected = value.vadProvider,
                     options = VadProvider.entries,
                     optionLabel = { it.displayName },
-                    onSelect = { value = value.copy(vadProvider = it) },
+                    onSelect = { updateValue(value.copy(vadProvider = it)) },
                 )
                 SettingsDropdown(
                     label = "VAD sensitivity",
                     selected = value.vadMode,
                     options = VadMode.entries,
                     optionLabel = { it.displayName },
-                    onSelect = { value = value.copy(vadMode = it) },
+                    onSelect = { updateValue(value.copy(vadMode = it)) },
                 )
                 AudioTimingSlider(
                     label = "Speech confirmation",
                     value = value.speechConfirmationMillis,
                     range = VoiceChatSettings.MIN_SPEECH_CONFIRMATION_MILLIS..VoiceChatSettings.MAX_SPEECH_CONFIRMATION_MILLIS,
-                    onValue = { value = value.copy(speechConfirmationMillis = it) },
+                    onValue = { updateValue(value.copy(speechConfirmationMillis = it)) },
                 )
                 AudioTimingSlider(
                     label = "Pre-roll",
                     value = value.preRollMillis,
                     range = VoiceChatSettings.MIN_PRE_ROLL_MILLIS..VoiceChatSettings.MAX_PRE_ROLL_MILLIS,
-                    onValue = { value = value.copy(preRollMillis = it) },
+                    onValue = { updateValue(value.copy(preRollMillis = it)) },
                 )
                 AudioTimingSlider(
                     label = "Minimum speech",
                     value = value.minimumSpeechMillis,
                     range = VoiceChatSettings.MIN_SPEECH_MILLIS..VoiceChatSettings.MAX_SPEECH_MILLIS,
-                    onValue = { value = value.copy(minimumSpeechMillis = it) },
+                    onValue = { updateValue(value.copy(minimumSpeechMillis = it)) },
                 )
                 SettingsDropdown(
                     label = "Experimental capture source",
                     selected = value.captureSource,
                     options = VoiceCaptureSource.entries,
                     optionLabel = { it.displayName },
-                    onSelect = { value = value.copy(captureSource = it) },
+                    onSelect = { updateValue(value.copy(captureSource = it)) },
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Request noise suppression", modifier = Modifier.weight(1f))
-                    Switch(checked = value.noiseSuppressionRequested, onCheckedChange = { value = value.copy(noiseSuppressionRequested = it) })
+                    Switch(checked = value.noiseSuppressionRequested, onCheckedChange = { updateValue(value.copy(noiseSuppressionRequested = it)) })
                 }
                 Text("Experimental audio changes apply after restarting the loop.", style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(value) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        dismissButton = {
+            TextButton(onClick = { updateValue(VoiceChatSettings()) }) { Text("Reset") }
+        },
     )
 }
 

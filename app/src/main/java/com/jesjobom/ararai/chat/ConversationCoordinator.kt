@@ -14,7 +14,7 @@ class ConversationCoordinator(
         sessionId: String,
         content: MessageContent,
     ): BegunConversationTurn {
-        val history = sessionStore.getMessages(sessionId)
+        val history = sessionStore.getRecentMessages(sessionId, MAX_CONTEXT_HISTORY_MESSAGES)
         val message = sessionStore.appendMessage(sessionId, ChatRole.User, content)
         return BegunConversationTurn(history = history, userMessage = message)
     }
@@ -46,6 +46,10 @@ class ConversationCoordinator(
         engine: LocalLlmEngine,
         request: PromptRequest,
     ): Flow<GenerationEvent> = engine.generate(request)
+
+    private companion object {
+        const val MAX_CONTEXT_HISTORY_MESSAGES = 512
+    }
 }
 
 data class BegunConversationTurn(

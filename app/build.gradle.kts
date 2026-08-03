@@ -5,7 +5,7 @@ import java.time.format.DateTimeFormatter
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("io.gitlab.arturbosch.detekt")
+    id("dev.detekt")
 }
 
 fun buildTimestampVersion(): String =
@@ -81,7 +81,6 @@ android {
 }
 
 detekt {
-    toolVersion = "1.23.8"
     config.setFrom(rootProject.files("config/detekt/detekt.yml"))
     baseline = rootProject.file("config/detekt/baseline.xml")
     buildUponDefaultConfig = true

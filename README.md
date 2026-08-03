@@ -15,7 +15,8 @@ backend, or external database.
   `LocalLlmEngine` boundary. E2B is the default lower-resource option; both
   configured models support text, image, audio, and reasoning input.
 - Streamed local Chat with persistent and renameable sessions, cancellation,
-  bounded context construction, selectable Markdown and local LaTeX math rendering, and optional reasoning
+  bounded and incrementally loadable history, bounded context construction,
+  selectable Markdown and local LaTeX math rendering, and optional reasoning
   controls when declared by the selected model.
 - Offline response-language detection and language-aware native Android
   text-to-speech playback for completed assistant responses.

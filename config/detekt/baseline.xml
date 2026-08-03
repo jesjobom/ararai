@@ -2,118 +2,82 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:ArarAiApp.kt$@Composable internal fun ArarAiApp( modelController: ModelCatalogController, chatSessionStore: ChatSessionStore, chatMediaRepository: ChatMediaRepository, chatMediaServices: ChatMediaServices, chatTextToSpeechServiceFactory: () -&gt; ChatTextToSpeechService, chatLanguageIdentifierFactory: () -&gt; ChatLanguageIdentifier, systemPrompt: String, appVersionLabel: String, themeMode: ThemeMode, onThemeModeChange: (ThemeMode) -&gt; Unit, openModelManagementRequest: Int = 0, liteRtLmCacheDir: String? = null, localLlmEngineFactory: () -&gt; LocalLlmEngine = { ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir) }, )</ID>
-    <ID>CyclomaticComplexMethod:BenchmarkViewModel.kt$BenchmarkViewModel$fun runBenchmark()</ID>
-    <ID>CyclomaticComplexMethod:ChatImageImporter.kt$ChatImageImporter$override fun import(uri: Uri): ImportedChatImage</ID>
-    <ID>CyclomaticComplexMethod:ChatInputComponents.kt$@Composable internal fun ChatInputBar( prompt: String, imageAttachments: List&lt;ImageAttachment&gt;, audioPrompt: AudioPrompt?, canAttachImage: Boolean, canUseAudioPrompt: Boolean, onPromptChanged: (String) -&gt; Unit, onAttachImage: (ImageAttachment) -&gt; Unit, onRemoveImage: (String) -&gt; Unit, onSendAudioPrompt: (AudioPrompt) -&gt; Unit, onClearAudioPrompt: () -&gt; Unit, canSubmit: Boolean, isGenerating: Boolean, error: String?, onSubmit: () -&gt; Unit, onCancelGeneration: () -&gt; Unit, mediaServices: ChatMediaServices, )</ID>
-    <ID>CyclomaticComplexMethod:ChatMessageMediaComponents.kt$@Composable internal fun AudioPlaybackRow( audio: AudioPrompt, compact: Boolean = false, mediaServices: ChatMediaServices, )</ID>
-    <ID>CyclomaticComplexMethod:ChatScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable internal fun ChatScreen( viewModel: ChatViewModel, mediaServices: ChatMediaServices, textToSpeechServiceFactory: () -&gt; ChatTextToSpeechService, languageIdentifierFactory: () -&gt; ChatLanguageIdentifier, onBack: () -&gt; Unit, onRetryModelDownload: () -&gt; Unit = {}, )</ID>
-    <ID>CyclomaticComplexMethod:MarkdownText.kt$internal fun parseInlineMath(text: String): List&lt;MathInlineSegment&gt;</ID>
-    <ID>CyclomaticComplexMethod:MarkdownText.kt$internal fun parseMarkdownBlocks(source: String): List&lt;MarkdownBlock&gt;</ID>
-    <ID>CyclomaticComplexMethod:ModelFileDownloader.kt$ModelFileDownloader$override suspend fun download( config: ModelConfig, onProgress: (ModelDownloadProgress) -&gt; Unit, ): ModelResolutionState.Available</ID>
-    <ID>InstanceOfCheckForException:BenchmarkViewModel.kt$BenchmarkViewModel$error is kotlinx.coroutines.CancellationException</ID>
-    <ID>InstanceOfCheckForException:ChatInputComponents.kt$error is kotlinx.coroutines.CancellationException</ID>
-    <ID>InstanceOfCheckForException:ChatViewModel.kt$ChatViewModel$error is kotlinx.coroutines.CancellationException</ID>
-    <ID>LargeClass:ChatViewModel.kt$ChatViewModel</ID>
-    <ID>LargeClass:ChatViewModelTest.kt$ChatViewModelTest</ID>
-    <ID>LongMethod:ArarAiApp.kt$@Composable internal fun ArarAiApp( modelController: ModelCatalogController, chatSessionStore: ChatSessionStore, chatMediaRepository: ChatMediaRepository, chatMediaServices: ChatMediaServices, chatTextToSpeechServiceFactory: () -&gt; ChatTextToSpeechService, chatLanguageIdentifierFactory: () -&gt; ChatLanguageIdentifier, systemPrompt: String, appVersionLabel: String, themeMode: ThemeMode, onThemeModeChange: (ThemeMode) -&gt; Unit, openModelManagementRequest: Int = 0, liteRtLmCacheDir: String? = null, localLlmEngineFactory: () -&gt; LocalLlmEngine = { ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir) }, )</ID>
-    <ID>LongMethod:ArarAiApp.kt$@Composable internal fun HomeScreen( modelStatus: ModelStatusUiState, appVersionLabel: String, onOpenChat: () -&gt; Unit, onOpenDiagnostics: () -&gt; Unit, onOpenModelStatus: () -&gt; Unit, onOpenSettings: () -&gt; Unit, )</ID>
-    <ID>LongMethod:ArarAiApp.kt$@Composable internal fun SettingsScreen( themeMode: ThemeMode, onThemeModeChange: (ThemeMode) -&gt; Unit, onBack: () -&gt; Unit, )</ID>
-    <ID>LongMethod:ArarAiApp.kt$@Composable private fun ModelCard( item: ManagedModelItem, isSelected: Boolean, onSelect: () -&gt; Unit, onDownload: () -&gt; Unit, onCancelDownload: () -&gt; Unit, onDelete: () -&gt; Unit, onRedownload: () -&gt; Unit, onRetry: () -&gt; Unit, )</ID>
-    <ID>LongMethod:BenchmarkViewModel.kt$BenchmarkViewModel$fun runBenchmark()</ID>
-    <ID>LongMethod:BenchmarkViewModelTest.kt$BenchmarkViewModelTest$@Test fun `runs benchmark and records stable metrics`()</ID>
-    <ID>LongMethod:ChatInputComponents.kt$@Composable internal fun AudioRecorderDialog( isRecording: Boolean, recordedAudio: RecordedAudio?, recordingDurationMillis: Long, error: String?, onStartRecording: () -&gt; Unit, onStopRecording: () -&gt; Unit, onUseRecording: () -&gt; Unit, onDismiss: () -&gt; Unit, mediaServices: ChatMediaServices, )</ID>
-    <ID>LongMethod:ChatInputComponents.kt$@Composable internal fun ChatInputBar( prompt: String, imageAttachments: List&lt;ImageAttachment&gt;, audioPrompt: AudioPrompt?, canAttachImage: Boolean, canUseAudioPrompt: Boolean, onPromptChanged: (String) -&gt; Unit, onAttachImage: (ImageAttachment) -&gt; Unit, onRemoveImage: (String) -&gt; Unit, onSendAudioPrompt: (AudioPrompt) -&gt; Unit, onClearAudioPrompt: () -&gt; Unit, canSubmit: Boolean, isGenerating: Boolean, error: String?, onSubmit: () -&gt; Unit, onCancelGeneration: () -&gt; Unit, mediaServices: ChatMediaServices, )</ID>
-    <ID>LongMethod:ChatMessageMediaComponents.kt$@Composable internal fun MessageRow( message: ChatMessage, showReasoning: Boolean, mediaServices: ChatMediaServices, isStreaming: Boolean = false, isSpeaking: Boolean = false, isSpeechPrepared: Boolean = false, onToggleSpeech: () -&gt; Unit = {}, )</ID>
-    <ID>LongMethod:ChatScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable internal fun ChatScreen( viewModel: ChatViewModel, mediaServices: ChatMediaServices, textToSpeechServiceFactory: () -&gt; ChatTextToSpeechService, languageIdentifierFactory: () -&gt; ChatLanguageIdentifier, onBack: () -&gt; Unit, onRetryModelDownload: () -&gt; Unit = {}, )</ID>
-    <ID>LongMethod:ChatSessionStoreTest.kt$ChatSessionStoreTest$private fun createVersionTwoDatabase()</ID>
-    <ID>LongMethod:ChatViewModel.kt$ChatViewModel$fun onModelStartupState(state: ModelStartupState)</ID>
-    <ID>LongMethod:ChatViewModel.kt$ChatViewModel$fun submitPrompt()</ID>
-    <ID>LongMethod:LiteRtLmLocalLlmEngine.kt$AndroidLiteRtLmSession$override fun generate( request: PromptRequest, config: InferenceConfig, ): Flow&lt;LiteRtLmChunk&gt;</ID>
-    <ID>LongMethod:MarkdownText.kt$@Composable internal fun MarkdownText( text: String, modifier: Modifier = Modifier, parseBlocks: (String) -&gt; List&lt;MarkdownBlock&gt; = ::parseMarkdownBlocks, )</ID>
-    <ID>LongMethod:MarkdownText.kt$internal fun parseMarkdownBlocks(source: String): List&lt;MarkdownBlock&gt;</ID>
-    <ID>LongMethod:ModelFileDownloader.kt$ModelFileDownloader$override suspend fun download( config: ModelConfig, onProgress: (ModelDownloadProgress) -&gt; Unit, ): ModelResolutionState.Available</ID>
-    <ID>LongParameterList:ArarAiApp.kt$( item: ManagedModelItem, isSelected: Boolean, onSelect: () -&gt; Unit, onDownload: () -&gt; Unit, onCancelDownload: () -&gt; Unit, onDelete: () -&gt; Unit, onRedownload: () -&gt; Unit, onRetry: () -&gt; Unit, )</ID>
-    <ID>LongParameterList:ArarAiApp.kt$( modelController: ModelCatalogController, chatSessionStore: ChatSessionStore, chatMediaRepository: ChatMediaRepository, chatMediaServices: ChatMediaServices, chatTextToSpeechServiceFactory: () -&gt; ChatTextToSpeechService, chatLanguageIdentifierFactory: () -&gt; ChatLanguageIdentifier, systemPrompt: String, appVersionLabel: String, themeMode: ThemeMode, onThemeModeChange: (ThemeMode) -&gt; Unit, openModelManagementRequest: Int = 0, liteRtLmCacheDir: String? = null, localLlmEngineFactory: () -&gt; LocalLlmEngine = { ConfiguredLocalLlmEngine(liteRtLmCacheDir = liteRtLmCacheDir) }, )</ID>
-    <ID>LongParameterList:ArarAiApp.kt$( modelStatus: ModelStatusUiState, appVersionLabel: String, onOpenChat: () -&gt; Unit, onOpenDiagnostics: () -&gt; Unit, onOpenModelStatus: () -&gt; Unit, onOpenSettings: () -&gt; Unit, )</ID>
-    <ID>LongParameterList:ArarAiApp.kt$( models: List&lt;ManagedModelItem&gt;, selectedModelId: String, onBack: () -&gt; Unit, onSelect: (String) -&gt; Unit, onDownload: (String) -&gt; Unit, onCancelDownload: (String) -&gt; Unit, onDelete: (String) -&gt; Unit, onRedownload: (String) -&gt; Unit, onRetry: (String) -&gt; Unit, )</ID>
-    <ID>LongParameterList:ArarAiApp.kt$( title: String, value: String, detail: String, icon: ImageVector, actionLabel: String, onAction: () -&gt; Unit, secondary: Boolean = false, )</ID>
-    <ID>LongParameterList:ChatImageImporter.kt$ChatImageImporter$( private val mediaRepository: ChatMediaRepository, private val openSource: (Uri) -&gt; InputStream?, private val sourceDisplayName: (Uri) -&gt; String?, private val declaredSourceSize: (Uri) -&gt; Long?, private val readBounds: (File) -&gt; ChatImageBounds? = ::readChatImageBounds, private val readOrientation: (File) -&gt; Int = ::readChatImageOrientation, private val maxSourceBytes: Long = MAX_CHAT_IMAGE_SOURCE_BYTES, private val maxDecodedDimension: Int = MAX_CHAT_IMAGE_DECODED_DIMENSION, private val normalizedDimension: Int = NORMALIZED_CHAT_IMAGE_DIMENSION, )</ID>
-    <ID>LongParameterList:ChatImageImporterTest.kt$ChatImageImporterTest$( mediaDir: File, source: ByteArray, maxSourceBytes: Long = MAX_CHAT_IMAGE_SOURCE_BYTES, maxDecodedDimension: Int = MAX_CHAT_IMAGE_DECODED_DIMENSION, normalizedDimension: Int = NORMALIZED_CHAT_IMAGE_DIMENSION, orientation: Int = ExifInterface.ORIENTATION_NORMAL, )</ID>
-    <ID>LongParameterList:ChatInputComponents.kt$( isRecording: Boolean, recordedAudio: RecordedAudio?, recordingDurationMillis: Long, error: String?, onStartRecording: () -&gt; Unit, onStopRecording: () -&gt; Unit, onUseRecording: () -&gt; Unit, onDismiss: () -&gt; Unit, mediaServices: ChatMediaServices, )</ID>
-    <ID>LongParameterList:ChatInputComponents.kt$( prompt: String, imageAttachments: List&lt;ImageAttachment&gt;, audioPrompt: AudioPrompt?, canAttachImage: Boolean, canUseAudioPrompt: Boolean, onPromptChanged: (String) -&gt; Unit, onAttachImage: (ImageAttachment) -&gt; Unit, onRemoveImage: (String) -&gt; Unit, onSendAudioPrompt: (AudioPrompt) -&gt; Unit, onClearAudioPrompt: () -&gt; Unit, canSubmit: Boolean, isGenerating: Boolean, error: String?, onSubmit: () -&gt; Unit, onCancelGeneration: () -&gt; Unit, mediaServices: ChatMediaServices, )</ID>
-    <ID>LongParameterList:ChatMessageMediaComponents.kt$( message: ChatMessage, showReasoning: Boolean, mediaServices: ChatMediaServices, isStreaming: Boolean = false, isSpeaking: Boolean = false, isSpeechPrepared: Boolean = false, onToggleSpeech: () -&gt; Unit = {}, )</ID>
-    <ID>LongParameterList:ChatScreen.kt$( viewModel: ChatViewModel, mediaServices: ChatMediaServices, textToSpeechServiceFactory: () -&gt; ChatTextToSpeechService, languageIdentifierFactory: () -&gt; ChatLanguageIdentifier, onBack: () -&gt; Unit, onRetryModelDownload: () -&gt; Unit = {}, )</ID>
-    <ID>LongParameterList:ChatSessionComponents.kt$( reasoningEnabled: Boolean, showReasoning: Boolean, canEnableReasoning: Boolean, canShowReasoning: Boolean, onReasoningEnabledChange: (Boolean) -&gt; Unit, onShowReasoningChange: (Boolean) -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
-    <ID>LongParameterList:ChatSessionComponents.kt$( session: ChatSessionUiState, isSelected: Boolean, canDelete: Boolean, onSelect: () -&gt; Unit, onRename: () -&gt; Unit, onDelete: () -&gt; Unit, )</ID>
-    <ID>LongParameterList:ChatSessionComponents.kt$( sessions: List&lt;ChatSessionUiState&gt;, selectedSessionId: String?, canDelete: Boolean, onDismiss: () -&gt; Unit, onCreate: () -&gt; Unit, onSelect: (String) -&gt; Unit, onRename: (ChatSessionUiState) -&gt; Unit, onDelete: (String) -&gt; Unit, onClearAll: () -&gt; Unit, )</ID>
-    <ID>LongParameterList:ChatSessionStoreTest.kt$ChatSessionStoreTest$( db: SQLiteDatabase, id: String, role: String, text: String, kind: String, payload: String, createdAt: Long, )</ID>
-    <ID>LongParameterList:ChatTextToSpeechVoiceSelectionTest.kt$ChatTextToSpeechVoiceSelectionTest$( name: String, locale: Locale, quality: Int = Voice.QUALITY_NORMAL, latency: Int = Voice.LATENCY_NORMAL, network: Boolean = false, features: Set&lt;String&gt; = emptySet(), )</ID>
-    <ID>LongParameterList:ChatViewModel.kt$ChatViewModel$( private val engine: LocalLlmEngine, initialModel: LocalModel?, inferenceConfig: InferenceConfig, private val systemPrompt: String = ModelCatalog.DEFAULT_SYSTEM_PROMPT, private val sessionStore: ChatSessionStore = InMemoryChatSessionStore(), private val mediaRepository: ChatMediaRepository = NoOpChatMediaRepository, private val promptContextBuilder: PromptContextBuilder = PromptContextBuilder(), initialModelStatus: String = if (initialModel == null) { "Model unavailable" } else { ChatUiState.MODEL_AVAILABLE }, private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default), private val assistantPersistenceIntervalMillis: Long = DEFAULT_ASSISTANT_PERSISTENCE_INTERVAL_MILLIS, private val assistantPresentationIntervalMillis: Long = DEFAULT_ASSISTANT_PRESENTATION_INTERVAL_MILLIS, )</ID>
-    <ID>LongParameterList:LlamaCppLocalLlmEngine.kt$LlamaNativeBridge$( modelPath: String, contextTokens: Int, temperature: Float, topP: Float, topK: Int, minP: Float, repeatPenalty: Float, gpuLayerCount: Int, )</ID>
-    <ID>LongParameterList:ModelCatalogController.kt$ModelCatalogController$( private val catalog: ModelCatalog, private val appFilesRoot: File, private val downloader: ModelDownloader = ModelFileDownloader(appFilesRoot), private val resolver: ModelResolver = ModelResolver(appFilesRoot), private val selectionStore: ModelSelectionStore = InMemoryModelSelectionStore(), private val downloadGateway: ModelDownloadCommandGateway? = null, private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default), )</ID>
-    <ID>LoopWithTooManyJumpStatements:MarkdownText.kt$while</ID>
-    <ID>LoopWithTooManyJumpStatements:ModelFileDownloader.kt$ModelFileDownloader$while</ID>
-    <ID>MaxLineLength:ArarAiApp.kt$text = "Benchmark is a troubleshooting tool for the selected model. It does not compare models or keep history."</ID>
-    <ID>MaxLineLength:BenchmarkViewModel.kt$BenchmarkViewModel.Companion$"Write one concise paragraph explaining why on-device AI performance should be benchmarked with stable parameters."</ID>
-    <ID>MaxLineLength:ChatImageImporter.kt$private</ID>
-    <ID>MaxLineLength:ChatMediaRepositoryTest.kt$ChatMediaRepositoryTest$private fun repository(): FileChatMediaRepository</ID>
-    <ID>MaxLineLength:ChatMediaServices.kt$internal</ID>
-    <ID>MaxLineLength:ChatSessionComponents.kt$"This permanently deletes ${if (sessionCount == 1) "the current session" else "all $sessionCount sessions"} and their messages. A new empty session will be created."</ID>
-    <ID>MaxLineLength:ChatSessionStore.kt$InMemoryChatSessionStore$override fun ensureSession(): ChatSession</ID>
-    <ID>MaxLineLength:ChatSessionStore.kt$InMemoryChatSessionStore$override fun listSessions(): List&lt;ChatSession&gt;</ID>
-    <ID>MaxLineLength:ChatSessionStore.kt$SqliteChatSessionStore$private</ID>
-    <ID>MaxLineLength:ChatSessionStoreTest.kt$ChatSessionStoreTest$private</ID>
-    <ID>MaxLineLength:ChatTextToSpeech.kt$AndroidChatTextToSpeechService$Log.d(LOG_TAG, "Selected TTS voice ${voice.name} (${voice.locale.toLanguageTag()}) for $languageTag")</ID>
-    <ID>MaxLineLength:ChatViewModel.kt$ChatViewModel$imageAttachments = if (state.model.inputCapabilities.image) it.imageAttachments else emptyList()</ID>
-    <ID>MaxLineLength:ChatViewModel.kt$ChatViewModel$private</ID>
-    <ID>MaxLineLength:ChatViewModel.kt$ChatViewModel$private fun List&lt;ChatSession&gt;.toUiState(): List&lt;ChatSessionUiState&gt;</ID>
-    <ID>MaxLineLength:ChatViewModel.kt$ChatViewModel$reasoningEnabled = current.reasoningEnabled &amp;&amp; modelForRequest.reasoningCapabilities.request</ID>
-    <ID>MaxLineLength:ChatViewModelTest.kt$ChatViewModelTest$assertEquals(listOf(ImageAttachment("file:///tmp/image.png", "image/png", "image.png")), content.imageAttachments)</ID>
-    <ID>MaxLineLength:ChatViewModelTest.kt$ChatViewModelTest.LoadFailingEngine$override fun generate(request: PromptRequest): Flow&lt;GenerationEvent&gt;</ID>
-    <ID>MaxLineLength:LiteRtLmLocalLlmEngine.kt$private</ID>
-    <ID>MaxLineLength:MarkdownText.kt$.</ID>
-    <ID>MaxLineLength:MarkdownText.kt$private</ID>
-    <ID>MaxLineLength:MarkdownText.kt$while</ID>
-    <ID>MaxLineLength:ModelCatalogController.kt$ModelCatalogController$private</ID>
-    <ID>MaxLineLength:ModelCatalogControllerTest.kt$SuspendedDownloader$)</ID>
-    <ID>MaxLineLength:ModelConfigParserTest.kt$ModelConfigParserTest$validRawConfig().replace("model.relativePath=models/smollm2-135m-q4.gguf", "model.relativePath=models/other.gguf")</ID>
-    <ID>MaxLineLength:ModelFileDownloader.kt$ModelFileDownloader$throw ModelDownloadException("All configured download URLs failed for ${config.id}: ${failures.joinToString("; ")}")</ID>
-    <ID>MaxLineLength:ModelFileDownloaderTest.kt$RangeModelByteSource$ModelByteResponse(ByteArrayInputStream(bytes.copyOfRange(requestedOffset.toInt(), bytes.size)), requestedOffset)</ID>
-    <ID>MaxLineLength:ModelStartupController.kt$ModelStartupController$is ModelResolutionState.Available -&gt; ModelStartupState.Available(resolution.model, config.inference)</ID>
-    <ID>MaxLineLength:ThemePreferenceStore.kt$SharedPreferencesThemePreferenceStore.Companion$fun decodeThemeMode(value: String?): ThemeMode</ID>
-    <ID>NestedBlockDepth:ChatTextToSpeech.kt$AndroidChatTextToSpeechService$private fun configureVoice(languageTag: String?): Boolean</ID>
-    <ID>NestedBlockDepth:MarkdownText.kt$internal fun parseMarkdownBlocks(source: String): List&lt;MarkdownBlock&gt;</ID>
-    <ID>ReturnCount:ChatMediaRepository.kt$FileChatMediaRepository$private fun ownedFile(uri: String): File?</ID>
-    <ID>ReturnCount:ChatTextToSpeech.kt$AndroidChatTextToSpeechService$private fun configureVoice(languageTag: String?): Boolean</ID>
-    <ID>ReturnCount:ChatTextToSpeech.kt$AndroidChatTextToSpeechService$private fun onInitialized(status: Int)</ID>
-    <ID>ReturnCount:ChatTextToSpeech.kt$AndroidChatTextToSpeechService$private fun speakPending()</ID>
-    <ID>ReturnCount:ChatViewModel.kt$ChatViewModel$fun submitPrompt()</ID>
-    <ID>ReturnCount:LlamaCppLocalLlmEngine.kt$LlamaCppLocalLlmEngine$private fun loadedState(): LoadedState?</ID>
-    <ID>ReturnCount:MarkdownText.kt$private fun displayMath(lines: List&lt;String&gt;, start: Int): ParsedDisplayMath?</ID>
-    <ID>ReturnCount:MarkdownText.kt$private fun isDollarMath(latex: String): Boolean</ID>
-    <ID>ReturnCount:ModelDownloadService.kt$ModelDownloadService$private fun progressPercent(state: ModelStartupState.Downloading): Int</ID>
-    <ID>ReturnCount:ModelFileIntegrity.kt$ModelFileIntegrity$fun validate( file: File, config: ModelConfig, ): ModelFileValidation</ID>
-    <ID>ReturnCount:ModelResolver.kt$ModelResolver$fun resolve(config: ModelConfig): ModelResolutionState</ID>
-    <ID>TooGenericExceptionCaught:BenchmarkViewModel.kt$BenchmarkViewModel$error: Throwable</ID>
-    <ID>TooGenericExceptionCaught:ChatImageImporter.kt$ChatImageImporter$error: Throwable</ID>
-    <ID>TooGenericExceptionCaught:ChatInputComponents.kt$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:ChatInputComponents.kt$error: Throwable</ID>
-    <ID>TooGenericExceptionCaught:ChatMediaServices.kt$AndroidChatAudioPlayer$error: Throwable</ID>
-    <ID>TooGenericExceptionCaught:ChatMessageMediaComponents.kt$error: Throwable</ID>
-    <ID>TooGenericExceptionCaught:ChatViewModel.kt$ChatViewModel$error: Throwable</ID>
-    <ID>TooGenericExceptionCaught:LiteRtLmLocalLlmEngine.kt$AndroidLiteRtLmBridge$error: Throwable</ID>
-    <ID>TooGenericExceptionCaught:LiteRtLmLocalLlmEngine.kt$AndroidLiteRtLmSession$error: Throwable</ID>
-    <ID>TooGenericExceptionCaught:LiteRtLmLocalLlmEngine.kt$LiteRtLmLocalLlmEngine$error: Throwable</ID>
-    <ID>TooGenericExceptionCaught:LlamaCppLocalLlmEngine.kt$LlamaCppLocalLlmEngine$error: Throwable</ID>
-    <ID>TooGenericExceptionCaught:ModelFileDownloader.kt$ModelFileDownloader$error: Exception</ID>
-    <ID>TooManyFunctions:ArarAiApp.kt$com.jesjobom.ararai.ui.ArarAiApp.kt</ID>
-    <ID>TooManyFunctions:ChatSessionStore.kt$ChatSessionStore</ID>
-    <ID>TooManyFunctions:ChatSessionStore.kt$InMemoryChatSessionStore : ChatSessionStore</ID>
-    <ID>TooManyFunctions:ChatSessionStore.kt$SqliteChatSessionStore : SQLiteOpenHelperChatSessionStore</ID>
-    <ID>TooManyFunctions:ChatViewModel.kt$ChatViewModel</ID>
-    <ID>TooManyFunctions:MarkdownText.kt$com.jesjobom.ararai.ui.MarkdownText.kt</ID>
-    <ID>TooManyFunctions:ModelCatalogController.kt$ModelCatalogController : ModelDownloadServiceController</ID>
-    <ID>TooManyFunctions:ModelDownloadService.kt$ModelDownloadService : Service</ID>
+    <ID>CyclomaticComplexMethod:BenchmarkViewModel.kt:BenchmarkViewModel$fun runBenchmark</ID>
+    <ID>CyclomaticComplexMethod:ChatImageImporter.kt:ChatImageImporter$override fun import: ImportedChatImage</ID>
+    <ID>CyclomaticComplexMethod:ChatInputComponents.kt:@Composable internal fun ChatInputBar</ID>
+    <ID>CyclomaticComplexMethod:ChatMessageMediaComponents.kt:@Composable internal fun AudioPlaybackRow</ID>
+    <ID>CyclomaticComplexMethod:ChatScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable internal fun ChatScreen</ID>
+    <ID>CyclomaticComplexMethod:MarkdownText.kt:internal fun parseInlineMath: List&lt;MathInlineSegment&gt;</ID>
+    <ID>CyclomaticComplexMethod:MarkdownText.kt:internal fun parseMarkdownBlocks: List&lt;MarkdownBlock&gt;</ID>
+    <ID>CyclomaticComplexMethod:ModelFileDownloader.kt:ModelFileDownloader$override suspend fun download: ModelResolutionState.Available</ID>
+    <ID>LargeClass:ChatViewModel.kt:ChatViewModel</ID>
+    <ID>LargeClass:ChatViewModelTest.kt:ChatViewModelTest</ID>
+    <ID>LongMethod:BenchmarkViewModel.kt:BenchmarkViewModel$fun runBenchmark</ID>
+    <ID>LongMethod:BenchmarkViewModelTest.kt:BenchmarkViewModelTest$@Test fun `runs benchmark and records stable metrics`</ID>
+    <ID>LongMethod:ChatInputComponents.kt:@Composable internal fun AudioRecorderDialog</ID>
+    <ID>LongMethod:ChatInputComponents.kt:@Composable internal fun ChatInputBar</ID>
+    <ID>LongMethod:ChatScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable internal fun ChatScreen</ID>
+    <ID>LongMethod:ChatSessionStoreTest.kt:ChatSessionStoreTest$private fun createVersionTwoDatabase</ID>
+    <ID>LongMethod:ChatViewModel.kt:ChatViewModel$fun onModelStartupState</ID>
+    <ID>LongMethod:LiteRtLmLocalLlmEngine.kt:AndroidLiteRtLmSession$override fun generate: Flow&lt;LiteRtLmChunk&gt;</ID>
+    <ID>LongMethod:MarkdownText.kt:@Composable internal fun MarkdownText</ID>
+    <ID>LongMethod:MarkdownText.kt:internal fun parseMarkdownBlocks: List&lt;MarkdownBlock&gt;</ID>
+    <ID>LongMethod:ModelFileDownloader.kt:ModelFileDownloader$override suspend fun download: ModelResolutionState.Available</ID>
+    <ID>LoopWithTooManyJumpStatements:MarkdownText.kt:while</ID>
+    <ID>LoopWithTooManyJumpStatements:ModelFileDownloader.kt:ModelFileDownloader$while</ID>
+    <ID>MaxLineLength:ArarAiApp.kt:text = "Benchmark is a troubleshooting tool for the selected model. It does not compare models or keep history."</ID>
+    <ID>MaxLineLength:ChatImageImporter.kt:private</ID>
+    <ID>MaxLineLength:ChatMediaRepositoryTest.kt:ChatMediaRepositoryTest$private fun repository: FileChatMediaRepository</ID>
+    <ID>MaxLineLength:ChatMediaServices.kt:internal</ID>
+    <ID>MaxLineLength:ChatSessionComponents.kt:"This permanently deletes ${if (sessionCount == 1) "the current session" else "all $sessionCount sessions"} and their messages. A new empty session will be created."</ID>
+    <ID>MaxLineLength:ChatSessionStore.kt:InMemoryChatSessionStore$override fun ensureSession: ChatSession</ID>
+    <ID>MaxLineLength:ChatSessionStore.kt:InMemoryChatSessionStore$override fun listSessions: List&lt;ChatSession&gt;</ID>
+    <ID>MaxLineLength:ChatSessionStore.kt:SqliteChatSessionStore$private</ID>
+    <ID>MaxLineLength:ChatSessionStoreTest.kt:ChatSessionStoreTest$private</ID>
+    <ID>MaxLineLength:ChatTextToSpeech.kt:AndroidChatTextToSpeechService$Log.d(LOG_TAG, "Selected TTS voice ${voice.name} (${voice.locale.toLanguageTag()}) for $languageTag")</ID>
+    <ID>MaxLineLength:ChatViewModel.kt:ChatViewModel$imageAttachments = if (state.model.inputCapabilities.image) it.imageAttachments else emptyList()</ID>
+    <ID>MaxLineLength:ChatViewModel.kt:ChatViewModel$private fun List&lt;ChatSession&gt;.toUiState: List&lt;ChatSessionUiState&gt;</ID>
+    <ID>MaxLineLength:ChatViewModel.kt:ChatViewModel$reasoningEnabled = current.reasoningEnabled &amp;&amp; modelForRequest.reasoningCapabilities.request</ID>
+    <ID>MaxLineLength:ChatViewModelTest.kt:ChatViewModelTest$assertEquals(listOf(ImageAttachment("file:///tmp/image.png", "image/png", "image.png")), content.imageAttachments)</ID>
+    <ID>MaxLineLength:ChatViewModelTest.kt:ChatViewModelTest.LoadFailingEngine$override fun generate: Flow&lt;GenerationEvent&gt;</ID>
+    <ID>MaxLineLength:MarkdownText.kt:.</ID>
+    <ID>MaxLineLength:MarkdownText.kt:private</ID>
+    <ID>MaxLineLength:MarkdownText.kt:while</ID>
+    <ID>MaxLineLength:ModelCatalogController.kt:ModelCatalogController$private</ID>
+    <ID>MaxLineLength:ModelCatalogControllerTest.kt:SuspendedDownloader$)</ID>
+    <ID>MaxLineLength:ModelFileDownloader.kt:ModelFileDownloader$throw ModelDownloadException("All configured download URLs failed for ${config.id}: ${failures.joinToString("; ")}")</ID>
+    <ID>MaxLineLength:ModelFileDownloaderTest.kt:RangeModelByteSource$ModelByteResponse(ByteArrayInputStream(bytes.copyOfRange(requestedOffset.toInt(), bytes.size)), requestedOffset)</ID>
+    <ID>MaxLineLength:ThemePreferenceStore.kt:SharedPreferencesThemePreferenceStore.Companion$fun decodeThemeMode: ThemeMode</ID>
+    <ID>ReturnCount:ChatMediaRepository.kt:FileChatMediaRepository$private fun ownedFile: File?</ID>
+    <ID>ReturnCount:ChatTextToSpeech.kt:AndroidChatTextToSpeechService$private fun configureVoice: Boolean</ID>
+    <ID>ReturnCount:ChatTextToSpeech.kt:AndroidChatTextToSpeechService$private fun onInitialized</ID>
+    <ID>ReturnCount:ChatTextToSpeech.kt:AndroidChatTextToSpeechService$private fun speakPending</ID>
+    <ID>ReturnCount:ChatViewModel.kt:ChatViewModel$fun submitPrompt</ID>
+    <ID>ReturnCount:MarkdownText.kt:private fun displayMath: ParsedDisplayMath?</ID>
+    <ID>ReturnCount:MarkdownText.kt:private fun isDollarMath: Boolean</ID>
+    <ID>ReturnCount:ModelDownloadService.kt:ModelDownloadService$private fun progressPercent: Int</ID>
+    <ID>ReturnCount:ModelFileIntegrity.kt:ModelFileIntegrity$fun validate: ModelFileValidation</ID>
+    <ID>ReturnCount:ModelResolver.kt:ModelResolver$fun resolve: ModelResolutionState</ID>
+    <ID>ThrowsCount:AudioTranscriber.kt:AndroidOnDeviceAudioTranscriber$override suspend fun transcribe: AudioTranscriptionResult</ID>
+    <ID>ThrowsCount:WhisperCppAudioTranscriber.kt:WhisperCppAudioTranscriber$@Suppress("TooGenericExceptionCaught") // JNI/runtime failures are normalized at the transcriber boundary. override suspend fun transcribe: AudioTranscriptionResult</ID>
+    <ID>TooGenericExceptionCaught:BenchmarkViewModel.kt:BenchmarkViewModel$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ChatImageImporter.kt:ChatImageImporter$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ChatInputComponents.kt:error: Exception</ID>
+    <ID>TooGenericExceptionCaught:ChatInputComponents.kt:error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ChatMediaServices.kt:AndroidChatAudioPlayer$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ChatMessageMediaComponents.kt:error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ChatViewModel.kt:ChatViewModel$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:LiteRtLmLocalLlmEngine.kt:AndroidLiteRtLmBridge$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:LiteRtLmLocalLlmEngine.kt:AndroidLiteRtLmSession$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:LiteRtLmLocalLlmEngine.kt:LiteRtLmLocalLlmEngine$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ModelFileDownloader.kt:ModelFileDownloader$error: Exception</ID>
+    <ID>TooManyFunctions:ArarAiApp.kt:com.jesjobom.ararai.ui.ArarAiApp.kt</ID>
+    <ID>TooManyFunctions:ChatSessionStore.kt:ChatSessionStore</ID>
+    <ID>TooManyFunctions:ChatSessionStore.kt:InMemoryChatSessionStore : ChatSessionStore</ID>
+    <ID>TooManyFunctions:ChatSessionStore.kt:SqliteChatSessionStore : SQLiteOpenHelperChatSessionStore</ID>
+    <ID>TooManyFunctions:ChatViewModel.kt:ChatViewModel</ID>
+    <ID>TooManyFunctions:MarkdownText.kt:com.jesjobom.ararai.ui.MarkdownText.kt</ID>
+    <ID>TooManyFunctions:ModelCatalogController.kt:ModelCatalogController : ModelDownloadServiceController</ID>
+    <ID>TooManyFunctions:ModelDownloadService.kt:ModelDownloadService : Service</ID>
   </CurrentIssues>
 </SmellBaseline>

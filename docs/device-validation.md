@@ -30,9 +30,6 @@ downloading a production model.
 ## LiteRT-LM
 
 - Download and integrity-check each candidate LiteRT-LM model used by the release.
-- For a quick provider check, open **Instructions and tools**, select the
-  **Tools** tab, and run the Wikipedia smoke test. It calls the provider
-  directly with a fixed query and does not load or prompt the model.
 - Validate model-driven tool selection through normal Chat and Voice Chat.
   Confirm English-first search, fallback to the question language, controlled
   failure, the three-call ceiling, and absence of visible protocol content.

@@ -11,8 +11,6 @@
 package com.jesjobom.ararai.voice
 
 import android.util.Log
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.jesjobom.ararai.chat.AssistantCompletionStatus
 import com.jesjobom.ararai.chat.AudioTranscriber
 import com.jesjobom.ararai.chat.AudioTranscriptionStatus
@@ -29,7 +27,6 @@ import com.jesjobom.ararai.chat.InMemoryChatSessionStore
 import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.chat.NoOpChatMediaRepository
 import com.jesjobom.ararai.chat.UnavailableAudioTranscriber
-import com.jesjobom.ararai.chat.mediaUris
 import com.jesjobom.ararai.engine.GenerationEvent
 import com.jesjobom.ararai.engine.GenerationMetrics
 import com.jesjobom.ararai.engine.LocalLlmEngine
@@ -38,13 +35,19 @@ import com.jesjobom.ararai.engine.PromptRequest
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelStartupState
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal class VoiceChatViewModel(
     private val engine: LocalLlmEngine,
@@ -66,7 +69,11 @@ internal class VoiceChatViewModel(
             sessionStore = sessionStore,
             contextProjector = ConversationContextProjector(systemPrompt),
         ),
-) : ViewModel() {
+    private val persistenceDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+    scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
+) {
+    private val lifecycleJob = SupervisorJob()
+    private val scope = CoroutineScope(scope.coroutineContext + lifecycleJob)
     private val mutableState = MutableStateFlow(VoiceChatUiState(settings = preferences.settings.value))
     val state: StateFlow<VoiceChatUiState> = mutableState.asStateFlow()
     private var model: LocalModel? = null
@@ -82,11 +89,13 @@ internal class VoiceChatViewModel(
     private var firstSpeechAt: Long? = null
     private var currentCapture: CapturedVoiceTurn? = null
     private var currentSessionId: String? = null
+    private val sessionMutationPending = AtomicBoolean(false)
+    private val closed = AtomicBoolean(false)
     private var segmenter = VoiceResponseSegmenter(preferences.settings.value.minimumWords)
     private val speechQueue = speechQueueFactory(::onSpeechStarted, ::onSpeechRange, ::onSpeechComplete, ::fail)
 
     init {
-        viewModelScope.launch {
+        scope.launch {
             preferences.settings.collect { settings -> mutableState.update { it.copy(settings = settings) } }
         }
     }
@@ -125,15 +134,15 @@ internal class VoiceChatViewModel(
 
     fun onEnteringVoiceChat() {
         if (modelLoadJob?.isActive == true) return
-        val session = sessionStore.createSession("New chat")
-        conversationSelection.select(session.id)
-        currentSessionId = session.id
-        refreshSessions(session.id)
-        val activeModel = model ?: return
-        val activeInference = inference?.let { generationConfigProvider(activeModel, it) } ?: return
-        if (!activeModel.inputCapabilities.audio && !audioTranscriber.isAvailable) return
-        mutableState.update { it.copy(isLoadingModel = true, isModelLoaded = false, error = null) }
-        modelLoadJob = viewModelScope.launch {
+        modelLoadJob = scope.launch(persistenceDispatcher) {
+            val session = sessionStore.createSession("New chat")
+            conversationSelection.select(session.id)
+            currentSessionId = session.id
+            refreshSessions(session.id)
+            val activeModel = model ?: return@launch
+            val activeInference = inference?.let { generationConfigProvider(activeModel, it) } ?: return@launch
+            if (!activeModel.inputCapabilities.audio && !audioTranscriber.isAvailable) return@launch
+            mutableState.update { it.copy(isLoadingModel = true, isModelLoaded = false, error = null) }
             try {
                 val loadStartedAt = System.nanoTime()
                 engine.load(activeModel, activeInference)
@@ -169,12 +178,22 @@ internal class VoiceChatViewModel(
     fun updateSettings(settings: VoiceChatSettings) = preferences.update(settings)
 
     fun createSession() {
+        runSessionMutation(::createSessionAfterPersistenceDispatch)
+    }
+
+    private fun createSessionAfterPersistenceDispatch() {
         if (state.value.isActive || state.value.isLoadingModel) return
         val session = sessionStore.createSession("New chat")
-        selectSession(session.id)
+        currentSessionId = session.id
+        conversationSelection.select(session.id)
+        refreshSessions(session.id)
     }
 
     fun selectSession(sessionId: String) {
+        runSessionMutation { selectSessionAfterPersistenceDispatch(sessionId) }
+    }
+
+    private fun selectSessionAfterPersistenceDispatch(sessionId: String) {
         if (state.value.isActive || state.value.isLoadingModel) return
         if (sessionStore.listSessions().none { it.id == sessionId }) return
         currentSessionId = sessionId
@@ -183,6 +202,10 @@ internal class VoiceChatViewModel(
     }
 
     fun renameSession(sessionId: String, title: String) {
+        runSessionMutation { renameSessionAfterPersistenceDispatch(sessionId, title) }
+    }
+
+    private fun renameSessionAfterPersistenceDispatch(sessionId: String, title: String) {
         if (state.value.isActive || state.value.isLoadingModel) return
         if (sessionStore.listSessions().none { it.id == sessionId }) return
         sessionStore.renameSession(sessionId, title)
@@ -190,8 +213,12 @@ internal class VoiceChatViewModel(
     }
 
     fun deleteSession(sessionId: String) {
+        runSessionMutation { deleteSessionAfterPersistenceDispatch(sessionId) }
+    }
+
+    private fun deleteSessionAfterPersistenceDispatch(sessionId: String) {
         if (state.value.isActive || state.value.isLoadingModel || state.value.sessions.size <= 1) return
-        val deletedMedia = sessionStore.getMessages(sessionId).flatMapTo(linkedSetOf()) { it.content.mediaUris() }
+        val deletedMedia = sessionStore.mediaUrisForSession(sessionId)
         sessionStore.deleteSession(sessionId)
         conversationSelection.clear(sessionId)
         mediaRepository.deleteUnreferenced(deletedMedia, sessionStore.referencedMediaUris())
@@ -206,6 +233,10 @@ internal class VoiceChatViewModel(
     }
 
     fun clearAllSessions() {
+        runSessionMutation(::clearAllSessionsAfterPersistenceDispatch)
+    }
+
+    private fun clearAllSessionsAfterPersistenceDispatch() {
         if (state.value.isActive || state.value.isLoadingModel) return
         val deletedMedia = sessionStore.referencedMediaUris()
         sessionStore.clearSessions()
@@ -214,6 +245,17 @@ internal class VoiceChatViewModel(
         currentSessionId = replacement.id
         conversationSelection.select(replacement.id)
         refreshSessions(replacement.id)
+    }
+
+    private fun runSessionMutation(block: () -> Unit) {
+        if (!sessionMutationPending.compareAndSet(false, true)) return
+        scope.launch(persistenceDispatcher) {
+            try {
+                block()
+            } finally {
+                sessionMutationPending.set(false)
+            }
+        }
     }
 
     fun start() {
@@ -237,8 +279,8 @@ internal class VoiceChatViewModel(
         capture?.close()
         capture = captureFactory(preferences.settings.value).also { newCapture ->
             newCapture.start(
-                onTurn = { turn -> viewModelScope.launch { processTurn(activeRun, turn) } },
-                onError = { message -> viewModelScope.launch { fail(message) } },
+                onTurn = { turn -> scope.launch { processTurn(activeRun, turn) } },
+                onError = { message -> scope.launch { fail(message) } },
             )
         }
         mutableState.update { it.copy(phase = VoiceChatPhase.Listening, error = null) }
@@ -274,7 +316,7 @@ internal class VoiceChatViewModel(
             inference?.let { generationConfigProvider(activeModel, it) }
                 ?: return fail("Inference configuration unavailable")
         val sessionId = currentSessionId ?: return fail("Conversation unavailable")
-        generationJob = viewModelScope.launch {
+        generationJob = scope.launch(persistenceDispatcher) {
             try {
                 val persistentPrompt = persistAudio(captured)
                 val initialContent =
@@ -293,7 +335,7 @@ internal class VoiceChatViewModel(
                 val effectiveContent =
                     if (activeModel.inputCapabilities.audio) {
                         if (audioTranscriber.isAvailable) {
-                            viewModelScope.launch {
+                            scope.launch {
                                 transcribeAndPersist(sessionId, userMessage.id, initialContent)
                             }
                         }
@@ -417,12 +459,15 @@ internal class VoiceChatViewModel(
         }
     }
 
-    private fun persistAudio(captured: CapturedVoiceTurn) = runCatching {
+    private fun persistAudio(captured: CapturedVoiceTurn): com.jesjobom.ararai.chat.AudioPrompt {
         val destination = mediaRepository.createDraftFile(prefix = "voice_", suffix = ".wav")
-        File(captured.prompt.uri).copyTo(destination, overwrite = true)
-        captured.prompt.copy(uri = destination.absolutePath, byteSize = destination.length())
-    }.getOrElse {
-        captured.prompt
+        return try {
+            File(captured.prompt.uri).copyTo(destination, overwrite = true)
+            captured.prompt.copy(uri = destination.absolutePath, byteSize = destination.length())
+        } catch (error: Throwable) {
+            destination.delete()
+            throw error
+        }
     }
 
     private suspend fun transcribeAndPersist(
@@ -574,9 +619,11 @@ internal class VoiceChatViewModel(
         currentAudio = null
     }
 
-    public override fun onCleared() {
+    fun close() {
+        if (!closed.compareAndSet(false, true)) return
         stop()
         speechQueue.close()
+        scope.cancel()
     }
 
     private fun Long.elapsedMillis(): Long = (System.nanoTime() - this) / 1_000_000

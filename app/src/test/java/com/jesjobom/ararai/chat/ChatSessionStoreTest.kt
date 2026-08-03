@@ -122,6 +122,62 @@ class ChatSessionStoreTest {
     }
 
     @Test
+    fun `in memory and sqlite stores return bounded recent messages in chronological order`() {
+        val sqlite = store()
+        val memory = InMemoryChatSessionStore()
+
+        listOf<ChatSessionStore>(sqlite, memory).forEach { candidate ->
+            val session = candidate.createSession("Long history")
+            repeat(8) { index -> candidate.appendMessage(session.id, ChatRole.User, "message-$index") }
+
+            assertEquals(8, candidate.countMessages(session.id))
+            assertEquals(
+                listOf("message-5", "message-6", "message-7"),
+                candidate.getRecentMessages(session.id, 3).map(StoredChatMessage::text),
+            )
+            assertTrue(candidate.getRecentMessages("missing-session", 3).isEmpty())
+            assertEquals(0, candidate.countMessages("missing-session"))
+            assertThrows(IllegalArgumentException::class.java) {
+                candidate.getRecentMessages(session.id, 0)
+            }
+        }
+    }
+
+    @Test
+    fun `session media lookup returns only distinct references owned by that session`() {
+        val sqlite = store()
+        val memory = InMemoryChatSessionStore()
+
+        listOf<ChatSessionStore>(sqlite, memory).forEach { candidate ->
+            val first = candidate.createSession("First")
+            val second = candidate.createSession("Second")
+            candidate.appendMessage(
+                first.id,
+                ChatRole.User,
+                MessageContent.TextPrompt(
+                    "first",
+                    listOf(
+                        ImageAttachment("file:///shared.jpg", "image/jpeg"),
+                        ImageAttachment("file:///first.jpg", "image/jpeg"),
+                    ),
+                ),
+            )
+            candidate.appendMessage(
+                second.id,
+                ChatRole.User,
+                MessageContent.AudioPromptContent(AudioPrompt("file:///shared.jpg", "audio/wav")),
+            )
+
+            assertEquals(
+                setOf("file:///shared.jpg", "file:///first.jpg"),
+                candidate.mediaUrisForSession(first.id),
+            )
+            assertEquals(setOf("file:///shared.jpg"), candidate.mediaUrisForSession(second.id))
+            assertTrue(candidate.mediaUrisForSession("missing-session").isEmpty())
+        }
+    }
+
+    @Test
     fun `sqlite reference lookup does not decode complete message payloads`() {
         val store = store()
         repeat(12) { index ->

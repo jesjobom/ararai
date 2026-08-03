@@ -4,7 +4,9 @@
 
 - JVM/Robolectric (`app/src/test`): model catalog/download/integrity, Chat state
   and persistence, prompt construction, engine orchestration, streaming durability,
-  media ownership/import limits, LiteRT ownership, and backup policy.
+  bounded history paging, persistence dispatch, media ownership/import limits,
+  Voice Chat media-copy failure, controller lifecycle cancellation, LiteRT
+  ownership/reuse policy, and backup policy.
 - Android instrumentation (`app/src/androidTest`): runtime permission/backup
   manifest configuration, real `ContentResolver` image import, MainActivity
   stop/resume, and platform text-to-speech boundaries.
@@ -19,7 +21,7 @@
 `scripts/quality-gate.sh` is the local and CI entry point. It runs:
 
 1. `spotlessCheck` with Spotless 7.2.1 and ktlint 1.7.1
-2. `detekt` 1.23.8 with the reviewed baseline in `config/detekt/baseline.xml`
+2. Detekt 2.0.0-alpha.5 with the reviewed baseline in `config/detekt/baseline.xml`
 3. `testDebugUnitTest`
 4. `lintDebug`
 5. `assembleDebug`
@@ -37,6 +39,10 @@ local formatting action. Detekt builds on its pinned default rules plus
 only: new findings fail the gate, and resolved entries should be removed by
 regenerating and reviewing `./gradlew detektBaseline` rather than hand-waving
 new code into the file.
+
+Gradle-resolved artifacts are locked and SHA-256 verified. Follow
+`docs/dependency-updates.md` whenever a dependency, plugin, or wrapper version
+changes; normal quality-gate runs use strict verification metadata.
 
 ## Reproducible CI caches
 

@@ -17,6 +17,9 @@ data class ChatUiState(
     val sessions: List<ChatSessionUiState> = emptyList(),
     val selectedSessionId: String? = null,
     val messages: List<ChatMessage> = emptyList(),
+    val hasOlderMessages: Boolean = false,
+    val isLoadingOlderMessages: Boolean = false,
+    val isPersistenceBusy: Boolean = false,
     val messageDisplayRevision: Long = 0L,
     val completedAssistantMessageId: String? = null,
     val isLoadingModel: Boolean = false,
@@ -33,7 +36,8 @@ data class ChatUiState(
                 selectedSessionId != null &&
                 hasSubmittableDraft &&
                 !isLoadingModel &&
-                !isGenerating
+                !isGenerating &&
+                !isPersistenceBusy
 
     val hasSubmittableDraft: Boolean
         get() =

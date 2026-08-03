@@ -74,6 +74,9 @@ configuration. Exact Gemma 4 and Whisper model support comes from
 `app/src/main/res/raw/fixed_model.properties`. Acceleration and real-model
 behavior require physical multi-turn memory, responsiveness, ANR, and thermal
 evidence.
+Resolved Gradle graphs are locked per project, downloaded artifacts are verified
+against checked-in SHA-256 metadata, and the wrapper distribution checksum is
+pinned. Intentional updates follow `docs/dependency-updates.md`.
 
 ## Architecture
 
@@ -87,12 +90,16 @@ The principal boundaries are:
 - application-scoped model download coordination is hosted by an Android
   foreground data-sync service so activity recreation does not own transfers;
 - `engine/`: runtime-neutral contracts plus the LiteRT-LM adapter;
-- `chat/`: session state, context construction, SQLite persistence, streaming
-  durability, media ownership, replaceable local audio transcription and
+- `engine/` keeps retained-resource ownership and conversation-reuse policy
+  separate from Android LiteRT SDK callbacks;
+- `chat/`: session state, bounded history presentation and context construction,
+  dispatcher-isolated SQLite persistence, streaming durability, media ownership,
+  replaceable local audio transcription and
   direct-audio/transcript routing;
 - `voice/`: contextual voice-loop coordination, PCM capture/VAD, experimental
   preprocessing and diagnostics, response segmentation, and sequential TTS;
 - `ui/`: navigation and Compose presentation, with injectable adapters around
+  a dedicated controller composition root that owns the shared local-LLM runtime,
   image import, audio recording/playback, response language identification,
   native text-to-speech, decoding, and draft cleanup;
 - `benchmark/`: diagnostic state and inference measurement.
