@@ -524,28 +524,6 @@ private fun <T> SettingsDropdown(
     }
 }
 
-private fun Float.asRateLabel(): String = String.format(Locale.US, "%.1fx", this)
-
-@Composable
-private fun VadProvider.displayName(): String = when (this) {
-    VadProvider.WebRtc -> "WebRTC"
-    VadProvider.Silero -> "Silero"
-}
-
-@Composable
-private fun VadMode.displayName(): String = when (this) {
-    VadMode.Normal -> stringResource(R.string.voice_vad_normal)
-    VadMode.Aggressive -> stringResource(R.string.voice_vad_aggressive)
-    VadMode.VeryAggressive -> stringResource(R.string.voice_vad_very_aggressive)
-}
-
-@Composable
-private fun VoiceCaptureSource.displayName(): String = when (this) {
-    VoiceCaptureSource.Microphone -> stringResource(R.string.voice_capture_microphone)
-    VoiceCaptureSource.VoiceRecognition -> stringResource(R.string.voice_capture_recognition)
-    VoiceCaptureSource.VoiceCommunication -> stringResource(R.string.voice_capture_communication)
-}
-
 @Composable
 private fun AudioTimingSlider(label: String, value: Int, range: IntRange, onValue: (Int) -> Unit) {
     Text(stringResource(R.string.voice_timing_millis, label, value))
@@ -559,13 +537,4 @@ private fun AudioTimingSlider(label: String, value: Int, range: IntRange, onValu
         valueRange = range.first.toFloat()..range.last.toFloat(),
         steps = (range.last - range.first) / VoiceChatSettings.AUDIO_TIMING_STEP_MILLIS - 1,
     )
-}
-
-@Composable
-private fun phaseLabel(phase: VoiceChatPhase) = when (phase) {
-    VoiceChatPhase.Idle -> stringResource(R.string.voice_phase_ready)
-    VoiceChatPhase.Listening -> stringResource(R.string.voice_phase_listening)
-    VoiceChatPhase.Processing -> stringResource(R.string.voice_phase_thinking)
-    VoiceChatPhase.Speaking -> stringResource(R.string.voice_phase_speaking)
-    VoiceChatPhase.Error -> stringResource(R.string.voice_phase_stopped)
 }

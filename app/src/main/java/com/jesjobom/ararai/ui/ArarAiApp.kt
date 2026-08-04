@@ -880,13 +880,31 @@ private fun GenerationTab(
     Text(stringResource(R.string.generation_last_turn), style = MaterialTheme.typography.titleMedium)
     val metrics = model.metrics
     if (metrics == null) {
-        Text(stringResource(R.string.generation_metrics_unavailable), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            stringResource(R.string.generation_metrics_unavailable),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     } else {
-        LabeledValue(stringResource(R.string.generation_time_first_token), stringResource(R.string.diagnostics_millis, metrics.timeToFirstTokenMillis))
+        LabeledValue(
+            stringResource(R.string.generation_time_first_token),
+            stringResource(R.string.diagnostics_millis, metrics.timeToFirstTokenMillis),
+        )
         LabeledValue(stringResource(R.string.diagnostics_prefill_tokens), metrics.prefillTokenCount.toString())
-        LabeledValue(stringResource(R.string.generation_prefill_speed), stringResource(R.string.diagnostics_tokens_per_second, String.format(Locale.US, "%.2f", metrics.prefillTokensPerSecond)))
+        LabeledValue(
+            stringResource(R.string.generation_prefill_speed),
+            stringResource(
+                R.string.diagnostics_tokens_per_second,
+                String.format(Locale.US, "%.2f", metrics.prefillTokensPerSecond),
+            ),
+        )
         LabeledValue(stringResource(R.string.diagnostics_decode_tokens), metrics.decodeTokenCount.toString())
-        LabeledValue(stringResource(R.string.generation_decode_speed), stringResource(R.string.diagnostics_tokens_per_second, String.format(Locale.US, "%.2f", metrics.decodeTokensPerSecond)))
+        LabeledValue(
+            stringResource(R.string.generation_decode_speed),
+            stringResource(
+                R.string.diagnostics_tokens_per_second,
+                String.format(Locale.US, "%.2f", metrics.decodeTokensPerSecond),
+            ),
+        )
     }
 }
 
@@ -972,7 +990,11 @@ private fun ToolsTab(
             }
         }
     }
-    Text(stringResource(R.string.tools_web_search), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    Text(
+        stringResource(R.string.tools_web_search),
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.SemiBold,
+    )
     Text(
         stringResource(R.string.tools_web_search_description),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1097,7 +1119,8 @@ private fun WebSearchProviderCard(
                         Text(
                             when {
                                 !compatible -> stringResource(R.string.tools_unavailable_model_build)
-                                preferred && provider == WebSearchProvider.Exa -> stringResource(R.string.tools_preferred_provider)
+                                preferred && provider == WebSearchProvider.Exa ->
+                                    stringResource(R.string.tools_preferred_provider)
                                 preferred -> stringResource(R.string.tools_enabled_search)
                                 enabled -> stringResource(R.string.tools_fallback_provider)
                                 else -> stringResource(R.string.tools_configured_disabled)
@@ -1403,8 +1426,14 @@ private fun BenchmarkDetailsCard(state: BenchmarkUiState) {
             LabeledValue(stringResource(R.string.diagnostics_status), state.status)
             LabeledValue(stringResource(R.string.diagnostics_runtime), state.backendLabel)
             LabeledValue(stringResource(R.string.diagnostics_prompt), state.promptLabel)
-            LabeledValue(stringResource(R.string.diagnostics_context), stringResource(R.string.diagnostics_tokens, state.contextTokens))
-            LabeledValue(stringResource(R.string.diagnostics_max_output), stringResource(R.string.diagnostics_tokens, state.maxTokens))
+            LabeledValue(
+                stringResource(R.string.diagnostics_context),
+                stringResource(R.string.diagnostics_tokens, state.contextTokens),
+            )
+            LabeledValue(
+                stringResource(R.string.diagnostics_max_output),
+                stringResource(R.string.diagnostics_tokens, state.maxTokens),
+            )
         }
     }
 }
@@ -1426,28 +1455,73 @@ private fun BenchmarkResultCard(result: BenchmarkResult) {
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            LabeledValue(stringResource(R.string.diagnostics_load), stringResource(R.string.diagnostics_millis, result.loadMillis))
-            LabeledValue(stringResource(R.string.diagnostics_first_token), result.firstTokenMillis?.let { stringResource(R.string.diagnostics_millis, it) } ?: stringResource(R.string.not_available_abbreviation))
-            LabeledValue(stringResource(R.string.diagnostics_generation), stringResource(R.string.diagnostics_millis, result.generationMillis))
-            LabeledValue(stringResource(R.string.diagnostics_total), stringResource(R.string.diagnostics_millis, result.totalMillis))
-            LabeledValue(stringResource(R.string.diagnostics_prefill_tokens), result.prefillTokens?.toString() ?: stringResource(R.string.not_available_abbreviation))
-            LabeledValue(
-                stringResource(R.string.diagnostics_prefill_throughput),
-                result.prefillTokensPerSecond?.let { stringResource(R.string.diagnostics_tokens_per_second, String.format(Locale.US, "%.2f", it)) } ?: stringResource(R.string.not_available_abbreviation),
-            )
-            LabeledValue(stringResource(R.string.diagnostics_decode_tokens), result.decodeTokens?.toString() ?: stringResource(R.string.not_available_abbreviation))
-            LabeledValue(
-                stringResource(R.string.diagnostics_decode_throughput),
-                result.decodeTokensPerSecond?.let { stringResource(R.string.diagnostics_tokens_per_second, String.format(Locale.US, "%.2f", it)) } ?: stringResource(R.string.not_available_abbreviation),
-            )
-            LabeledValue(stringResource(R.string.diagnostics_output_chars), result.generatedCharacters.toString())
-            LabeledValue(stringResource(R.string.diagnostics_stream_chunks), result.streamedChunks.toString())
-            LabeledValue(
-                label = stringResource(R.string.diagnostics_character_throughput),
-                value = stringResource(R.string.diagnostics_chars_per_second, String.format(Locale.US, "%.2f", result.charactersPerSecond)),
-            )
+            BenchmarkTimingValues(result)
+            BenchmarkTokenValues(result)
         }
     }
+}
+
+@Composable
+private fun BenchmarkTimingValues(result: BenchmarkResult) {
+    LabeledValue(
+        stringResource(R.string.diagnostics_load),
+        stringResource(R.string.diagnostics_millis, result.loadMillis),
+    )
+    LabeledValue(
+        stringResource(R.string.diagnostics_first_token),
+        result.firstTokenMillis?.let {
+            stringResource(R.string.diagnostics_millis, it)
+        } ?: stringResource(R.string.not_available_abbreviation),
+    )
+    LabeledValue(
+        stringResource(R.string.diagnostics_generation),
+        stringResource(R.string.diagnostics_millis, result.generationMillis),
+    )
+    LabeledValue(
+        stringResource(R.string.diagnostics_total),
+        stringResource(R.string.diagnostics_millis, result.totalMillis),
+    )
+}
+
+@Composable
+private fun BenchmarkTokenValues(result: BenchmarkResult) {
+    LabeledValue(
+        stringResource(R.string.diagnostics_prefill_tokens),
+        result.prefillTokens?.toString()
+            ?: stringResource(R.string.not_available_abbreviation),
+    )
+    LabeledValue(
+        stringResource(R.string.diagnostics_prefill_throughput),
+        result.prefillTokensPerSecond?.let {
+            stringResource(
+                R.string.diagnostics_tokens_per_second,
+                String.format(Locale.US, "%.2f", it),
+            )
+        } ?: stringResource(R.string.not_available_abbreviation),
+    )
+    LabeledValue(
+        stringResource(R.string.diagnostics_decode_tokens),
+        result.decodeTokens?.toString()
+            ?: stringResource(R.string.not_available_abbreviation),
+    )
+    LabeledValue(
+        stringResource(R.string.diagnostics_decode_throughput),
+        result.decodeTokensPerSecond?.let {
+            stringResource(
+                R.string.diagnostics_tokens_per_second,
+                String.format(Locale.US, "%.2f", it),
+            )
+        } ?: stringResource(R.string.not_available_abbreviation),
+    )
+    LabeledValue(stringResource(R.string.diagnostics_output_chars), result.generatedCharacters.toString())
+    LabeledValue(stringResource(R.string.diagnostics_stream_chunks), result.streamedChunks.toString())
+    LabeledValue(
+        label = stringResource(R.string.diagnostics_character_throughput),
+        value = stringResource(
+            R.string.diagnostics_chars_per_second,
+            String.format(Locale.US, "%.2f", result.charactersPerSecond),
+        ),
+    )
 }
 
 @Composable
@@ -1565,7 +1639,11 @@ private fun ModelCard(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = if (isSelected) stringResource(R.string.models_selected_status, localizedStatusTitle) else localizedStatusTitle,
+                        text = if (isSelected) {
+                            stringResource(R.string.models_selected_status, localizedStatusTitle)
+                        } else {
+                            localizedStatusTitle
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -1601,12 +1679,18 @@ private fun ModelCard(
                 ?.length()
                 ?.takeIf { it > 0L }
             LabeledValue(
-                label = if (installedBytes != null) stringResource(R.string.models_installed_size) else stringResource(R.string.models_approximate_download),
-                value = (installedBytes ?: item.config.expectedBytes)?.toStorageSize() ?: stringResource(R.string.models_unknown),
+                label = if (installedBytes != null) {
+                    stringResource(R.string.models_installed_size)
+                } else {
+                    stringResource(R.string.models_approximate_download)
+                },
+                value = (installedBytes ?: item.config.expectedBytes)?.toStorageSize()
+                    ?: stringResource(R.string.models_unknown),
             )
             LabeledValue(
                 label = stringResource(R.string.models_recommended_ram),
-                value = item.config.recommendedFreeRamBytes?.toStorageSize() ?: stringResource(R.string.models_not_specified),
+                value = item.config.recommendedFreeRamBytes?.toStorageSize()
+                    ?: stringResource(R.string.models_not_specified),
             )
 
             Text(

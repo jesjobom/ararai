@@ -32,7 +32,10 @@ class SharedPreferencesApplicationLanguagePreferenceStore(
         const val PREFERENCES_NAME = "ararai_preferences"
         const val KEY_APPLICATION_LANGUAGE = "application_language"
 
-        fun decodeLanguage(value: String?): ApplicationLanguage = ApplicationLanguage.entries.firstOrNull { it.name == value } ?: ApplicationLanguage.System
+        fun decodeLanguage(value: String?): ApplicationLanguage {
+            val decoded = ApplicationLanguage.entries.firstOrNull { it.name == value }
+            return decoded ?: ApplicationLanguage.System
+        }
 
         fun localizedContext(base: Context, language: ApplicationLanguage): Context {
             val tag = language.languageTag ?: return base

@@ -162,7 +162,10 @@ internal fun ModelStatusUiState.localizedDetail(): String = when (detailKind) {
 }
 
 @Composable
-internal fun ModelStatusUiState.localizedCapabilities(): List<String> = capabilityDescriptors.takeIf(List<*>::isNotEmpty)?.map { it.localized() } ?: capabilities
+internal fun ModelStatusUiState.localizedCapabilities(): List<String> {
+    val localized = capabilityDescriptors.takeIf(List<*>::isNotEmpty)?.map { it.localized() }
+    return localized ?: capabilities
+}
 
 @Composable
 private fun ModelCapabilityDescriptor.localized(): String = when (kind) {
@@ -181,25 +184,11 @@ private fun ModelCapabilityDescriptor.localized(): String = when (kind) {
 }
 
 private fun ModelConfig.capabilityDescriptors(): List<ModelCapabilityDescriptor> = buildList {
-    add(ModelCapabilityDescriptor(kind = if (maturity == ModelMaturity.Stable) ModelCapabilityKind.Stable else ModelCapabilityKind.Experimental))
+    add(ModelCapabilityDescriptor(kind = maturity.capabilityKind()))
     variant?.let { add(ModelCapabilityDescriptor(literal = it)) }
-    purposes.forEach { purpose ->
-        add(
-            ModelCapabilityDescriptor(
-                kind = when (purpose) {
-                    ModelPurpose.Chat -> ModelCapabilityKind.Chat
-                    ModelPurpose.Reasoning -> ModelCapabilityKind.Reasoning
-                    ModelPurpose.Utility -> ModelCapabilityKind.Utility
-                },
-            ),
-        )
-    }
+    purposes.mapTo(this) { ModelCapabilityDescriptor(kind = it.capabilityKind()) }
     tasks.forEach { task ->
-        val kind = when (task) {
-            ModelTask.Chat -> ModelCapabilityKind.Chat
-            ModelTask.Reasoning -> ModelCapabilityKind.Reasoning
-            ModelTask.Transcription -> ModelCapabilityKind.Transcription
-        }
+        val kind = task.capabilityKind()
         if (none { it.kind == kind }) add(ModelCapabilityDescriptor(kind = kind))
     }
     if (inputCapabilities.text) add(ModelCapabilityDescriptor(kind = ModelCapabilityKind.Text))
@@ -212,9 +201,36 @@ private fun ModelConfig.capabilityDescriptors(): List<ModelCapabilityDescriptor>
     }
     add(
         ModelCapabilityDescriptor(
-            kind = if (acceleration == ModelAccelerationPolicy.CpuOnly) ModelCapabilityKind.Cpu else ModelCapabilityKind.Gpu,
+            kind = acceleration.capabilityKind(),
         ),
     )
+}
+
+private fun ModelMaturity.capabilityKind(): ModelCapabilityKind = if (this == ModelMaturity.Stable) {
+    ModelCapabilityKind.Stable
+} else {
+    ModelCapabilityKind.Experimental
+}
+
+private fun ModelPurpose.capabilityKind(): ModelCapabilityKind = when (this) {
+    ModelPurpose.Chat -> ModelCapabilityKind.Chat
+    ModelPurpose.Reasoning -> ModelCapabilityKind.Reasoning
+    ModelPurpose.Utility -> ModelCapabilityKind.Utility
+}
+
+private fun ModelTask.capabilityKind(): ModelCapabilityKind = when (this) {
+    ModelTask.Chat -> ModelCapabilityKind.Chat
+    ModelTask.Reasoning -> ModelCapabilityKind.Reasoning
+    ModelTask.Transcription -> ModelCapabilityKind.Transcription
+}
+
+private fun ModelAccelerationPolicy.capabilityKind(): ModelCapabilityKind {
+    val kind = if (this == ModelAccelerationPolicy.CpuOnly) {
+        ModelCapabilityKind.Cpu
+    } else {
+        ModelCapabilityKind.Gpu
+    }
+    return kind
 }
 
 internal fun ModelConfig.capabilityLabels(): List<String> = buildList {

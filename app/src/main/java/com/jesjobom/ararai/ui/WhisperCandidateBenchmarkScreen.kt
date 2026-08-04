@@ -73,6 +73,8 @@ internal fun WhisperCandidateBenchmarkScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
+    val unknownErrorMessage = stringResource(R.string.unknown_error)
+    val saveAudioFailedMessage = stringResource(R.string.whisper_save_audio_failed)
     var capture by remember { mutableStateOf<AndroidVoiceTurnCapture?>(null) }
     var status by remember { mutableStateOf(WhisperBenchmarkStatus.Ready) }
     var statusDetail by remember { mutableStateOf<String?>(null) }
@@ -101,7 +103,7 @@ internal fun WhisperCandidateBenchmarkScreen(
                 report = buildString {
                     appendLine("outcome=failure")
                     appendLine("model_id=${item.config.id}")
-                    append("message=${error.message ?: context.getString(R.string.unknown_error)}")
+                    append("message=${error.message ?: unknownErrorMessage}")
                 }
             } finally {
                 isBusy = false
@@ -160,7 +162,7 @@ internal fun WhisperCandidateBenchmarkScreen(
                                     hasSavedSample = true
                                     executeBenchmark(sampleFile)
                                 } catch (error: IOException) {
-                                    statusDetail = error.message ?: context.getString(R.string.whisper_save_audio_failed)
+                                    statusDetail = error.message ?: saveAudioFailedMessage
                                     isBusy = false
                                     capture?.close()
                                     capture = null
