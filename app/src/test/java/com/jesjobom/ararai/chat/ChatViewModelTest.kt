@@ -14,6 +14,7 @@ import com.jesjobom.ararai.model.ModelInputCapabilities
 import com.jesjobom.ararai.model.ModelReasoningCapabilities
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.ui.UserMessageKey
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
@@ -207,9 +208,10 @@ class ChatViewModelTest {
 
     @Test
     fun `surfaces load failure and preserves submitted message`() = runTest {
+        val engine = LoadFailingEngine("load failed")
         val viewModel =
             ChatViewModel(
-                engine = LoadFailingEngine("load failed"),
+                engine = engine,
                 initialModel = model,
                 inferenceConfig = inferenceConfig,
             )
@@ -220,12 +222,15 @@ class ChatViewModelTest {
             awaitItem()
             viewModel.submitPrompt()
 
-            var loading = awaitItem()
-            while (!loading.isGenerating) loading = awaitItem()
+            engine.loadStarted.await()
+            val loading = viewModel.uiState.value
+            assertTrue(loading.isGenerating)
             assertTrue(loading.isLoadingModel)
             assertFalse(loading.canSubmit)
 
-            val failed = awaitItem()
+            engine.failLoad()
+            var failed = awaitItem()
+            while (failed.error == null) failed = awaitItem()
             assertFalse(failed.isLoadingModel)
             assertFalse(failed.isGenerating)
             assertEquals("load failed", failed.error)
@@ -1329,11 +1334,20 @@ class ChatViewModelTest {
     private class LoadFailingEngine(
         private val message: String,
     ) : LocalLlmEngine {
+        val loadStarted = CompletableDeferred<Unit>()
+        private val loadFailure = CompletableDeferred<Unit>()
+
         override suspend fun load(
             model: LocalModel,
             config: InferenceConfig,
         ) {
+            loadStarted.complete(Unit)
+            loadFailure.await()
             error(message)
+        }
+
+        fun failLoad() {
+            loadFailure.complete(Unit)
         }
 
         override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(GenerationEvent.Token("unexpected"))
