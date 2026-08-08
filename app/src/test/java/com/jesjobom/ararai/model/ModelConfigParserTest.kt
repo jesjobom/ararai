@@ -39,7 +39,7 @@ class ModelConfigParserTest {
         assertEquals(false, config.inputCapabilities.audio)
         assertEquals(false, config.reasoningCapabilities.request)
         assertEquals(false, config.reasoningCapabilities.output)
-        assertEquals(emptySet<String>(), config.knowledgeToolCapabilities.toolNames)
+        assertEquals(emptySet<String>(), config.toolCapabilities.toolNames)
         assertEquals("models/smollm2-135m-q4.gguf", config.relativePath)
         assertEquals(1234L, config.expectedBytes)
         assertEquals(4294967296L, config.recommendedFreeRamBytes)
@@ -132,7 +132,7 @@ class ModelConfigParserTest {
 
         assertEquals(
             setOf("wikipedia_search", "calendar_lookup"),
-            config.knowledgeToolCapabilities.toolNames,
+            config.toolCapabilities.toolNames,
         )
     }
 
@@ -255,8 +255,8 @@ class ModelConfigParserTest {
             assertEquals(ModelArtifactFormat.LiteRtLmBundle, model.artifactFormat)
             assertEquals("gemma-4", model.family)
             assertEquals(
-                setOf("wikipedia_search", "web_search"),
-                model.knowledgeToolCapabilities.toolNames,
+                setOf("wikipedia_search", "web_search", "calculator"),
+                model.toolCapabilities.toolNames,
             )
         }
         val candidates = catalog.models.filter { it.supportsTask(ModelTask.Transcription) }

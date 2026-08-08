@@ -311,8 +311,8 @@ internal class VoiceChatViewModel(
                 responsePreview = "",
                 spokenRange = null,
                 readingAnchor = 0,
-                researchInProgress = false,
-                activeKnowledgeToolName = null,
+                toolInProgress = false,
+                activeToolName = null,
                 researchSources = emptyList(),
                 notice = null,
                 noticeKey = null,
@@ -408,23 +408,23 @@ internal class VoiceChatViewModel(
                         }
                         is GenerationEvent.ReasoningToken -> reasoning.append(event.text)
                         is GenerationEvent.Metrics -> generationMetricsConsumer(activeModel, event.value)
-                        is GenerationEvent.KnowledgeToolStarted -> {
+                        is GenerationEvent.ToolStarted -> {
                             mutableState.update {
                                 it.copy(
-                                    researchInProgress = true,
-                                    activeKnowledgeToolName = event.displayName,
+                                    toolInProgress = true,
+                                    activeToolName = event.displayName,
                                     researchSources = answerSources,
                                 )
                             }
                         }
-                        is GenerationEvent.KnowledgeToolFinished -> {
+                        is GenerationEvent.ToolFinished -> {
                             answerSources =
                                 (answerSources + event.sources)
                                     .distinctBy { source -> source.canonicalUrl }
                             mutableState.update {
                                 it.copy(
-                                    researchInProgress = false,
-                                    activeKnowledgeToolName = null,
+                                    toolInProgress = false,
+                                    activeToolName = null,
                                     researchSources = answerSources,
                                 )
                             }
@@ -592,8 +592,8 @@ internal class VoiceChatViewModel(
                 responsePreview = "",
                 spokenRange = null,
                 readingAnchor = 0,
-                researchInProgress = false,
-                activeKnowledgeToolName = null,
+                toolInProgress = false,
+                activeToolName = null,
                 notice = null,
                 noticeKey = null,
                 error = null,
@@ -613,8 +613,8 @@ internal class VoiceChatViewModel(
         mutableState.update {
             it.copy(
                 phase = VoiceChatPhase.Error,
-                researchInProgress = false,
-                activeKnowledgeToolName = null,
+                toolInProgress = false,
+                activeToolName = null,
                 error = message,
                 errorKey = null,
             )
@@ -632,8 +632,8 @@ internal class VoiceChatViewModel(
         mutableState.update {
             it.copy(
                 phase = VoiceChatPhase.Error,
-                researchInProgress = false,
-                activeKnowledgeToolName = null,
+                toolInProgress = false,
+                activeToolName = null,
                 error = null,
                 errorKey = messageKey,
             )

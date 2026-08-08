@@ -16,7 +16,7 @@ import com.jesjobom.ararai.chat.ConversationSelection
 import com.jesjobom.ararai.chat.InstructionPreferences
 import com.jesjobom.ararai.chat.InteractionMode
 import com.jesjobom.ararai.chat.conversationTurnSettings
-import com.jesjobom.ararai.chat.eligibleKnowledgeToolNames
+import com.jesjobom.ararai.chat.eligibleToolNames
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.knowledge.WebSearchPreferences
@@ -88,7 +88,7 @@ internal fun rememberArarAiAppControllers(
                     conversationTurnSettings(
                         settings,
                         InteractionMode.Chat,
-                        eligibleKnowledgeToolNames(
+                        eligibleToolNames(
                             settings,
                             activeModel,
                             webSearchPreferences.settings.value.preferredProvider,
@@ -128,7 +128,7 @@ internal fun rememberArarAiAppControllers(
                     conversationTurnSettings(
                         settings,
                         InteractionMode.Voice,
-                        eligibleKnowledgeToolNames(
+                        eligibleToolNames(
                             settings,
                             activeModel,
                             webSearchPreferences.settings.value.preferredProvider,

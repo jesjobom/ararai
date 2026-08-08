@@ -138,6 +138,16 @@ Model downloads still require network access to their configured artifact URLs.
 Once a valid model is present, core inference and Chat do not call a hosted
 inference service.
 
+The optional **Local calculator** under **Assistant configuration → Tools** is
+disabled by default and runs entirely on-device. It is advertised only to the
+individually validated Gemma bundles. The bounded grammar supports decimal and
+scientific literals, parentheses, unary signs, `+`, `-`, `*`, `/`, `%`, bounded
+`^`, `abs`, `sqrt`, `min`, `max`, `ln`, `log10`, `sin`, `cos`, `tan`, and the
+`pi`/`e` constants; trigonometric arguments use radians. Evaluation uses
+DECIMAL128. Division may be rounded, and transcendental or fractional-power
+results are labeled approximate. Expressions and intermediate results are not
+sent over the network or persisted as conversation messages.
+
 Wikipedia is an explicit opt-in exception to otherwise local Chat processing.
 Enable it under **Assistant configuration → Tools**. A request is sent only when the
 selected installed model advertises `wikipedia_search` and the model emits that

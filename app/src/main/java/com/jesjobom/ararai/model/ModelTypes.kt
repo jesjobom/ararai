@@ -25,7 +25,7 @@ data class ModelReasoningCapabilities(
     val output: Boolean = false,
 )
 
-data class ModelKnowledgeToolCapabilities(
+data class ModelToolCapabilities(
     val toolNames: Set<String> = emptySet(),
 ) {
     fun supports(toolName: String): Boolean = toolName in toolNames
@@ -138,7 +138,7 @@ data class ModelConfig(
     val inference: InferenceConfig? = null,
     val inputCapabilities: ModelInputCapabilities = ModelInputCapabilities(),
     val reasoningCapabilities: ModelReasoningCapabilities = ModelReasoningCapabilities(),
-    val knowledgeToolCapabilities: ModelKnowledgeToolCapabilities = ModelKnowledgeToolCapabilities(),
+    val toolCapabilities: ModelToolCapabilities = ModelToolCapabilities(),
 )
 
 fun ModelConfig.supportsPurpose(purpose: ModelPurpose): Boolean = purpose in purposes
@@ -182,5 +182,5 @@ data class LocalModel(
     val acceleration: ModelAccelerationPolicy = ModelAccelerationPolicy.GpuPreferred,
     val inputCapabilities: ModelInputCapabilities = ModelInputCapabilities(),
     val reasoningCapabilities: ModelReasoningCapabilities = ModelReasoningCapabilities(),
-    val knowledgeToolCapabilities: ModelKnowledgeToolCapabilities = ModelKnowledgeToolCapabilities(),
+    val toolCapabilities: ModelToolCapabilities = ModelToolCapabilities(),
 )

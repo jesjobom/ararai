@@ -146,8 +146,11 @@ meet.
 - Implicit multiplication, variables, assignment, custom definitions, factorial,
   random, strings, booleans, comparison/logical operators, dates, durations,
   arrays, structures, regex, and arbitrary library functions are rejected.
-- Concrete numeric limits will be finalized from automated corpus measurements,
-  but they must be constants owned by the app and stricter than EvalEx defaults.
+- App-owned limits are 512 input characters, 128 lexical tokens, 16 nesting
+  levels, 80 characters per numeric literal, absolute integer exponents up to
+  1,000, three calls per user turn, and a 2-second evaluation deadline. EvalEx
+  implicit multiplication, arrays, structures, binary values, quoted strings,
+  lenient parsing, and every non-allowlisted function/operator are disabled.
 
 ## Sources and reproducible evidence
 

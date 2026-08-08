@@ -17,7 +17,7 @@ class WebSearchOpenApiToolTest {
                     ToolResult.Success("evidence", listOf(source))
                 },
             )
-        val events = mutableListOf<KnowledgeToolExecutionEvent>()
+        val events = mutableListOf<ApplicationToolExecutionEvent>()
         tool.beginTurn(events::add)
 
         val response = JsonParser.parseString(
@@ -28,8 +28,8 @@ class WebSearchOpenApiToolTest {
         assertEquals(listOf(source), tool.consumeCapturedSources())
         assertEquals(
             listOf(
-                KnowledgeToolExecutionEvent.Started,
-                KnowledgeToolExecutionEvent.Succeeded(listOf(source)),
+                ApplicationToolExecutionEvent.Started,
+                ApplicationToolExecutionEvent.Succeeded(listOf(source)),
             ),
             events,
         )

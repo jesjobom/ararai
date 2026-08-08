@@ -240,6 +240,9 @@
     <string name="instructions_voice_chat">Voice Chat instruction</string>
     <string name="instructions_restore_default">Restore default</string>
     <string name="tools_wikipedia_description">Uses Wikipedia/MediaWiki for eligible factual searches. Inference and conversation storage remain local.</string>
+    <string name="tools_local_calculator">Local calculator</string>
+    <string name="tools_local_calculator_description">Evaluates bounded arithmetic and numeric functions entirely on-device. Supports +, −, ×, ÷, %, powers, abs, sqrt, min, max, logarithms, and trigonometry in radians. Results may be rounded or approximate.</string>
+    <string name="tools_use_calculator">Use local calculator</string>
     <string name="tools_use_wikipedia">Use Wikipedia</string>
     <string name="tools_available_model">Available for the selected model.</string>
     <string name="tools_unavailable_model">Unavailable for the selected model.</string>

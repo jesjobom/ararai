@@ -77,8 +77,8 @@ internal fun ChatScreen(
             ?: stringResource(R.string.chat_title)
     val localizedError = state.errorKey?.localizedText() ?: state.error
     val modelStatusText = when {
-        state.researchInProgress ->
-            state.activeKnowledgeToolName
+        state.toolInProgress ->
+            state.activeToolName
                 ?.takeIf(String::isNotBlank)
                 ?.let { stringResource(R.string.chat_using_named_tool, it) }
                 ?: stringResource(R.string.chat_using_tool)

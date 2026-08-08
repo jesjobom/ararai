@@ -91,6 +91,29 @@ class VoiceChatViewModelTest {
     }
 
     @Test
+    fun `calculator lifecycle persists only final voice answer`() {
+        val engine = RecordingEngine(
+            flowOf(
+                GenerationEvent.ToolStarted("calculator", "Local calculator"),
+                GenerationEvent.ToolFinished("calculator"),
+                GenerationEvent.Token("The result is 42."),
+                GenerationEvent.Completed,
+            ),
+        )
+        val harness = harness(engine)
+        prepareAndStart(harness)
+        harness.captureFactory.latest!!.emitNewTurn()
+
+        waitUntil { harness.store.allMessages().any { it.role == ChatRole.Assistant } }
+
+        val assistant = harness.store.allMessages().last().content as MessageContent.TextPrompt
+        assertEquals("The result is 42.", assistant.text)
+        assertTrue(assistant.sources.isEmpty())
+        assertFalse(harness.viewModel.state.value.toolInProgress)
+        harness.viewModel.stop()
+    }
+
+    @Test
     fun `generation failure enters controlled error state and removes temporary capture`() {
         val harness = harness(RecordingEngine(flowOf(GenerationEvent.Failed("generation failed"))))
         prepareAndStart(harness)
@@ -131,7 +154,7 @@ class VoiceChatViewModelTest {
         waitUntil { engine.cancellations.get() == 1 }
         assertEquals(VoiceChatPhase.Idle, harness.viewModel.state.value.phase)
         assertFalse(temporaryCapture.exists())
-        assertFalse(harness.viewModel.state.value.researchInProgress)
+        assertFalse(harness.viewModel.state.value.toolInProgress)
     }
 
     @Test

@@ -11,6 +11,7 @@ data class InstructionSettings(
     val chatInstruction: String = InstructionDefaults.CHAT,
     val voiceInstruction: String = InstructionDefaults.VOICE,
     val wikipediaEnabled: Boolean = false,
+    val calculatorEnabled: Boolean = false,
 )
 
 object InstructionDefaults {
@@ -40,6 +41,7 @@ interface InstructionPreferences {
     fun setInstruction(mode: InteractionMode, value: String)
     fun restoreDefault(mode: InteractionMode)
     fun setWikipediaEnabled(enabled: Boolean)
+    fun setCalculatorEnabled(enabled: Boolean)
 }
 
 class InMemoryInstructionPreferences(
@@ -70,6 +72,10 @@ class InMemoryInstructionPreferences(
     override fun setWikipediaEnabled(enabled: Boolean) {
         mutableSettings.value = mutableSettings.value.copy(wikipediaEnabled = enabled)
     }
+
+    override fun setCalculatorEnabled(enabled: Boolean) {
+        mutableSettings.value = mutableSettings.value.copy(calculatorEnabled = enabled)
+    }
 }
 
 class SharedPreferencesInstructionPreferences(context: Context) : InstructionPreferences {
@@ -84,6 +90,7 @@ class SharedPreferencesInstructionPreferences(context: Context) : InstructionPre
                 preferences.getString(KEY_VOICE, InstructionDefaults.VOICE)
                     ?: InstructionDefaults.VOICE,
                 wikipediaEnabled = preferences.getBoolean(KEY_WIKIPEDIA, false),
+                calculatorEnabled = preferences.getBoolean(KEY_CALCULATOR, false),
             ),
         )
 
@@ -106,6 +113,11 @@ class SharedPreferencesInstructionPreferences(context: Context) : InstructionPre
         preferences.edit().putBoolean(KEY_WIKIPEDIA, enabled).apply()
     }
 
+    override fun setCalculatorEnabled(enabled: Boolean) {
+        delegate.setCalculatorEnabled(enabled)
+        preferences.edit().putBoolean(KEY_CALCULATOR, enabled).apply()
+    }
+
     private fun instructionFor(mode: InteractionMode): String = if (mode == InteractionMode.Chat) {
         settings.value.chatInstruction
     } else {
@@ -117,6 +129,7 @@ class SharedPreferencesInstructionPreferences(context: Context) : InstructionPre
         const val KEY_CHAT = "chat_instruction"
         const val KEY_VOICE = "voice_instruction"
         const val KEY_WIKIPEDIA = "wikipedia_enabled"
+        const val KEY_CALCULATOR = "calculator_enabled"
     }
 }
 
@@ -151,6 +164,9 @@ fun conversationTurnSettings(
             .toSortedSet()
     val toolInstruction =
         buildList {
+            if (CALCULATOR_TOOL_NAME !in normalizedTools) {
+                add(CALCULATOR_UNAVAILABLE_INSTRUCTION)
+            }
             if (WIKIPEDIA_SEARCH_TOOL_NAME in normalizedTools) {
                 add(
                     "Use wikipedia_search only for a direct, stable encyclopedic lookup, such as a person's " +
@@ -178,6 +194,12 @@ fun conversationTurnSettings(
                         "Never expose tool protocol or JSON.",
                 )
             }
+            if (CALCULATOR_TOOL_NAME in normalizedTools) {
+                add(
+                    "Use calculator for arithmetic and supported numeric functions. Pass only the expression, " +
+                        "use at most three calls, and never expose tool protocol or JSON.",
+                )
+            }
         }
             .joinToString("\n")
     return ConversationTurnSettings(
@@ -193,27 +215,35 @@ fun conversationTurnSettings(
     )
 }
 
-fun eligibleKnowledgeToolNames(
+fun eligibleToolNames(
     settings: InstructionSettings,
     model: LocalModel?,
     selectedWebProvider: WebSearchProvider? = null,
     experimentalWebSearchEnabled: Boolean = false,
 ): Set<String> = buildSet {
     if (settings.wikipediaEnabled &&
-        model?.knowledgeToolCapabilities?.supports(WIKIPEDIA_SEARCH_TOOL_NAME) == true
+        model?.toolCapabilities?.supports(WIKIPEDIA_SEARCH_TOOL_NAME) == true
     ) {
         add(WIKIPEDIA_SEARCH_TOOL_NAME)
     }
     if (selectedWebProvider != null &&
         experimentalWebSearchEnabled &&
-        model?.knowledgeToolCapabilities?.supports(WEB_SEARCH_TOOL_NAME) == true
+        model?.toolCapabilities?.supports(WEB_SEARCH_TOOL_NAME) == true
     ) {
         add(WEB_SEARCH_TOOL_NAME)
+    }
+    if (settings.calculatorEnabled && model?.toolCapabilities?.supports(CALCULATOR_TOOL_NAME) == true) {
+        add(CALCULATOR_TOOL_NAME)
     }
 }
 
 const val WIKIPEDIA_SEARCH_TOOL_NAME = "wikipedia_search"
 const val WEB_SEARCH_TOOL_NAME = "web_search"
+const val CALCULATOR_TOOL_NAME = "calculator"
+
+private const val CALCULATOR_UNAVAILABLE_INSTRUCTION =
+    "No calculator or math tool is available for this turn. Answer directly without emitting " +
+        "tool-call markup, tool protocol, XML-like tags, or JSON."
 
 fun normalizeEditableInstruction(value: String): String = value
     .take(InstructionDefaults.MAX_LENGTH)

@@ -59,7 +59,7 @@ class WikipediaOpenApiToolTest {
     @Test
     fun `reports bounded lifecycle events without reference text`() {
         val source = source()
-        val events = mutableListOf<KnowledgeToolExecutionEvent>()
+        val events = mutableListOf<ApplicationToolExecutionEvent>()
         val tool = toolReturning(success(source))
         tool.beginTurn(events::add)
 
@@ -67,8 +67,8 @@ class WikipediaOpenApiToolTest {
 
         assertEquals(
             listOf(
-                KnowledgeToolExecutionEvent.Started,
-                KnowledgeToolExecutionEvent.Succeeded(listOf(source)),
+                ApplicationToolExecutionEvent.Started,
+                ApplicationToolExecutionEvent.Succeeded(listOf(source)),
             ),
             events,
         )
@@ -76,7 +76,7 @@ class WikipediaOpenApiToolTest {
 
     @Test
     fun `reports controlled failure reason after start`() {
-        val events = mutableListOf<KnowledgeToolExecutionEvent>()
+        val events = mutableListOf<ApplicationToolExecutionEvent>()
         val tool = toolReturning(ToolResult.Failure(ToolFailureReason.TimedOut))
         tool.beginTurn(events::add)
 
@@ -84,8 +84,8 @@ class WikipediaOpenApiToolTest {
 
         assertEquals(
             listOf(
-                KnowledgeToolExecutionEvent.Started,
-                KnowledgeToolExecutionEvent.Failed(ToolFailureReason.TimedOut),
+                ApplicationToolExecutionEvent.Started,
+                ApplicationToolExecutionEvent.Failed(ToolFailureReason.TimedOut),
             ),
             events,
         )

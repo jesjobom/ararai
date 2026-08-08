@@ -218,8 +218,8 @@ class ChatViewModel(
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
-                researchInProgress = false,
-                activeKnowledgeToolName = null,
+                toolInProgress = false,
+                activeToolName = null,
                 researchSources = emptyList(),
                 error = null,
                 errorKey = null,
@@ -247,8 +247,8 @@ class ChatViewModel(
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
-                researchInProgress = false,
-                activeKnowledgeToolName = null,
+                toolInProgress = false,
+                activeToolName = null,
                 researchSources = emptyList(),
                 error = null,
                 errorKey = null,
@@ -346,8 +346,8 @@ class ChatViewModel(
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
-                researchInProgress = false,
-                activeKnowledgeToolName = null,
+                toolInProgress = false,
+                activeToolName = null,
                 researchSources = emptyList(),
                 error = null,
                 errorKey = null,
@@ -557,8 +557,8 @@ class ChatViewModel(
                 hasOlderMessages = hasOlderMessages(sessionId),
                 isLoadingModel = true,
                 isGenerating = true,
-                researchInProgress = false,
-                activeKnowledgeToolName = null,
+                toolInProgress = false,
+                activeToolName = null,
                 researchSources = emptyList(),
                 error = null,
                 errorKey = null,
@@ -629,23 +629,23 @@ class ChatViewModel(
                                 is GenerationEvent.Token -> appendAssistantToken(event.text)
                                 is GenerationEvent.ReasoningToken -> appendAssistantReasoningToken(event.text)
                                 is GenerationEvent.Metrics -> generationMetricsConsumer(modelForRequest, event.value)
-                                is GenerationEvent.KnowledgeToolStarted -> {
+                                is GenerationEvent.ToolStarted -> {
                                     _uiState.update {
                                         it.copy(
-                                            researchInProgress = true,
-                                            activeKnowledgeToolName = event.displayName,
+                                            toolInProgress = true,
+                                            activeToolName = event.displayName,
                                             researchSources = pendingResearchSources,
                                         )
                                     }
                                 }
-                                is GenerationEvent.KnowledgeToolFinished -> {
+                                is GenerationEvent.ToolFinished -> {
                                     pendingResearchSources =
                                         (pendingResearchSources + event.sources)
                                             .distinctBy { source -> source.canonicalUrl }
                                     _uiState.update {
                                         it.copy(
-                                            researchInProgress = false,
-                                            activeKnowledgeToolName = null,
+                                            toolInProgress = false,
+                                            activeToolName = null,
                                             researchSources = pendingResearchSources,
                                         )
                                     }
@@ -658,8 +658,8 @@ class ChatViewModel(
                                         it.copy(
                                             isLoadingModel = false,
                                             isGenerating = false,
-                                            researchInProgress = false,
-                                            activeKnowledgeToolName = null,
+                                            toolInProgress = false,
+                                            activeToolName = null,
                                             error = event.message,
                                             errorKey = null,
                                         )
@@ -674,8 +674,8 @@ class ChatViewModel(
                                         it.copy(
                                             isLoadingModel = false,
                                             isGenerating = false,
-                                            researchInProgress = false,
-                                            activeKnowledgeToolName = null,
+                                            toolInProgress = false,
+                                            activeToolName = null,
                                             prompt = "",
                                             imageAttachments = emptyList(),
                                             audioPrompt = null,
@@ -808,8 +808,8 @@ class ChatViewModel(
             it.copy(
                 isLoadingModel = false,
                 isGenerating = false,
-                researchInProgress = false,
-                activeKnowledgeToolName = null,
+                toolInProgress = false,
+                activeToolName = null,
                 researchSources = emptyList(),
             )
         }
@@ -861,8 +861,8 @@ class ChatViewModel(
             it.copy(
                 isLoadingModel = false,
                 isGenerating = false,
-                researchInProgress = false,
-                activeKnowledgeToolName = null,
+                toolInProgress = false,
+                activeToolName = null,
                 researchSources = emptyList(),
                 error = null,
                 errorKey = null,
@@ -881,8 +881,8 @@ class ChatViewModel(
                 isLoadingModel = false,
                 isGenerating = false,
                 isPersistenceBusy = false,
-                researchInProgress = false,
-                activeKnowledgeToolName = null,
+                toolInProgress = false,
+                activeToolName = null,
             )
         }
     }

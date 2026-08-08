@@ -1125,16 +1125,18 @@ class ChatViewModelTest {
                 engine =
                 EventStreamingEngine(
                     listOf(
-                        GenerationEvent.KnowledgeToolStarted("wikipedia_search"),
-                        GenerationEvent.KnowledgeToolFinished(
+                        GenerationEvent.ToolStarted("wikipedia_search"),
+                        GenerationEvent.ToolFinished(
                             toolName = "wikipedia_search",
                             sources = listOf(source),
                         ),
-                        GenerationEvent.KnowledgeToolStarted("web_search"),
-                        GenerationEvent.KnowledgeToolFinished(
+                        GenerationEvent.ToolStarted("web_search"),
+                        GenerationEvent.ToolFinished(
                             toolName = "web_search",
                             sources = listOf(webSource),
                         ),
+                        GenerationEvent.ToolStarted("calculator", "Local calculator"),
+                        GenerationEvent.ToolFinished(toolName = "calculator"),
                         GenerationEvent.Token("Final answer"),
                         GenerationEvent.Completed,
                     ),
@@ -1146,7 +1148,7 @@ class ChatViewModelTest {
         viewModel.submitPrompt()
         runCurrent()
 
-        assertFalse(viewModel.uiState.value.researchInProgress)
+        assertFalse(viewModel.uiState.value.toolInProgress)
         assertEquals(listOf(source, webSource), viewModel.uiState.value.researchSources)
         assertEquals("Final answer", store.latestAssistantText())
         assertEquals(

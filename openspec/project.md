@@ -33,6 +33,10 @@ inference remains device-, driver-, model-, and workload-dependent.
   applied to its KV-cache capacity; unsupported independent response limits are
   disclosed rather than simulated. Runtime-backed last-turn metrics are
   ephemeral and benchmark runs retain fixed isolated parameters.
+- The optional calculator uses EvalEx 3.7.0 behind an application-owned bounded
+  grammar and generic local-compute tool boundary. It is disabled by default,
+  capability-gated per model, runs without network access, and never persists
+  raw tool protocol or intermediate values.
 - Reasoning-only terminal generations are persisted as incomplete assistant
   responses. Normal Chat can show partial reasoning, while Voice Chat avoids
   empty TTS and recovers its loop.
@@ -65,6 +69,7 @@ local model is sufficient for the core Chat inference flow.
 - LiteRT-LM 0.14.0 for configured Gemma 4 LiteRT-LM bundles
 - whisper.cpp through JNI/NDK for transcription artifacts
 - Bundled ML Kit Language ID 17.0.6 for offline response-language detection
+- EvalEx 3.7.0 for bounded DECIMAL128 local calculation
 - Android VAD 2.0.10 WebRTC/Silero adapters and ONNX Runtime Android 1.22.0 for
   experimental offline pause-detection comparison
 - Plain SQLite for Chat sessions/messages and local preferences for model

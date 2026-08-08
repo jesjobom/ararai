@@ -2,7 +2,7 @@ package com.jesjobom.ararai.chat
 
 import com.jesjobom.ararai.knowledge.WebSearchProvider
 import com.jesjobom.ararai.model.LocalModel
-import com.jesjobom.ararai.model.ModelKnowledgeToolCapabilities
+import com.jesjobom.ararai.model.ModelToolCapabilities
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -16,26 +16,26 @@ class InstructionPreferencesTest {
                 id = "supported",
                 name = "Supported",
                 filePath = "/tmp/model",
-                knowledgeToolCapabilities =
-                ModelKnowledgeToolCapabilities(setOf(WIKIPEDIA_SEARCH_TOOL_NAME)),
+                toolCapabilities =
+                ModelToolCapabilities(setOf(WIKIPEDIA_SEARCH_TOOL_NAME)),
             )
-        val unsupported = supported.copy(knowledgeToolCapabilities = ModelKnowledgeToolCapabilities())
+        val unsupported = supported.copy(toolCapabilities = ModelToolCapabilities())
 
         assertEquals(
             setOf(WIKIPEDIA_SEARCH_TOOL_NAME),
-            eligibleKnowledgeToolNames(InstructionSettings(wikipediaEnabled = true), supported),
+            eligibleToolNames(InstructionSettings(wikipediaEnabled = true), supported),
         )
         assertEquals(
             emptySet<String>(),
-            eligibleKnowledgeToolNames(InstructionSettings(wikipediaEnabled = false), supported),
+            eligibleToolNames(InstructionSettings(wikipediaEnabled = false), supported),
         )
         assertEquals(
             emptySet<String>(),
-            eligibleKnowledgeToolNames(InstructionSettings(wikipediaEnabled = true), unsupported),
+            eligibleToolNames(InstructionSettings(wikipediaEnabled = true), unsupported),
         )
         assertEquals(
             emptySet<String>(),
-            eligibleKnowledgeToolNames(InstructionSettings(wikipediaEnabled = true), null),
+            eligibleToolNames(InstructionSettings(wikipediaEnabled = true), null),
         )
     }
 
@@ -46,13 +46,13 @@ class InstructionPreferencesTest {
                 id = "supported",
                 name = "Supported",
                 filePath = "/tmp/model",
-                knowledgeToolCapabilities =
-                ModelKnowledgeToolCapabilities(setOf(WEB_SEARCH_TOOL_NAME)),
+                toolCapabilities =
+                ModelToolCapabilities(setOf(WEB_SEARCH_TOOL_NAME)),
             )
 
         assertEquals(
             setOf(WEB_SEARCH_TOOL_NAME),
-            eligibleKnowledgeToolNames(
+            eligibleToolNames(
                 InstructionSettings(),
                 supported,
                 selectedWebProvider = WebSearchProvider.Tavily,
@@ -61,7 +61,7 @@ class InstructionPreferencesTest {
         )
         assertEquals(
             emptySet<String>(),
-            eligibleKnowledgeToolNames(
+            eligibleToolNames(
                 InstructionSettings(),
                 supported,
                 selectedWebProvider = WebSearchProvider.Tavily,
@@ -70,7 +70,7 @@ class InstructionPreferencesTest {
         )
         assertEquals(
             emptySet<String>(),
-            eligibleKnowledgeToolNames(
+            eligibleToolNames(
                 InstructionSettings(),
                 supported,
                 selectedWebProvider = null,
@@ -86,6 +86,30 @@ class InstructionPreferencesTest {
         assertEquals(InstructionDefaults.CHAT, preferences.settings.value.chatInstruction)
         assertEquals(InstructionDefaults.VOICE, preferences.settings.value.voiceInstruction)
         assertFalse(preferences.settings.value.wikipediaEnabled)
+        assertFalse(preferences.settings.value.calculatorEnabled)
+    }
+
+    @Test
+    fun `advertises calculator only when preference and model capability are enabled`() {
+        val supported = LocalModel(
+            id = "supported",
+            name = "Supported",
+            filePath = "/tmp/model",
+            toolCapabilities = ModelToolCapabilities(setOf(CALCULATOR_TOOL_NAME)),
+        )
+
+        assertEquals(
+            setOf(CALCULATOR_TOOL_NAME),
+            eligibleToolNames(InstructionSettings(calculatorEnabled = true), supported),
+        )
+        assertEquals(emptySet<String>(), eligibleToolNames(InstructionSettings(), supported))
+        assertEquals(
+            emptySet<String>(),
+            eligibleToolNames(
+                InstructionSettings(calculatorEnabled = true),
+                supported.copy(toolCapabilities = ModelToolCapabilities()),
+            ),
+        )
     }
 
     @Test
@@ -161,6 +185,33 @@ class InstructionPreferencesTest {
             )
 
         assertFalse(turn.systemInstruction.contains("wikipedia_search"))
+    }
+
+    @Test
+    fun `explicitly forbids calculator protocol when calculator is not advertised`() {
+        val turn =
+            conversationTurnSettings(
+                settings = InstructionSettings(calculatorEnabled = false),
+                mode = InteractionMode.Chat,
+                advertisedToolNames = emptySet(),
+            )
+
+        assertTrue(turn.systemInstruction.contains("No calculator or math tool is available"))
+        assertTrue(turn.systemInstruction.contains("without emitting tool-call markup"))
+        assertFalse(turn.advertisedToolNames.contains(CALCULATOR_TOOL_NAME))
+    }
+
+    @Test
+    fun `does not forbid calculator when calculator is advertised`() {
+        val turn =
+            conversationTurnSettings(
+                settings = InstructionSettings(calculatorEnabled = true),
+                mode = InteractionMode.Chat,
+                advertisedToolNames = setOf(CALCULATOR_TOOL_NAME),
+            )
+
+        assertFalse(turn.systemInstruction.contains("No calculator or math tool is available"))
+        assertTrue(turn.systemInstruction.contains("Use calculator"))
     }
 
     @Test

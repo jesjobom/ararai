@@ -4,14 +4,14 @@ import app.cash.turbine.test
 import com.jesjobom.ararai.chat.AudioPrompt
 import com.jesjobom.ararai.chat.ImageAttachment
 import com.jesjobom.ararai.chat.MessageContent
+import com.jesjobom.ararai.knowledge.ApplicationToolExecutionEvent
 import com.jesjobom.ararai.knowledge.KnowledgeSource
-import com.jesjobom.ararai.knowledge.KnowledgeToolExecutionEvent
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelAccelerationPolicy
 import com.jesjobom.ararai.model.ModelInputCapabilities
-import com.jesjobom.ararai.model.ModelKnowledgeToolCapabilities
 import com.jesjobom.ararai.model.ModelRuntime
+import com.jesjobom.ararai.model.ModelToolCapabilities
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -119,7 +119,7 @@ class LiteRtLmLocalLlmEngineTest {
     }
 
     @Test
-    fun `forwards model knowledge capabilities and rejects unadvertised model tools`() = runTest {
+    fun `forwards model tool capabilities and rejects unsupported tools`() = runTest {
         val bridge = RecordingBridge()
         val engine =
             LiteRtLmLocalLlmEngine(
@@ -128,13 +128,13 @@ class LiteRtLmLocalLlmEngineTest {
             )
         val capableModel =
             model.copy(
-                knowledgeToolCapabilities =
-                ModelKnowledgeToolCapabilities(setOf("wikipedia_search")),
+                toolCapabilities =
+                ModelToolCapabilities(setOf("wikipedia_search")),
             )
 
         engine.load(capableModel, config)
 
-        assertEquals(setOf("wikipedia_search"), bridge.loadedKnowledgeToolNames)
+        assertEquals(setOf("wikipedia_search"), bridge.loadedToolNames)
         engine
             .generate(
                 PromptRequest(
@@ -143,7 +143,7 @@ class LiteRtLmLocalLlmEngineTest {
                 ),
             ).test {
                 assertEquals(
-                    GenerationEvent.Failed("Selected model does not support the requested knowledge tools"),
+                    GenerationEvent.Failed("Selected model does not support the requested tools"),
                     awaitItem(),
                 )
                 awaitComplete()
@@ -166,12 +166,12 @@ class LiteRtLmLocalLlmEngineTest {
                 chunks =
                 listOf(
                     LiteRtLmChunk(
-                        knowledgeToolEvent = KnowledgeToolExecutionEvent.Started,
-                        knowledgeToolDisplayName = "Wikipedia",
+                        toolEvent = ApplicationToolExecutionEvent.Started,
+                        toolDisplayName = "Wikipedia",
                     ),
                     LiteRtLmChunk(
-                        knowledgeToolEvent =
-                        KnowledgeToolExecutionEvent.Succeeded(listOf(source)),
+                        toolEvent =
+                        ApplicationToolExecutionEvent.Succeeded(listOf(source)),
                     ),
                     LiteRtLmChunk(text = "answer"),
                 ),
@@ -183,8 +183,8 @@ class LiteRtLmLocalLlmEngineTest {
             )
         engine.load(
             model.copy(
-                knowledgeToolCapabilities =
-                ModelKnowledgeToolCapabilities(setOf("wikipedia_search")),
+                toolCapabilities =
+                ModelToolCapabilities(setOf("wikipedia_search")),
             ),
             config,
         )
@@ -197,11 +197,11 @@ class LiteRtLmLocalLlmEngineTest {
                 ),
             ).test {
                 assertEquals(
-                    GenerationEvent.KnowledgeToolStarted("wikipedia_search", "Wikipedia"),
+                    GenerationEvent.ToolStarted("wikipedia_search", "Wikipedia"),
                     awaitItem(),
                 )
                 assertEquals(
-                    GenerationEvent.KnowledgeToolFinished(
+                    GenerationEvent.ToolFinished(
                         toolName = "wikipedia_search",
                         sources = listOf(source),
                     ),
@@ -228,14 +228,14 @@ class LiteRtLmLocalLlmEngineTest {
                 chunks =
                 listOf(
                     LiteRtLmChunk(
-                        knowledgeToolEvent = KnowledgeToolExecutionEvent.Started,
-                        knowledgeToolName = "web_search",
-                        knowledgeToolDisplayName = "Exa",
+                        toolEvent = ApplicationToolExecutionEvent.Started,
+                        toolName = "web_search",
+                        toolDisplayName = "Exa",
                     ),
                     LiteRtLmChunk(
-                        knowledgeToolEvent =
-                        KnowledgeToolExecutionEvent.Succeeded(listOf(source)),
-                        knowledgeToolName = "web_search",
+                        toolEvent =
+                        ApplicationToolExecutionEvent.Succeeded(listOf(source)),
+                        toolName = "web_search",
                     ),
                 ),
             )
@@ -246,8 +246,8 @@ class LiteRtLmLocalLlmEngineTest {
             )
         engine.load(
             model.copy(
-                knowledgeToolCapabilities =
-                ModelKnowledgeToolCapabilities(setOf("web_search")),
+                toolCapabilities =
+                ModelToolCapabilities(setOf("web_search")),
             ),
             config,
         )
@@ -260,11 +260,11 @@ class LiteRtLmLocalLlmEngineTest {
                 ),
             ).test {
                 assertEquals(
-                    GenerationEvent.KnowledgeToolStarted("web_search", "Exa"),
+                    GenerationEvent.ToolStarted("web_search", "Exa"),
                     awaitItem(),
                 )
                 assertEquals(
-                    GenerationEvent.KnowledgeToolFinished(
+                    GenerationEvent.ToolFinished(
                         toolName = "web_search",
                         sources = listOf(source),
                     ),
@@ -678,7 +678,7 @@ class LiteRtLmLocalLlmEngineTest {
             private set
         var loadedInputCapabilities: ModelInputCapabilities? = null
             private set
-        var loadedKnowledgeToolNames: Set<String> = emptySet()
+        var loadedToolNames: Set<String> = emptySet()
             private set
         var loadedProfile: LiteRtLmWorkloadProfile? = null
             private set
@@ -691,7 +691,7 @@ class LiteRtLmLocalLlmEngineTest {
             config: InferenceConfig,
             useGpu: Boolean,
             inputCapabilities: ModelInputCapabilities,
-            knowledgeToolNames: Set<String>,
+            toolNames: Set<String>,
             profile: LiteRtLmWorkloadProfile,
         ): LiteRtLmSession {
             loadCalls += 1
@@ -699,7 +699,7 @@ class LiteRtLmLocalLlmEngineTest {
             loadedConfig = config
             loadedUseGpu = useGpu
             loadedInputCapabilities = inputCapabilities
-            loadedKnowledgeToolNames = knowledgeToolNames
+            loadedToolNames = toolNames
             loadedProfile = profile
             loadedProfiles += profile
             return session

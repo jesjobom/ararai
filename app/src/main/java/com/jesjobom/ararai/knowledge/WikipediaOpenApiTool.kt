@@ -33,19 +33,19 @@ class WikipediaOpenApiTool(
      * LiteRT-LM retains the registered tool instance with its conversation, so callers reusing a
      * conversation must mark each user-turn boundary explicitly.
      */
-    fun beginTurn(observer: (KnowledgeToolExecutionEvent) -> Unit = {}) = turn.beginTurn(observer)
+    fun beginTurn(observer: (ApplicationToolExecutionEvent) -> Unit = {}) = turn.beginTurn(observer)
 }
 
-sealed interface KnowledgeToolExecutionEvent {
-    data object Started : KnowledgeToolExecutionEvent
+sealed interface ApplicationToolExecutionEvent {
+    data object Started : ApplicationToolExecutionEvent
 
     data class Succeeded(
         val sources: List<KnowledgeSource>,
-    ) : KnowledgeToolExecutionEvent
+    ) : ApplicationToolExecutionEvent
 
     data class Failed(
         val reason: ToolFailureReason?,
-    ) : KnowledgeToolExecutionEvent
+    ) : ApplicationToolExecutionEvent
 }
 
 /**
@@ -59,9 +59,9 @@ internal class WikipediaToolTurn(
 ) {
     private val invocationCount = AtomicInteger(0)
     private val capturedSources = AtomicReference<List<KnowledgeSource>>(emptyList())
-    private val observer = AtomicReference<(KnowledgeToolExecutionEvent) -> Unit>({})
+    private val observer = AtomicReference<(ApplicationToolExecutionEvent) -> Unit>({})
 
-    fun beginTurn(observer: (KnowledgeToolExecutionEvent) -> Unit = {}) {
+    fun beginTurn(observer: (ApplicationToolExecutionEvent) -> Unit = {}) {
         capturedSources.set(emptyList())
         invocationCount.set(0)
         this.observer.set(observer)
@@ -70,10 +70,10 @@ internal class WikipediaToolTurn(
     @Suppress("ReturnCount")
     fun execute(paramsJsonString: String): String {
         if (invocationCount.incrementAndGet() > MAX_CALLS_PER_TURN) {
-            observer.get().invoke(KnowledgeToolExecutionEvent.Failed(reason = null))
+            observer.get().invoke(ApplicationToolExecutionEvent.Failed(reason = null))
             return failureJson(ToolAdapterFailure.CallLimitReached)
         }
-        observer.get().invoke(KnowledgeToolExecutionEvent.Started)
+        observer.get().invoke(ApplicationToolExecutionEvent.Started)
 
         val request =
             parseRequest(paramsJsonString)
@@ -106,9 +106,9 @@ internal class WikipediaToolTurn(
     private fun serializeObserved(result: ToolResult): String {
         when (result) {
             is ToolResult.Success ->
-                observer.get().invoke(KnowledgeToolExecutionEvent.Succeeded(result.sources.toList()))
+                observer.get().invoke(ApplicationToolExecutionEvent.Succeeded(result.sources.toList()))
             is ToolResult.Failure ->
-                observer.get().invoke(KnowledgeToolExecutionEvent.Failed(result.reason))
+                observer.get().invoke(ApplicationToolExecutionEvent.Failed(result.reason))
         }
         return serialize(result)
     }
@@ -117,7 +117,7 @@ internal class WikipediaToolTurn(
         adapterFailure: ToolAdapterFailure,
         reason: ToolFailureReason,
     ): String {
-        observer.get().invoke(KnowledgeToolExecutionEvent.Failed(reason))
+        observer.get().invoke(ApplicationToolExecutionEvent.Failed(reason))
         return failureJson(adapterFailure)
     }
 

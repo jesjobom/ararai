@@ -96,9 +96,13 @@ object ModelConfigParser {
             request = optionalBoolean("${modelPrefix}capabilities.reasoning.request", defaultValue = false),
             output = optionalBoolean("${modelPrefix}capabilities.reasoning.output", defaultValue = false),
         ),
-        knowledgeToolCapabilities =
-        ModelKnowledgeToolCapabilities(
-            toolNames = optionalList("${modelPrefix}capabilities.knowledgeTools").toSet(),
+        toolCapabilities =
+        ModelToolCapabilities(
+            toolNames =
+            (
+                optionalList("${modelPrefix}capabilities.tools") +
+                    optionalList("${modelPrefix}capabilities.knowledgeTools")
+                ).toSet(),
         ),
     ).also { it.validate() }
 
@@ -221,11 +225,11 @@ object ModelConfigParser {
         require(!inputCapabilities.image || inputCapabilities.text) {
             "image input requires text input support"
         }
-        require(knowledgeToolCapabilities.toolNames.all { it.matches(Regex("[a-z][a-z0-9_]{0,63}")) }) {
-            "knowledge tool capability names must use lowercase snake_case identifiers"
+        require(toolCapabilities.toolNames.all { it.matches(Regex("[a-z][a-z0-9_]{0,63}")) }) {
+            "tool capability names must use lowercase snake_case identifiers"
         }
-        require(knowledgeToolCapabilities.toolNames.isEmpty() || runtime == ModelRuntime.LiteRtLm) {
-            "knowledge tool capabilities require the LiteRT-LM runtime"
+        require(toolCapabilities.toolNames.isEmpty() || runtime == ModelRuntime.LiteRtLm) {
+            "tool capabilities require the LiteRT-LM runtime"
         }
     }
 }

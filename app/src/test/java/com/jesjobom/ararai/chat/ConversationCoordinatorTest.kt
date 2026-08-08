@@ -17,8 +17,8 @@ class ConversationCoordinatorTest {
     fun `forwards knowledge lifecycle events without transforming protocol`() = runTest {
         val events =
             listOf(
-                GenerationEvent.KnowledgeToolStarted("wikipedia_search"),
-                GenerationEvent.KnowledgeToolFinished("wikipedia_search"),
+                GenerationEvent.ToolStarted("wikipedia_search"),
+                GenerationEvent.ToolFinished("wikipedia_search"),
                 GenerationEvent.Completed,
             )
         val engine = RecordingEngine(events)

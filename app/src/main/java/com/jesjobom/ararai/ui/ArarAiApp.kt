@@ -83,7 +83,7 @@ import com.jesjobom.ararai.chat.InMemoryInstructionPreferences
 import com.jesjobom.ararai.chat.InstructionPreferences
 import com.jesjobom.ararai.chat.InteractionMode
 import com.jesjobom.ararai.chat.conversationTurnSettings
-import com.jesjobom.ararai.chat.eligibleKnowledgeToolNames
+import com.jesjobom.ararai.chat.eligibleToolNames
 import com.jesjobom.ararai.engine.AndroidLiteRtLmBridge
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.LiteRtLmLocalLlmEngine
@@ -441,17 +441,21 @@ internal fun ArarAiApp(
             wikipediaCompatible =
             (startupState as? ModelStartupState.Available)
                 ?.model
-                ?.knowledgeToolCapabilities
+                ?.toolCapabilities
                 ?.supports(com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME) == true,
+            calculatorCompatible =
+            (startupState as? ModelStartupState.Available)?.model?.toolCapabilities
+                ?.supports(com.jesjobom.ararai.chat.CALCULATOR_TOOL_NAME) == true,
             webSearchCompatible =
             com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH &&
                 (startupState as? ModelStartupState.Available)
                     ?.model
-                    ?.knowledgeToolCapabilities
+                    ?.toolCapabilities
                     ?.supports(com.jesjobom.ararai.chat.WEB_SEARCH_TOOL_NAME) == true,
             onInstructionChange = instructionPreferences::setInstruction,
             onRestoreDefault = instructionPreferences::restoreDefault,
             onWikipediaEnabledChange = instructionPreferences::setWikipediaEnabled,
+            onCalculatorEnabledChange = instructionPreferences::setCalculatorEnabled,
             onContextTokensChange = { generationPreferences.setContextTokens(modelConfig.id, it) },
             onTemperatureChange = { generationPreferences.setTemperature(modelConfig.id, it) },
             onRestoreGenerationDefaults = { generationPreferences.restoreDefaults(modelConfig.id) },
@@ -744,10 +748,12 @@ internal fun InstructionsAndToolsScreen(
     settings: com.jesjobom.ararai.chat.InstructionSettings,
     generationModel: GenerationModelUiState? = null,
     wikipediaCompatible: Boolean,
+    calculatorCompatible: Boolean = false,
     webSearchCompatible: Boolean = false,
     onInstructionChange: (InteractionMode, String) -> Unit,
     onRestoreDefault: (InteractionMode) -> Unit,
     onWikipediaEnabledChange: (Boolean) -> Unit,
+    onCalculatorEnabledChange: (Boolean) -> Unit = {},
     onContextTokensChange: (Int) -> Unit = {},
     onTemperatureChange: (Float) -> Unit = {},
     onRestoreGenerationDefaults: () -> Unit = {},
@@ -794,6 +800,8 @@ internal fun InstructionsAndToolsScreen(
                         settings = settings,
                         wikipediaCompatible = wikipediaCompatible,
                         onWikipediaEnabledChange = onWikipediaEnabledChange,
+                        calculatorCompatible = calculatorCompatible,
+                        onCalculatorEnabledChange = onCalculatorEnabledChange,
                         webSearchSettings = webSearchSettings,
                         webSearchCompatible = webSearchCompatible,
                         webSmokeRunning = webSmokeRunning,
@@ -973,6 +981,8 @@ private fun ToolsTab(
     settings: com.jesjobom.ararai.chat.InstructionSettings,
     wikipediaCompatible: Boolean,
     onWikipediaEnabledChange: (Boolean) -> Unit,
+    calculatorCompatible: Boolean,
+    onCalculatorEnabledChange: (Boolean) -> Unit,
     webSearchSettings: WebSearchSettings,
     webSearchCompatible: Boolean,
     webSmokeRunning: WebSearchProvider?,
@@ -982,6 +992,45 @@ private fun ToolsTab(
     onWebProviderEnabledChange: (WebSearchProvider, Boolean) -> Unit,
     onRemoveWebProvider: (WebSearchProvider) -> Unit,
 ) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                stringResource(R.string.tools_local_calculator),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                stringResource(R.string.tools_local_calculator_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.tools_use_calculator))
+                    Text(
+                        stringResource(
+                            if (calculatorCompatible) {
+                                R.string.tools_available_model
+                            } else {
+                                R.string.tools_unavailable_model
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(
+                    checked = settings.calculatorEnabled,
+                    onCheckedChange = onCalculatorEnabledChange,
+                    enabled = calculatorCompatible || settings.calculatorEnabled,
+                    modifier = Modifier.testTag("calculator-enabled"),
+                )
+            }
+        }
+    }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(
             modifier = Modifier.padding(16.dp),

@@ -51,8 +51,8 @@ class WebSearchChatVoiceParityTest {
             )
         val events =
             listOf(
-                GenerationEvent.KnowledgeToolStarted("web_search", "Fake Tavily"),
-                GenerationEvent.KnowledgeToolFinished("web_search", listOf(source)),
+                GenerationEvent.ToolStarted("web_search", "Fake Tavily"),
+                GenerationEvent.ToolFinished("web_search", listOf(source)),
                 GenerationEvent.Token("Final answer from focused evidence."),
                 GenerationEvent.Completed,
             )
@@ -97,10 +97,10 @@ class WebSearchChatVoiceParityTest {
         assertEquals(listOf(source), chatAssistant.sources)
         assertEquals(chatAssistant.sources, voiceAssistant.sources)
         assertEquals(listOf("Final answer from focused evidence."), speech.segments)
-        assertFalse(chat.uiState.value.researchInProgress)
-        assertFalse(voice.state.value.researchInProgress)
-        assertEquals(null, chat.uiState.value.activeKnowledgeToolName)
-        assertEquals(null, voice.state.value.activeKnowledgeToolName)
+        assertFalse(chat.uiState.value.toolInProgress)
+        assertFalse(voice.state.value.toolInProgress)
+        assertEquals(null, chat.uiState.value.activeToolName)
+        assertEquals(null, voice.state.value.activeToolName)
         voice.stop()
     }
 
@@ -116,7 +116,7 @@ class WebSearchChatVoiceParityTest {
             )
         chat.onPromptChanged("Search indefinitely")
         chat.submitPrompt()
-        waitUntil { chat.uiState.value.researchInProgress }
+        waitUntil { chat.uiState.value.toolInProgress }
         chat.cancelGeneration()
         waitUntil { chatEngine.cancellations.get() == 1 }
 
@@ -138,14 +138,14 @@ class WebSearchChatVoiceParityTest {
         voice.start()
         waitUntil { captureFactory.latest?.started == true }
         captureFactory.latest!!.emit(audioTurn())
-        waitUntil { voice.state.value.researchInProgress }
+        waitUntil { voice.state.value.toolInProgress }
         voice.stop()
         waitUntil { voiceEngine.cancellations.get() == 1 }
 
-        assertFalse(chat.uiState.value.researchInProgress)
-        assertFalse(voice.state.value.researchInProgress)
-        assertEquals(null, chat.uiState.value.activeKnowledgeToolName)
-        assertEquals(null, voice.state.value.activeKnowledgeToolName)
+        assertFalse(chat.uiState.value.toolInProgress)
+        assertFalse(voice.state.value.toolInProgress)
+        assertEquals(null, chat.uiState.value.activeToolName)
+        assertEquals(null, voice.state.value.activeToolName)
         assertEquals(VoiceChatPhase.Idle, voice.state.value.phase)
     }
 
@@ -181,7 +181,7 @@ private class CancellableWebSearchEngine : LocalLlmEngine {
     val cancellations = AtomicInteger()
     override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
     override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
-        emit(GenerationEvent.KnowledgeToolStarted("web_search", "Fake Exa"))
+        emit(GenerationEvent.ToolStarted("web_search", "Fake Exa"))
         try {
             awaitCancellation()
         } finally {

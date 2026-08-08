@@ -240,6 +240,9 @@
     <string name="instructions_voice_chat">Instrução do Chat por voz</string>
     <string name="instructions_restore_default">Restaurar padrão</string>
     <string name="tools_wikipedia_description">Usa Wikipedia/MediaWiki para pesquisas factuais compatíveis. A inferência e o armazenamento das conversas permanecem locais.</string>
+    <string name="tools_local_calculator">Calculadora local</string>
+    <string name="tools_local_calculator_description">Avalia aritmética limitada e funções numéricas inteiramente no dispositivo. Aceita +, −, ×, ÷, %, potências, abs, sqrt, min, max, logaritmos e trigonometria em radianos. Resultados podem ser arredondados ou aproximados.</string>
+    <string name="tools_use_calculator">Usar calculadora local</string>
     <string name="tools_use_wikipedia">Usar Wikipedia</string>
     <string name="tools_available_model">Disponível para o modelo selecionado.</string>
     <string name="tools_unavailable_model">Indisponível para o modelo selecionado.</string>

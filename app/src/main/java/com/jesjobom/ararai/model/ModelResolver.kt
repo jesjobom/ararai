@@ -49,7 +49,7 @@ class ModelResolver(
                 acceleration = config.acceleration,
                 inputCapabilities = config.inputCapabilities,
                 reasoningCapabilities = config.reasoningCapabilities,
-                knowledgeToolCapabilities = config.knowledgeToolCapabilities,
+                toolCapabilities = config.toolCapabilities,
                 filePath = file.absolutePath,
             ),
         )

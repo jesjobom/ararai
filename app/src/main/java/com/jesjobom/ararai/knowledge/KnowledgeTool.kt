@@ -1,5 +1,13 @@
 package com.jesjobom.ararai.knowledge
 
+enum class ApplicationToolCategory { ExternalKnowledge, LocalCompute }
+
+interface ApplicationTool<in Request, out Result> {
+    val displayName: String
+    val category: ApplicationToolCategory
+    suspend fun execute(request: Request): Result
+}
+
 data class ToolRequest(
     val query: String,
     val language: String = "en",
@@ -37,11 +45,14 @@ enum class ToolFailureReason {
     Cancelled,
 }
 
-fun interface KnowledgeTool {
-    val displayName: String
+fun interface KnowledgeTool : ApplicationTool<ToolRequest, ToolResult> {
+    override val displayName: String
         get() = "Tool"
 
-    suspend fun execute(request: ToolRequest): ToolResult
+    override suspend fun execute(request: ToolRequest): ToolResult
+
+    override val category: ApplicationToolCategory
+        get() = ApplicationToolCategory.ExternalKnowledge
 }
 
 class FallbackKnowledgeTool(

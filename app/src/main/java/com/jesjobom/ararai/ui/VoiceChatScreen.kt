@@ -142,9 +142,9 @@ internal fun VoiceChatScreen(
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(phaseLabel(state.phase), style = MaterialTheme.typography.headlineSmall)
                 Box(modifier = Modifier.height(24.dp), contentAlignment = Alignment.Center) {
-                    if (state.researchInProgress) {
+                    if (state.toolInProgress) {
                         Text(
-                            state.activeKnowledgeToolName
+                            state.activeToolName
                                 ?.takeIf(String::isNotBlank)
                                 ?.let { stringResource(R.string.chat_using_named_tool, it) }
                                 ?: stringResource(R.string.chat_using_tool),

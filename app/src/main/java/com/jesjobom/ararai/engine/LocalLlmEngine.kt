@@ -119,12 +119,12 @@ sealed interface GenerationEvent {
         val message: String,
     ) : GenerationEvent
 
-    data class KnowledgeToolStarted(
+    data class ToolStarted(
         val toolName: String,
         val displayName: String = toolName,
     ) : GenerationEvent
 
-    data class KnowledgeToolFinished(
+    data class ToolFinished(
         val toolName: String,
         val sources: List<KnowledgeSource> = emptyList(),
         val failureReason: ToolFailureReason? = null,

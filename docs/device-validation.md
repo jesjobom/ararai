@@ -88,6 +88,38 @@ downloading a production model.
   the Chat and Voice instructions, and switch modes. Confirm the retained
   native conversation is recreated only when compatibility changes.
 
+## Local calculator tool
+
+Automated implementation evidence for `add-local-math-tool` was completed on
+2026-08-08. The resulting debug APK is 116,238,682 bytes, 182,369 bytes larger
+than the immediately preceding license-disclosure build.
+
+JJ completed physical-device acceptance on 2026-08-08 with both validated Gemma
+E2B and E4B bundles. Multiple calculation prompts were compared with the local
+calculator disabled and enabled, and the enabled results were accepted. During
+the disabled-tool pass, one model initially emitted a learned `call:math`
+protocol-shaped string without executing the app's `calculator` tool. The app
+was hardened to explicitly forbid calculator/math tool markup whenever the tool
+is not advertised; the replacement APK was then retested with both models and
+accepted.
+
+No separate quantitative cold/warm latency, process-memory, thermal, or Android
+installed-size measurements were retained from this acceptance pass. The APK
+size delta above is the available binary-size evidence. Those quantitative
+measurements remain release-validation checks rather than claims of this change.
+
+- Test E2B and E4B independently with calculator disabled, then enabled. Record
+  bundle hash and verify that only the validated model advertises `calculator`.
+- Ask direct arithmetic, precedence, square-root, logarithm, and trigonometry
+  questions in Chat and Voice Chat. Confirm tool selection, final synthesis, and
+  no visible or spoken JSON/protocol/intermediate value.
+- Confirm normal non-math prompts do not invoke calculation. Exercise invalid
+  expressions, division by zero, excessive exponents, the three-call ceiling,
+  cancellation, background/foreground, and model switching.
+- Record cold/warm latency, responsiveness, memory, and installed APK size.
+  Confirm expressions/results remain local and canonical history contains only
+  the user message and final assistant response.
+
 ## Conversational generation configuration
 
 - For E2B and E4B, open **Assistant configuration → Generation** and verify the

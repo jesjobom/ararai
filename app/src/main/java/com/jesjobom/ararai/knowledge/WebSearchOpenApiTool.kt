@@ -21,7 +21,7 @@ class WebSearchOpenApiTool(
 
     fun consumeCapturedSources(): List<KnowledgeSource> = turn.consumeCapturedSources()
 
-    fun beginTurn(observer: (KnowledgeToolExecutionEvent) -> Unit = {}) = turn.beginTurn(observer)
+    fun beginTurn(observer: (ApplicationToolExecutionEvent) -> Unit = {}) = turn.beginTurn(observer)
 }
 
 internal class WebSearchToolTurn(
@@ -29,9 +29,9 @@ internal class WebSearchToolTurn(
 ) {
     private val invocationCount = AtomicInteger(0)
     private val capturedSources = AtomicReference<List<KnowledgeSource>>(emptyList())
-    private val observer = AtomicReference<(KnowledgeToolExecutionEvent) -> Unit>({})
+    private val observer = AtomicReference<(ApplicationToolExecutionEvent) -> Unit>({})
 
-    fun beginTurn(observer: (KnowledgeToolExecutionEvent) -> Unit = {}) {
+    fun beginTurn(observer: (ApplicationToolExecutionEvent) -> Unit = {}) {
         capturedSources.set(emptyList())
         invocationCount.set(0)
         this.observer.set(observer)
@@ -40,10 +40,10 @@ internal class WebSearchToolTurn(
     @Suppress("ReturnCount")
     fun execute(paramsJsonString: String): String {
         if (invocationCount.incrementAndGet() > MAX_CALLS_PER_TURN) {
-            observer.get().invoke(KnowledgeToolExecutionEvent.Failed(reason = null))
+            observer.get().invoke(ApplicationToolExecutionEvent.Failed(reason = null))
             return failureJson("CALL_LIMIT_REACHED", "Web search reached the per-turn call limit.")
         }
-        observer.get().invoke(KnowledgeToolExecutionEvent.Started)
+        observer.get().invoke(ApplicationToolExecutionEvent.Started)
         val request =
             parseRequest(paramsJsonString)
                 ?: return observedFailure(ToolFailureReason.InvalidArguments)
@@ -66,9 +66,9 @@ internal class WebSearchToolTurn(
     private fun serializeObserved(result: ToolResult): String {
         when (result) {
             is ToolResult.Success ->
-                observer.get().invoke(KnowledgeToolExecutionEvent.Succeeded(result.sources.toList()))
+                observer.get().invoke(ApplicationToolExecutionEvent.Succeeded(result.sources.toList()))
             is ToolResult.Failure ->
-                observer.get().invoke(KnowledgeToolExecutionEvent.Failed(result.reason))
+                observer.get().invoke(ApplicationToolExecutionEvent.Failed(result.reason))
         }
         return when (result) {
             is ToolResult.Success -> {
@@ -85,7 +85,7 @@ internal class WebSearchToolTurn(
     }
 
     private fun observedFailure(reason: ToolFailureReason): String {
-        observer.get().invoke(KnowledgeToolExecutionEvent.Failed(reason))
+        observer.get().invoke(ApplicationToolExecutionEvent.Failed(reason))
         return failureJson(reason.code(), reason.message())
     }
 

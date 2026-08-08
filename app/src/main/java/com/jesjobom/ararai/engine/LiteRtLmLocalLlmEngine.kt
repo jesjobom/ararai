@@ -16,14 +16,19 @@ import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.tool
+import com.jesjobom.ararai.chat.CALCULATOR_TOOL_NAME
 import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.chat.WEB_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME
+import com.jesjobom.ararai.knowledge.ApplicationToolExecutionEvent
 import com.jesjobom.ararai.knowledge.KnowledgeTool
-import com.jesjobom.ararai.knowledge.KnowledgeToolExecutionEvent
+import com.jesjobom.ararai.knowledge.ToolFailureReason
 import com.jesjobom.ararai.knowledge.WebSearchOpenApiTool
 import com.jesjobom.ararai.knowledge.WikipediaKnowledgeTool
 import com.jesjobom.ararai.knowledge.WikipediaOpenApiTool
+import com.jesjobom.ararai.math.CalculatorExecutionEvent
+import com.jesjobom.ararai.math.CalculatorOpenApiTool
+import com.jesjobom.ararai.math.EvalExLocalMathEngine
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelAccelerationPolicy
@@ -51,7 +56,7 @@ class LiteRtLmLocalLlmEngine(
     private var loadedModelPath: String? = null
     private var loadedConfig: InferenceConfig? = null
     private var loadedInputCapabilities: ModelInputCapabilities? = null
-    private var loadedKnowledgeToolNames: Set<String> = emptySet()
+    private var loadedToolNames: Set<String> = emptySet()
     private var loadedUseGpu: Boolean = false
     private var loadedProfile: LiteRtLmWorkloadProfile? = null
 
@@ -73,7 +78,7 @@ class LiteRtLmLocalLlmEngine(
                 if (isLoaded) {
                     loadedConfig = config
                     loadedInputCapabilities = model.inputCapabilities
-                    loadedKnowledgeToolNames = model.knowledgeToolCapabilities.toolNames
+                    loadedToolNames = model.toolCapabilities.toolNames
                 }
                 isLoaded
             }
@@ -88,7 +93,7 @@ class LiteRtLmLocalLlmEngine(
                     config = config,
                     useGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred,
                     inputCapabilities = model.inputCapabilities,
-                    knowledgeToolNames = model.knowledgeToolCapabilities.toolNames,
+                    toolNames = model.toolCapabilities.toolNames,
                     profile = LiteRtLmWorkloadProfile.TextOnly,
                 )
             }
@@ -99,7 +104,7 @@ class LiteRtLmLocalLlmEngine(
             loadedModelPath = model.filePath
             loadedConfig = config
             loadedInputCapabilities = model.inputCapabilities
-            loadedKnowledgeToolNames = model.knowledgeToolCapabilities.toolNames
+            loadedToolNames = model.toolCapabilities.toolNames
             loadedUseGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred
             loadedProfile = LiteRtLmWorkloadProfile.TextOnly
         }
@@ -114,7 +119,7 @@ class LiteRtLmLocalLlmEngine(
                 if (loadedSession == null || config == null || capabilities == null) {
                     null
                 } else {
-                    LoadedState(config, capabilities, loadedKnowledgeToolNames)
+                    LoadedState(config, capabilities, loadedToolNames)
                 }
             }
 
@@ -131,8 +136,8 @@ class LiteRtLmLocalLlmEngine(
                         trySend(GenerationEvent.Failed(failure))
                         return@launch
                     }
-                    if (!initialState.knowledgeToolNames.containsAll(request.normalizedAdvertisedToolNames())) {
-                        trySend(GenerationEvent.Failed("Selected model does not support the requested knowledge tools"))
+                    if (!initialState.toolNames.containsAll(request.normalizedAdvertisedToolNames())) {
+                        trySend(GenerationEvent.Failed("Selected model does not support the requested tools"))
                         return@launch
                     }
                     val session = ensureProfile(LiteRtLmWorkloadProfile.from(request))
@@ -172,7 +177,7 @@ class LiteRtLmLocalLlmEngine(
                 loadedModelPath = null
                 loadedConfig = null
                 loadedInputCapabilities = null
-                loadedKnowledgeToolNames = emptySet()
+                loadedToolNames = emptySet()
                 loadedUseGpu = false
                 loadedProfile = null
                 current
@@ -188,7 +193,7 @@ class LiteRtLmLocalLlmEngine(
     private data class LoadedState(
         val config: InferenceConfig,
         val capabilities: ModelInputCapabilities,
-        val knowledgeToolNames: Set<String>,
+        val toolNames: Set<String>,
     )
 
     private suspend fun ensureProfile(desiredProfile: LiteRtLmWorkloadProfile): LiteRtLmSession {
@@ -200,7 +205,7 @@ class LiteRtLmLocalLlmEngine(
                     modelPath = checkNotNull(loadedModelPath) { "Model is not loaded" },
                     config = checkNotNull(loadedConfig) { "Model is not loaded" },
                     capabilities = checkNotNull(loadedInputCapabilities) { "Model is not loaded" },
-                    knowledgeToolNames = loadedKnowledgeToolNames,
+                    toolNames = loadedToolNames,
                     useGpu = loadedUseGpu,
                 )
             }
@@ -217,7 +222,7 @@ class LiteRtLmLocalLlmEngine(
                 config = snapshot.config,
                 useGpu = snapshot.useGpu,
                 inputCapabilities = snapshot.capabilities,
-                knowledgeToolNames = snapshot.knowledgeToolNames,
+                toolNames = snapshot.toolNames,
                 profile = desiredProfile,
             )
         synchronized(lock) {
@@ -233,7 +238,7 @@ class LiteRtLmLocalLlmEngine(
         val modelPath: String,
         val config: InferenceConfig,
         val capabilities: ModelInputCapabilities,
-        val knowledgeToolNames: Set<String>,
+        val toolNames: Set<String>,
         val useGpu: Boolean,
     )
 
@@ -248,21 +253,21 @@ class LiteRtLmLocalLlmEngine(
         if (text.isNotEmpty()) add(GenerationEvent.Token(text))
         if (reasoning.isNotEmpty()) add(GenerationEvent.ReasoningToken(reasoning))
         metrics?.let { add(GenerationEvent.Metrics(it)) }
-        val eventToolName = knowledgeToolName ?: WIKIPEDIA_SEARCH_TOOL_NAME
-        val eventToolDisplayName = knowledgeToolDisplayName ?: eventToolName
-        when (val event = knowledgeToolEvent) {
-            KnowledgeToolExecutionEvent.Started ->
-                add(GenerationEvent.KnowledgeToolStarted(eventToolName, eventToolDisplayName))
-            is KnowledgeToolExecutionEvent.Succeeded ->
+        val eventToolName = toolName ?: WIKIPEDIA_SEARCH_TOOL_NAME
+        val eventToolDisplayName = toolDisplayName ?: eventToolName
+        when (val event = toolEvent) {
+            ApplicationToolExecutionEvent.Started ->
+                add(GenerationEvent.ToolStarted(eventToolName, eventToolDisplayName))
+            is ApplicationToolExecutionEvent.Succeeded ->
                 add(
-                    GenerationEvent.KnowledgeToolFinished(
+                    GenerationEvent.ToolFinished(
                         toolName = eventToolName,
                         sources = event.sources,
                     ),
                 )
-            is KnowledgeToolExecutionEvent.Failed ->
+            is ApplicationToolExecutionEvent.Failed ->
                 add(
-                    GenerationEvent.KnowledgeToolFinished(
+                    GenerationEvent.ToolFinished(
                         toolName = eventToolName,
                         failureReason = event.reason,
                     ),
@@ -279,7 +284,7 @@ interface LiteRtLmBridge {
         config: InferenceConfig,
         useGpu: Boolean,
         inputCapabilities: ModelInputCapabilities,
-        knowledgeToolNames: Set<String>,
+        toolNames: Set<String>,
         profile: LiteRtLmWorkloadProfile,
     ): LiteRtLmSession
 }
@@ -313,9 +318,9 @@ data class LiteRtLmChunk(
     val text: String = "",
     val reasoning: String = "",
     val metrics: GenerationMetrics? = null,
-    val knowledgeToolEvent: KnowledgeToolExecutionEvent? = null,
-    val knowledgeToolName: String? = null,
-    val knowledgeToolDisplayName: String? = null,
+    val toolEvent: ApplicationToolExecutionEvent? = null,
+    val toolName: String? = null,
+    val toolDisplayName: String? = null,
 )
 
 fun interface WebSearchKnowledgeToolResolver {
@@ -328,13 +333,14 @@ class AndroidLiteRtLmBridge(
     private val wikipediaKnowledgeTool: KnowledgeTool = WikipediaKnowledgeTool(),
     private val webSearchKnowledgeToolResolver: WebSearchKnowledgeToolResolver =
         WebSearchKnowledgeToolResolver { null },
+    private val calculatorEngine: com.jesjobom.ararai.math.LocalMathEngine = EvalExLocalMathEngine(),
 ) : LiteRtLmBridge {
     override suspend fun load(
         modelPath: String,
         config: InferenceConfig,
         useGpu: Boolean,
         inputCapabilities: ModelInputCapabilities,
-        knowledgeToolNames: Set<String>,
+        toolNames: Set<String>,
         profile: LiteRtLmWorkloadProfile,
     ): LiteRtLmSession {
         val startedAt = System.nanoTime()
@@ -362,7 +368,8 @@ class AndroidLiteRtLmBridge(
                 engine,
                 wikipediaKnowledgeTool,
                 webSearchKnowledgeToolResolver,
-                knowledgeToolNames,
+                calculatorEngine,
+                toolNames,
             )
         } catch (error: Throwable) {
             engine.close()
@@ -382,7 +389,8 @@ private class AndroidLiteRtLmSession(
     private val engine: Engine,
     private val wikipediaKnowledgeTool: KnowledgeTool,
     private val webSearchKnowledgeToolResolver: WebSearchKnowledgeToolResolver,
-    private val supportedKnowledgeToolNames: Set<String>,
+    private val calculatorEngine: com.jesjobom.ararai.math.LocalMathEngine,
+    private val supportedToolNames: Set<String>,
 ) : LiteRtLmSession {
     private val conversations =
         RetainedResourceOwner<Conversation, RetainedConversationState>(
@@ -427,6 +435,7 @@ private class AndroidLiteRtLmSession(
                     retained.resource,
                     retained.state.wikipediaTool,
                     retained.state.webSearchTool,
+                    retained.state.calculatorTool,
                 )
             } else {
                 retained?.resource?.let { conversations.invalidate(it, cancelFirst = false) }
@@ -436,18 +445,36 @@ private class AndroidLiteRtLmSession(
         created.wikipediaTool?.beginTurn { event ->
             trySend(
                 LiteRtLmChunk(
-                    knowledgeToolEvent = event,
-                    knowledgeToolName = WIKIPEDIA_SEARCH_TOOL_NAME,
-                    knowledgeToolDisplayName = created.wikipediaTool.displayName,
+                    toolEvent = event,
+                    toolName = WIKIPEDIA_SEARCH_TOOL_NAME,
+                    toolDisplayName = created.wikipediaTool.displayName,
                 ),
             )
         }
         created.webSearchTool?.beginTurn { event ->
             trySend(
                 LiteRtLmChunk(
-                    knowledgeToolEvent = event,
-                    knowledgeToolName = WEB_SEARCH_TOOL_NAME,
-                    knowledgeToolDisplayName = created.webSearchTool.displayName,
+                    toolEvent = event,
+                    toolName = WEB_SEARCH_TOOL_NAME,
+                    toolDisplayName = created.webSearchTool.displayName,
+                ),
+            )
+        }
+        created.calculatorTool?.beginTurn { event ->
+            val mapped = when (event) {
+                CalculatorExecutionEvent.Started -> ApplicationToolExecutionEvent.Started
+                is CalculatorExecutionEvent.Finished ->
+                    if (event.failure == null) {
+                        ApplicationToolExecutionEvent.Succeeded(emptyList())
+                    } else {
+                        ApplicationToolExecutionEvent.Failed(ToolFailureReason.Unavailable)
+                    }
+            }
+            trySend(
+                LiteRtLmChunk(
+                    toolEvent = mapped,
+                    toolName = CALCULATOR_TOOL_NAME,
+                    toolDisplayName = "Local calculator",
                 ),
             )
         }
@@ -513,6 +540,7 @@ private class AndroidLiteRtLmSession(
                                     transcript = request.transcriptAfter(previousText),
                                     wikipediaTool = created.wikipediaTool,
                                     webSearchTool = created.webSearchTool,
+                                    calculatorTool = created.calculatorTool,
                                 ),
                             )
                         }
@@ -546,8 +574,8 @@ private class AndroidLiteRtLmSession(
         samplerConfig: SamplerConfig,
     ): ProductionConversation {
         val requested = request.normalizedAdvertisedToolNames()
-        require(supportedKnowledgeToolNames.containsAll(requested)) {
-            "Requested knowledge tool is not supported by the loaded model"
+        require(supportedToolNames.containsAll(requested)) {
+            "Requested tool is not supported by the loaded model"
         }
         val wikipediaTool =
             if (WIKIPEDIA_SEARCH_TOOL_NAME in requested) {
@@ -565,10 +593,12 @@ private class AndroidLiteRtLmSession(
             } else {
                 null
             }
+        val calculatorTool = if (CALCULATOR_TOOL_NAME in requested) CalculatorOpenApiTool(calculatorEngine) else null
         val configuredTools =
             listOfNotNull(
                 wikipediaTool?.let(::tool),
                 webSearchTool?.let(::tool),
+                calculatorTool?.let(::tool),
             )
         if (configuredTools.isNotEmpty()) {
             ExperimentalFlags.enableConversationConstrainedDecoding = true
@@ -587,6 +617,7 @@ private class AndroidLiteRtLmSession(
                 ),
                 wikipediaTool = wikipediaTool,
                 webSearchTool = webSearchTool,
+                calculatorTool = calculatorTool,
             )
         } finally {
             if (configuredTools.isNotEmpty()) {
@@ -599,6 +630,7 @@ private class AndroidLiteRtLmSession(
         val conversation: Conversation,
         val wikipediaTool: WikipediaOpenApiTool?,
         val webSearchTool: WebSearchOpenApiTool?,
+        val calculatorTool: CalculatorOpenApiTool?,
     )
 
     override fun cancel() {
@@ -632,6 +664,7 @@ private class AndroidLiteRtLmSession(
         val transcript: List<PromptChatMessage>,
         val wikipediaTool: WikipediaOpenApiTool? = null,
         val webSearchTool: WebSearchOpenApiTool? = null,
+        val calculatorTool: CalculatorOpenApiTool? = null,
     )
 }
 

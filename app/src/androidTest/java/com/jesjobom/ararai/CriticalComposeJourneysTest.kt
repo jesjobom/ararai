@@ -101,6 +101,7 @@ class CriticalComposeJourneysTest {
                         hasOverrides = contextTokens != 2_048 || temperature != 0.7f,
                     ),
                     wikipediaCompatible = compatible,
+                    calculatorCompatible = true,
                     webSearchCompatible = true,
                     onInstructionChange = { mode, value ->
                         settings =
@@ -117,6 +118,7 @@ class CriticalComposeJourneysTest {
                             }
                     },
                     onWikipediaEnabledChange = { settings = settings.copy(wikipediaEnabled = it) },
+                    onCalculatorEnabledChange = { settings = settings.copy(calculatorEnabled = it) },
                     webSearchSettings = webSearchSettings,
                     onVerifyWebProvider = { provider, _ ->
                         webSearchSettings =
@@ -160,6 +162,7 @@ class CriticalComposeJourneysTest {
         composeRule.onAllNodesWithText("Restore default")[0].performClick()
         composeRule.onNodeWithText(InstructionDefaults.CHAT).assertIsDisplayed()
         composeRule.onNodeWithText("Tools").performClick()
+        composeRule.onNodeWithTag("calculator-enabled").assertIsOff().performClick().assertIsOn()
         composeRule.onNodeWithText(
             "Uses Wikipedia/MediaWiki for eligible factual searches. Inference and conversation storage remain local.",
         ).assertIsDisplayed()

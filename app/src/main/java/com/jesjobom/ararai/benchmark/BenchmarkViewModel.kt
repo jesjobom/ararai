@@ -96,8 +96,8 @@ class BenchmarkViewModel(
                             }
                             is GenerationEvent.ReasoningToken -> Unit
                             is GenerationEvent.Metrics -> runtimeMetrics = event.value
-                            is GenerationEvent.KnowledgeToolStarted,
-                            is GenerationEvent.KnowledgeToolFinished,
+                            is GenerationEvent.ToolStarted,
+                            is GenerationEvent.ToolFinished,
                             -> Unit
                             is GenerationEvent.Failed -> failure = event.message
                             GenerationEvent.Completed -> completed = true
