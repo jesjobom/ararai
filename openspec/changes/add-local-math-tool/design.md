@@ -9,10 +9,10 @@ expression, performs deterministic local computation, and returns application-
 owned data. Reusing the LiteRT-LM structured-call loop is appropriate; pretending
 that local computation is a knowledge provider is not.
 
-The engine choice is unresolved. Building an expression parser in the application
-would create avoidable correctness and security risk, but accepting a third-party
-engine without evaluating its grammar, numerical model, license, Android behavior,
-maintenance, transitive graph, and size would move that risk into the dependency.
+The completed engine evaluation is recorded in
+`docs/local-math-engine-evaluation.md`. It selected EvalEx 3.7.0 core and rejected
+EvalEx-big-math for the initial slice, exp4j, parsii, mXparser, Symja, and a new
+app-owned parser.
 
 ## Decisions
 
@@ -34,8 +34,8 @@ cover at least:
 - resistance to dynamic code execution, reflection, filesystem/network access,
   and unexpectedly extensible functions.
 
-The evaluation artifact SHALL identify the selected approach and rejected
-alternatives with evidence. If the findings change supported operations,
+The evaluation artifact identifies the selected approach and rejected
+alternatives with evidence. If later findings change supported operations,
 precision guarantees, limits, dependency policy, UI disclosure, or feasibility,
 this active change SHALL be revised and strictly validated before implementation
 continues. A library is preferred only when it clears the gate; the proposal does
@@ -57,12 +57,18 @@ tool loading.
 ### Keep the model-facing calculator contract narrow
 
 The initial structured call exposes one expression and no executable callback,
-script, arbitrary precision setting, or user-controlled function definition. The
-final grammar and supported function set follow the research gate, but the
-baseline must support finite decimal arithmetic with grouping and the four basic
-operators. Additional powers, roots, constants, or transcendental functions are
-included only when their semantics and limits are documented by the selected
-approach.
+script, precision setting, variable, assignment, or user-controlled definition.
+Its allowlist is unary `+`/`-`; binary `+`, `-`, `*`, `/`, `%`, and bounded `^`;
+`abs`, `sqrt`, `min`, `max`, `ln`, `log10`, `sin`, `cos`, and `tan`; and `pi`/`e`.
+Trigonometric inputs use radians. Implicit multiplication and every other EvalEx
+operator, function, constant, and data type are rejected.
+
+The adapter uses `MathContext.DECIMAL128`. Basic decimal operations retain that
+34-significant-digit HALF_EVEN policy. Division may round; EvalEx core
+transcendentals and fractional powers are double-backed and are explicitly
+reported as approximate. EvalEx-big-math remains a later option if evidence shows
+that arbitrary-precision transcendentals justify its additional dependencies and
+version-compatibility risk.
 
 Inputs are bounded by schema and revalidated before evaluation. Results use a
 locale-independent machine representation for the model and may carry a separate

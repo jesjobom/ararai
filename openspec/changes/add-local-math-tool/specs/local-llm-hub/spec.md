@@ -41,6 +41,12 @@ The app SHALL offer an optional `calculator` tool that evaluates bounded
 mathematical expressions entirely on-device using the selected documented engine
 and returns a structured result to an eligible model.
 
+The initial grammar SHALL be limited to decimal/scientific numeric literals,
+parentheses, unary signs, documented arithmetic operators, documented numeric
+functions, and the `pi` and `e` constants. Trigonometric inputs SHALL use radians.
+Variables, assignment, implicit multiplication, custom definitions, nonnumeric
+types, and non-allowlisted evaluator capabilities SHALL be rejected.
+
 #### Scenario: Enable calculator for an eligible model
 
 - **GIVEN** calculator is enabled in Assistant configuration
@@ -55,6 +61,7 @@ and returns a structured result to an eligible model.
 - **WHEN** the model submits a valid expression within documented grammar and resource limits
 - **THEN** the app evaluates it without network access
 - **AND** returns a finite result in a locale-independent structured representation
+- **AND** identifies whether the result is exact, rounded, or approximate under the documented DECIMAL128 policy
 - **AND** the model can use that result to synthesize the final response.
 
 #### Scenario: Answer without calculation
@@ -129,3 +136,29 @@ settings.
 - **THEN** the action appears immediately above Settings
 - **AND** the screen provides `Instructions`, `Tools`, and `Generation` tabs
 - **AND** the Tools tab distinguishes external-network tools from local-compute tools.
+
+#### Scenario: Edit instructions independently
+
+- **WHEN** the user edits and saves the normal-Chat or Voice-Chat instruction
+- **THEN** the app enforces the documented size limit
+- **AND** persists the accepted text locally
+- **AND** applies it only to future turns from that interaction mode
+- **AND** does not modify already completed messages.
+
+#### Scenario: Review Wikipedia networking
+
+- **GIVEN** Wikipedia is not enabled
+- **WHEN** the user reviews the tool
+- **THEN** the screen explains that eligible queries and result retrieval use an
+  external Wikipedia/MediaWiki service
+- **AND** explains that inference and conversation storage remain local
+- **AND** no Wikipedia request occurs before enablement.
+
+#### Scenario: Selected model cannot use the enabled tool
+
+- **GIVEN** the Wikipedia preference is enabled
+- **AND** the selected model lacks verified Wikipedia tool capability
+- **WHEN** the tools screen or a conversation is active
+- **THEN** the app reports that Wikipedia is unavailable for the current model
+- **AND** does not advertise a hidden tool to that model
+- **AND** normal local generation remains available.

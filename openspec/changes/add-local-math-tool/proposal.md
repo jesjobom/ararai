@@ -9,20 +9,17 @@ value when composing the final response. The capability must preserve the app's
 local-first privacy model and must not interpret expressions through executable
 code.
 
-The exact expression engine is deliberately not selected in this proposal. A
-time-boxed library evaluation is the first implementation gate because Android
-compatibility, license, binary size, numerical semantics, supported functions,
-maintenance quality, and cancellation behavior may constrain or expand the
-safe product contract.
+The expression-engine evaluation selected EvalEx 3.7.0 behind an app-owned,
+strictly allowlisted adapter. The research found that core decimal arithmetic is
+BigDecimal-based while transcendental and fractional-power paths use double, so
+the product contract distinguishes exact, rounded, and approximate results. The
+larger EvalEx-big-math extension is deferred.
 
 ## What Changes
 
-- Evaluate maintained math-expression libraries against explicit product,
-  security, Android, licensing, precision, and size criteria before selecting an
-  engine or adding a dependency.
-- Record the evaluation and revise this change's proposal, design, requirements,
-  and tasks when its findings materially affect scope; implementation does not
-  begin until those documents are internally consistent.
+- Use EvalEx 3.7.0 after a recorded comparison of maintained math-expression
+  libraries and a minimal app-owned grammar against product, security, Android,
+  licensing, precision, dependency, and measured size criteria.
 - Generalize the application tool boundary so local deterministic tools are not
   represented as external knowledge providers.
 - Add an optional local `calculator` tool for models with individually verified

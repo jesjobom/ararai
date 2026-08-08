@@ -3339,3 +3339,135 @@ textual follow-up while avoiding unbounded historical media replay.
 - **WHEN** the user submits a prompt with new image attachments
 - **THEN** the request includes only the newly submitted images
 - **AND** does not mix them with historical images.
+
+### Requirement: Repository execution guidance
+
+The repository SHALL provide automatically discoverable guidance for coding
+agents that identifies the canonical specification workflow, required automated
+quality gate, project source boundaries, and checks that require a physical
+Android device.
+
+#### Scenario: Agent starts a repository change
+
+- **WHEN** a coding agent begins work in the ArarAI repository
+- **THEN** it can discover the repository operating guide without prior session context
+- **AND** the guide directs it to the consolidated OpenSpec contract and active change
+- **AND** the guide identifies `scripts/quality-gate.sh` as the required automated gate.
+
+#### Scenario: Automated validation reaches an environment boundary
+
+- **WHEN** an agent completes the automated quality gate without a connected supported device
+- **THEN** the guide prevents it from claiming real model, GPU, microphone, TTS, memory, or thermal validation
+- **AND** directs it to `docs/device-validation.md` for those checks.
+
+### Requirement: Bounded conversation history presentation
+
+Chat SHALL preserve every canonical conversation message while initially loading
+only a bounded recent window for presentation. The user SHALL be able to request
+older messages in bounded increments without changing their content or order.
+
+#### Scenario: Open a long conversation
+
+- **GIVEN** a conversation contains more messages than the initial display window
+- **WHEN** the user opens that conversation
+- **THEN** Chat loads and displays the most recent bounded window in chronological order
+- **AND** indicates that older messages are available
+- **AND** does not delete or rewrite messages outside the window.
+
+#### Scenario: Load older conversation history
+
+- **GIVEN** older messages exist before the displayed window
+- **WHEN** the user requests older messages
+- **THEN** Chat prepends the next bounded page in canonical chronological order
+- **AND** retains the currently displayed messages without duplication
+- **AND** eventually reports that no older messages remain.
+
+### Requirement: Responsive conversation persistence
+
+Interactive conversation reads and writes that can touch SQLite or decode stored
+payloads SHALL execute away from the Android main thread.
+
+#### Scenario: Submit or switch a conversation
+
+- **WHEN** the user submits a turn or switches, renames, deletes, or clears a conversation
+- **THEN** database work executes on the configured persistence dispatcher
+- **AND** resulting UI state is published after the operation completes
+- **AND** repeated input cannot create duplicate operations while one is active.
+
+### Requirement: Efficient conversation media lookup
+
+Conversation deletion SHALL identify the session's media references without
+loading and decoding every message payload.
+
+#### Scenario: Delete a conversation with media
+
+- **WHEN** a conversation containing app-owned media is deleted
+- **THEN** the store queries its distinct media references directly
+- **AND** cleanup deletes only files no longer referenced by another conversation.
+
+### Requirement: Explicit Chat controller lifecycle
+
+The application SHALL give each Chat controller an explicit, idempotent disposal
+boundary that cancels work owned by that controller without cancelling an
+externally supplied parent scope.
+
+#### Scenario: Chat owner leaves composition
+
+- **WHEN** the Compose owner disposes the Chat controller
+- **THEN** active generation and delayed controller work are cancelled
+- **AND** subsequent controller commands do not start new work
+- **AND** repeated disposal has no additional effect
+
+### Requirement: Centralized application controller ownership
+
+The application SHALL construct the shared local model runtime and its Chat,
+Voice Chat, benchmark, and diagnostic controllers in a dedicated composition
+root with one explicit disposal boundary.
+
+#### Scenario: Application composition is removed
+
+- **WHEN** the application controller owner leaves composition
+- **THEN** its controllers and shared local model runtime are closed
+- **AND** normal Chat and Voice Chat used the same conversation selection,
+  coordinator, store, and engine for the owner's lifetime
+
+### Requirement: Focused LiteRT lifecycle policy
+
+The LiteRT integration SHALL keep generic resource ownership and pure conversation
+reuse decisions separate from Android SDK-specific inference callbacks.
+
+#### Scenario: LiteRT session replaces or cancels a conversation
+
+- **WHEN** a retained conversation is incompatible or an active generation is cancelled
+- **THEN** the focused ownership policy disposes each claimed resource at most once
+- **AND** the reuse policy accepts only a matching non-null session and transcript
+
+### Requirement: Third-party license disclosure
+
+The application SHALL provide a user-accessible open-source license disclosure
+that distinguishes the ArarAI project license from third-party licenses.
+
+#### Scenario: User opens dependency licenses
+
+- **WHEN** the user selects Open-source licenses from Settings
+- **THEN** the application shows the resolved Gradle libraries and their
+  available attribution and license information
+- **AND** the disclosure includes transitive runtime dependencies rather than
+  only the dependencies declared directly by the application
+
+#### Scenario: User inspects native and model notices
+
+- **WHEN** the user opens the license disclosure
+- **THEN** the application identifies the native whisper.cpp runtime and each
+  downloadable model family outside the Gradle graph
+- **AND** it provides the reviewed license identifier and upstream source or
+  license link for each
+
+#### Scenario: Dependency or catalog artifacts change
+
+- **WHEN** a build dependency, native source revision, or model artifact is
+  intentionally updated
+- **THEN** the project provides a repeatable process to regenerate or review the
+  affected license disclosure
+- **AND** unknown or ambiguous license metadata remains visible to maintainers
+  for explicit review

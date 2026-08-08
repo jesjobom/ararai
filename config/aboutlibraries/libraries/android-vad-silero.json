@@ -1,0 +1,8 @@
+{
+  "uniqueId": "com.github.gkonovalov.android-vad:silero",
+  "name": "Android VAD - Silero",
+  "website": "https://github.com/gkonovalov/android-vad",
+  "licenses": [
+    "MIT"
+  ]
+}

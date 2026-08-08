@@ -480,11 +480,13 @@ class CriticalComposeJourneysTest {
     @Test
     fun themeSelectionUpdatesVisibleSelectedState() {
         var themeMode by mutableStateOf(ThemeMode.System)
+        var licensesOpened = false
         composeRule.setContent {
             MaterialTheme {
                 SettingsScreen(
                     themeMode = themeMode,
                     onThemeModeChange = { themeMode = it },
+                    onOpenSourceLicenses = { licensesOpened = true },
                     onBack = {},
                 )
             }
@@ -493,7 +495,9 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithTag("theme-option-system").assertIsSelected()
         composeRule.onNodeWithTag("theme-option-dark").assertIsNotSelected().performClick()
         composeRule.onNodeWithTag("theme-option-dark").assertIsSelected()
+        composeRule.onNodeWithTag("open-source-licenses").performScrollTo().performClick()
         composeRule.runOnIdle { assertEquals(ThemeMode.Dark, themeMode) }
+        composeRule.runOnIdle { assertTrue(licensesOpened) }
     }
 
     @Test

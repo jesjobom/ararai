@@ -17,6 +17,13 @@
     <string name="language_portuguese_brazil_description">Usar português do Brasil</string>
     <string name="settings_theme">Tema</string>
     <string name="settings_theme_description">Escolha um tema ou use a configuração do dispositivo.</string>
+    <string name="settings_legal">Informações legais</string>
+    <string name="open_source_licenses_title">Licenças de código aberto</string>
+    <string name="open_source_licenses_description">Veja as licenças e atribuições de bibliotecas, componentes nativos e modelos.</string>
+    <string name="open_source_licenses_explanation">O ArarAI é licenciado sob a Apache License 2.0. Bibliotecas, componentes nativos e modelos baixados de terceiros permanecem sujeitos às próprias licenças.</string>
+    <string name="open_source_licenses_external_title">Componentes nativos e modelos</string>
+    <string name="open_source_licenses_gradle_title">Bibliotecas da aplicação</string>
+    <string name="action_open_source">Abrir origem</string>
     <string name="theme_system">Sistema</string>
     <string name="theme_system_description">Usar a aparência do seu dispositivo</string>
     <string name="theme_light">Claro</string>

@@ -1,0 +1,8 @@
+{
+  "uniqueId": "com.github.gkonovalov.android-vad:webrtc",
+  "name": "Android VAD - WebRTC",
+  "website": "https://github.com/gkonovalov/android-vad",
+  "licenses": [
+    "MIT"
+  ]
+}

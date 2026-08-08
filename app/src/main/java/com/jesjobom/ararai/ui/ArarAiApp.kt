@@ -129,6 +129,7 @@ private enum class AppDestination {
     ModelStatus,
     WhisperBenchmark,
     Settings,
+    OpenSourceLicenses,
     InstructionsTools,
 }
 
@@ -234,6 +235,7 @@ internal fun ArarAiApp(
             AppDestination.ModelStatus,
             AppDestination.WhisperBenchmark,
             AppDestination.Settings,
+            AppDestination.OpenSourceLicenses,
             AppDestination.InstructionsTools,
             -> Unit
         }
@@ -303,6 +305,7 @@ internal fun ArarAiApp(
                 AppDestination.ModelStatus,
                 AppDestination.WhisperBenchmark,
                 AppDestination.Settings,
+                AppDestination.OpenSourceLicenses,
                 AppDestination.InstructionsTools,
                 -> Unit
             }
@@ -412,7 +415,11 @@ internal fun ArarAiApp(
             appliedApplicationLanguage = appliedApplicationLanguage,
             onApplicationLanguageChange = onApplicationLanguageChange,
             onRestartApplication = onRestartApplication,
+            onOpenSourceLicenses = { destination = AppDestination.OpenSourceLicenses },
             onBack = { returnHome() },
+        )
+        AppDestination.OpenSourceLicenses -> OpenSourceLicensesScreen(
+            onBack = { destination = AppDestination.Settings },
         )
         AppDestination.InstructionsTools -> InstructionsAndToolsScreen(
             settings = instructionSettings,
@@ -631,6 +638,7 @@ internal fun SettingsScreen(
     appliedApplicationLanguage: ApplicationLanguage = applicationLanguage,
     onApplicationLanguageChange: (ApplicationLanguage) -> Unit = {},
     onRestartApplication: () -> Unit = {},
+    onOpenSourceLicenses: () -> Unit = {},
     onBack: () -> Unit,
 ) {
     ArarAiScaffold(title = stringResource(R.string.settings_title), onBack = onBack) { modifier ->
@@ -700,6 +708,31 @@ internal fun SettingsScreen(
                     description = mode.description(),
                     onClick = { onThemeModeChange(mode) },
                 )
+            }
+            Text(
+                text = stringResource(R.string.settings_legal),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            ElevatedCard(
+                onClick = onOpenSourceLicenses,
+                modifier = Modifier.testTag("open-source-licenses"),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.open_source_licenses_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = stringResource(R.string.open_source_licenses_description),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

@@ -49,6 +49,8 @@ inference remains device-, driver-, model-, and workload-dependent.
   measurements.
 - Conversations, preferences, models, runtime caches, and Chat media are local.
   Android backup and device transfer are disabled for the application.
+- Settings exposes generated license and attribution metadata for the resolved
+  Gradle graph plus reviewed disclosures for native and downloadable artifacts.
 
 Model downloads contact only the artifact URLs declared in the catalog. A valid
 local model is sufficient for the core Chat inference flow.

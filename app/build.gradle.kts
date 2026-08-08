@@ -5,6 +5,7 @@ import java.time.format.DateTimeFormatter
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.mikepenz.aboutlibraries.plugin.android")
     id("dev.detekt")
 }
 
@@ -91,6 +92,14 @@ detekt {
     parallel = true
 }
 
+aboutLibraries {
+    collect {
+        configPath = file("../config/aboutlibraries")
+        fetchRemoteLicense = false
+        includePlatform = true
+    }
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
 
@@ -108,6 +117,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:$liteRtLmVersion")
     implementation("com.google.mlkit:language-id:17.0.6")
+    implementation("com.mikepenz:aboutlibraries-core:14.1.0")
     implementation("com.github.gkonovalov.android-vad:webrtc:2.0.10")
     implementation("com.github.gkonovalov.android-vad:silero:2.0.10")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

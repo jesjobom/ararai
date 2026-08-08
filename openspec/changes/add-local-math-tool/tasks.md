@@ -1,9 +1,9 @@
 ## 1. Research and specification gate
 
-- [ ] 1.1 Define a representative evaluator corpus covering supported arithmetic, candidate advanced operations, precedence, precision, locale, domain errors, adversarial inputs, complexity, cancellation, and performance.
-- [ ] 1.2 Compare maintained expression engines and a minimal app-owned grammar against license, Android API 28 compatibility, maintenance/supply-chain posture, transitive graph, measured binary-size impact, numerical semantics, resource control, performance, and arbitrary-execution risk.
-- [ ] 1.3 Record the selected approach, rejected alternatives, evidence, supported grammar, numerical/rounding policy, hard limits, dependency impact, and residual risks in a repository-local decision artifact.
-- [ ] 1.4 Revise this proposal, design, spec delta, and remaining tasks for every material restriction or safe capability found by the research; run strict OpenSpec validation before adding a production dependency or calculator code.
+- [x] 1.1 Define a representative evaluator corpus covering supported arithmetic, candidate advanced operations, precedence, precision, locale, domain errors, adversarial inputs, complexity, cancellation, and performance.
+- [x] 1.2 Compare maintained expression engines and a minimal app-owned grammar against license, Android API 28 compatibility, maintenance/supply-chain posture, transitive graph, measured binary-size impact, numerical semantics, resource control, performance, and arbitrary-execution risk.
+- [x] 1.3 Record the selected approach, rejected alternatives, evidence, supported grammar, numerical/rounding policy, hard limits, dependency impact, and residual risks in `docs/local-math-engine-evaluation.md`.
+- [x] 1.4 Revise this proposal, design, spec delta, and remaining tasks for every material restriction or safe capability found by the research; run strict OpenSpec validation before adding a production dependency or calculator code.
 
 ## 2. Generic tool boundary
 
@@ -13,7 +13,7 @@
 
 ## 3. Local calculation engine
 
-- [ ] 3.1 Add the selected dependency with locking and verification metadata, or implement the approved minimal grammar, as determined by the research gate.
+- [ ] 3.1 Add `com.ezylang:EvalEx:3.7.0` with locking, verification metadata, and Apache-2.0 notice; do not add EvalEx-big-math in this change.
 - [ ] 3.2 Implement bounded parsing/evaluation behind an app-owned interface with stable structured success and failure results.
 - [ ] 3.3 Enforce the researched input, complexity, execution, cancellation, numerical, and locale-independent formatting policies.
 - [ ] 3.4 Verify the engine against the evaluator corpus, including malformed/adversarial input, undefined/non-finite outcomes, repeatability, and concurrency.

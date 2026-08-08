@@ -39,6 +39,9 @@ backend, or external database.
   Jetpack Compose; model benchmarks are opened from downloaded model cards.
 - Persistent System, Light, and Dark appearance selection with Material dynamic
   colors on supported devices.
+- A localized Settings disclosure lists resolved direct and transitive Gradle
+  library licenses together with reviewed native-runtime and downloadable-model
+  notices.
 - Optional Wikipedia knowledge retrieval for the validated Gemma 4 E2B and E4B
   bundles in normal Chat and Voice Chat. The model selects structured calls
   semantically; successful answers retain bounded canonical source links in the
