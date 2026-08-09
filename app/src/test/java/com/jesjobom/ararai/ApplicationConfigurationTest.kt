@@ -8,6 +8,24 @@ import javax.xml.parsers.DocumentBuilderFactory
 
 class ApplicationConfigurationTest {
     @Test
+    fun `application declares branded launcher and launch theme`() {
+        val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(sourceManifest())
+        val application = document.getElementsByTagName("application").item(0) as org.w3c.dom.Element
+        val activities = document.getElementsByTagName("activity")
+        val mainActivity =
+            (0 until activities.length)
+                .map { activities.item(it) as org.w3c.dom.Element }
+                .first { it.getAttribute("android:name") == ".MainActivity" }
+
+        assertEquals("@mipmap/ic_launcher", application.getAttribute("android:icon"))
+        assertEquals("@mipmap/ic_launcher_round", application.getAttribute("android:roundIcon"))
+        assertEquals("@style/Theme.ArarAI.Starting", mainActivity.getAttribute("android:theme"))
+        assertTrue(sourceResource("mipmap-anydpi-v26/ic_launcher.xml").isFile)
+        assertTrue(sourceResource("mipmap-anydpi-v26/ic_launcher_round.xml").isFile)
+        assertTrue(sourceResource("values-v31/styles.xml").isFile)
+    }
+
+    @Test
     fun `launcher activity is locked to portrait`() {
         val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(sourceManifest())
         val activities = document.getElementsByTagName("activity")
@@ -56,5 +74,14 @@ class ApplicationConfigurationTest {
         return candidates.firstOrNull(File::isFile).also {
             assertTrue("Unable to locate source AndroidManifest.xml from ${File(".").absolutePath}", it != null)
         }!!
+    }
+
+    private fun sourceResource(relativePath: String): File {
+        val candidates =
+            listOf(
+                File("app/src/main/res/$relativePath"),
+                File("src/main/res/$relativePath"),
+            )
+        return candidates.firstOrNull(File::isFile) ?: candidates.first()
     }
 }

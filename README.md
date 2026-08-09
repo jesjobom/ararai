@@ -1,5 +1,7 @@
 # ArarAI
 
+![ArarAI project banner](docs/images/ararai-banner.webp)
+
 ArarAI is an Android application for running configured open LLMs locally on an
 arm64 device. Models, inference, conversations, and Chat media stay app-owned;
 the core Chat flow does not depend on a remote inference API, application

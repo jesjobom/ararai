@@ -3,11 +3,13 @@ package com.jesjobom.ararai.ui
 import android.app.ActivityManager
 import android.content.Context
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -59,9 +61,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -510,39 +515,42 @@ internal fun ArarAiScaffold(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     onBack: (() -> Unit)? = null,
+    showTopBar: Boolean = true,
     content: @Composable (Modifier) -> Unit,
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        subtitle?.let {
+            if (showTopBar) {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = it,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = title,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold,
                             )
+                            subtitle?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
-                    }
-                },
-                navigationIcon = {
-                    if (onBack != null) {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(R.string.action_back),
-                            )
+                    },
+                    navigationIcon = {
+                        if (onBack != null) {
+                            IconButton(onClick = onBack) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = stringResource(R.string.action_back),
+                                )
+                            }
                         }
-                    }
-                },
-            )
+                    },
+                )
+            }
         },
     ) { padding ->
         content(
@@ -568,6 +576,7 @@ internal fun HomeScreen(
     ArarAiScaffold(
         title = stringResource(R.string.app_name),
         subtitle = appVersionLabel,
+        showTopBar = false,
     ) { modifier ->
         Column(
             modifier = modifier
@@ -575,6 +584,7 @@ internal fun HomeScreen(
                 .padding(vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            HomeBrandHeader(appVersionLabel = appVersionLabel)
             Text(
                 text = stringResource(R.string.home_headline),
                 style = MaterialTheme.typography.headlineSmall,
@@ -628,6 +638,34 @@ internal fun HomeScreen(
                 detail = stringResource(R.string.home_settings_description),
                 icon = Icons.Filled.Settings,
                 onAction = onOpenSettings,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeBrandHeader(appVersionLabel: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color(0xFF010923),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ararai_wordmark),
+                contentDescription = stringResource(R.string.app_name),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(3f),
+                contentScale = ContentScale.Fit,
+            )
+            Text(
+                text = appVersionLabel,
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.78f),
             )
         }
     }

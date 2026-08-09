@@ -324,6 +324,8 @@ class CriticalComposeJourneysTest {
             }
         }
 
+        composeRule.onNodeWithContentDescription("ArarAI").assertIsDisplayed()
+        composeRule.onNodeWithText("test").assertIsDisplayed()
         composeRule.onNodeWithText("Chat").performClick()
         composeRule.onNodeWithText("Message").performTextInput("Hello")
         composeRule.onNodeWithContentDescription("Send").performClick()

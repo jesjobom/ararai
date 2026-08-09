@@ -21,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.jesjobom.ararai.chat.DeferredNewChatSessionStore
 import com.jesjobom.ararai.chat.FileChatMediaRepository
 import com.jesjobom.ararai.chat.SharedPreferencesChatPreferences
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
 
     @Suppress("LongMethod")
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         handleNavigationIntent(intent)
 
