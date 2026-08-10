@@ -27,4 +27,24 @@ class ChatPreferencesTest {
 
         assertFalse(SharedPreferencesChatPreferences(context).showAudioTranscriptions.value)
     }
+
+    @Test
+    fun `reasoning choices default off and persist independently`() {
+        val preferences = SharedPreferencesChatPreferences(context)
+        assertFalse(preferences.reasoningEnabled.value)
+        assertFalse(preferences.showReasoning.value)
+
+        preferences.setReasoningEnabled(true)
+        preferences.setShowReasoning(true)
+
+        val restored = SharedPreferencesChatPreferences(context)
+        assertTrue(restored.reasoningEnabled.value)
+        assertTrue(restored.showReasoning.value)
+
+        restored.setReasoningEnabled(false)
+
+        val updated = SharedPreferencesChatPreferences(context)
+        assertFalse(updated.reasoningEnabled.value)
+        assertTrue(updated.showReasoning.value)
+    }
 }

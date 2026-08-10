@@ -93,9 +93,15 @@ internal class ChatImageImporter(
 
 internal fun Context.chatImageImporter(mediaRepository: ChatMediaRepository): ChatImageImporter = ChatImageImporter(
     mediaRepository = mediaRepository,
-    openSource = { uri -> contentResolver.openInputStream(uri) },
-    sourceDisplayName = { uri -> uri.displayName(this) },
-    declaredSourceSize = { uri -> uri.size(this) },
+    openSource = { uri ->
+        if (uri.scheme == "file") {
+            File(uri.path.orEmpty()).inputStream()
+        } else {
+            contentResolver.openInputStream(uri)
+        }
+    },
+    sourceDisplayName = { uri -> if (uri.scheme == "file") File(uri.path.orEmpty()).name else uri.displayName(this) },
+    declaredSourceSize = { uri -> if (uri.scheme == "file") File(uri.path.orEmpty()).length() else uri.size(this) },
 )
 
 private fun InputStream.copyToBounded(

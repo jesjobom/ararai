@@ -231,6 +231,7 @@ class ChatSessionStoreTest {
             ChatRole.User,
             MessageContent.AudioPromptContent(
                 audio = AudioPrompt("file:///spoken.wav", "audio/wav", durationMillis = 900),
+                imageAttachments = listOf(ImageAttachment("file:///spoken.jpg", "image/jpeg", "spoken.jpg", 42)),
                 transcript = "hello locally",
                 transcriptionStatus = AudioTranscriptionStatus.Completed,
                 transcriptionFailureKind = AudioTranscriptionFailureKind.EmptyResults,
@@ -243,6 +244,11 @@ class ChatSessionStoreTest {
         val content = store.getMessages(session.id).single().content as MessageContent.AudioPromptContent
 
         assertEquals("hello locally", content.transcript)
+        assertEquals("file:///spoken.jpg", content.imageAttachments.single().uri)
+        assertEquals(
+            setOf("file:///spoken.wav", "file:///spoken.jpg"),
+            store.referencedMediaUris(),
+        )
         assertEquals(AudioTranscriptionStatus.Completed, content.transcriptionStatus)
         assertEquals(AudioTranscriptionFailureKind.EmptyResults, content.transcriptionFailureKind)
         assertEquals("events=results:hypotheses=0", content.transcriptionDiagnostic)

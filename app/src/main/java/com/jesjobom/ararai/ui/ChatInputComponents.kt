@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material3.AlertDialog
@@ -80,6 +81,8 @@ internal fun ChatInputBar(
         val coroutineScope = rememberCoroutineScope()
         var imageImportError by remember { mutableStateOf<String?>(null) }
         var isImportingImage by remember { mutableStateOf(false) }
+        var imageSourceOpen by remember { mutableStateOf(false) }
+        var cameraOpen by remember { mutableStateOf(false) }
         var audioRecorderOpen by remember { mutableStateOf(false) }
         var activeRecorder by remember { mutableStateOf<ChatAudioRecording?>(null) }
         var activeRecordingFile by remember { mutableStateOf<File?>(null) }
@@ -149,10 +152,7 @@ internal fun ChatInputBar(
                 recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
         }
-        val imagePicker = rememberLauncherForActivityResult(
-            ActivityResultContracts.OpenDocument(),
-        ) { uri ->
-            uri ?: return@rememberLauncherForActivityResult
+        fun importImage(uri: android.net.Uri, deleteSource: Boolean = false) {
             imageImportError = null
             isImportingImage = true
             coroutineScope.launch {
@@ -170,8 +170,28 @@ internal fun ChatInputBar(
                     if (error is kotlinx.coroutines.CancellationException) throw error
                     imageImportError = error.message ?: "Unable to import selected image"
                 } finally {
+                    if (deleteSource && uri.scheme == "file") File(uri.path.orEmpty()).delete()
                     isImportingImage = false
                 }
+            }
+        }
+        val imagePicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            uri ?: return@rememberLauncherForActivityResult
+            importImage(uri)
+        }
+        val cameraPermissionDenied = stringResource(R.string.chat_camera_permission_denied)
+        val cameraPermission =
+            rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                if (granted) cameraOpen = true else imageImportError = cameraPermissionDenied
+            }
+        fun openCamera() {
+            imageSourceOpen = false
+            if (context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                cameraOpen = true
+            } else {
+                cameraPermission.launch(Manifest.permission.CAMERA)
             }
         }
         DisposableEffect(Unit) {
@@ -236,9 +256,9 @@ internal fun ChatInputBar(
 
                 if (canAttachImage || canUseAudioPrompt) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (canAttachImage && audioPrompt == null) {
+                        if (canAttachImage) {
                             OutlinedButton(
-                                onClick = { imagePicker.launch(arrayOf("image/*")) },
+                                onClick = { imageSourceOpen = true },
                                 enabled = !isImportingImage,
                             ) {
                                 Icon(imageVector = Icons.Filled.AttachFile, contentDescription = null)
@@ -248,7 +268,7 @@ internal fun ChatInputBar(
                                 )
                             }
                         }
-                        if (canUseAudioPrompt && imageAttachments.isEmpty() && prompt.isBlank()) {
+                        if (canUseAudioPrompt && prompt.isBlank()) {
                             OutlinedButton(onClick = ::openAudioRecorder) {
                                 Icon(imageVector = Icons.Filled.GraphicEq, contentDescription = null)
                                 Text(
@@ -305,6 +325,51 @@ internal fun ChatInputBar(
                         audioRecorderOpen = false
                         recordingError = null
                     }
+                },
+            )
+        }
+        if (imageSourceOpen) {
+            AlertDialog(
+                onDismissRequest = { imageSourceOpen = false },
+                title = { Text(stringResource(R.string.chat_image_source_title)) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = ::openCamera, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Filled.CameraAlt, contentDescription = null)
+                            Text(stringResource(R.string.chat_take_photo), modifier = Modifier.padding(start = 6.dp))
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                imageSourceOpen = false
+                                imagePicker.launch(arrayOf("image/*"))
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Filled.AttachFile, contentDescription = null)
+                            Text(
+                                stringResource(R.string.chat_choose_gallery),
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { imageSourceOpen = false }) { Text(stringResource(R.string.action_cancel)) }
+                },
+            )
+        }
+        if (cameraOpen) {
+            ChatCameraCaptureDialog(
+                mediaServices = mediaServices,
+                onCaptured = { uri ->
+                    cameraOpen = false
+                    importImage(uri, deleteSource = true)
+                },
+                onDismiss = { cameraOpen = false },
+                onError = {
+                    imageImportError = it
+                    cameraOpen = false
                 },
             )
         }

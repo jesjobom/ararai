@@ -1,5 +1,6 @@
 package com.jesjobom.ararai
 
+import android.graphics.Bitmap
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -27,6 +29,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import com.jesjobom.ararai.chat.AssistantCompletionStatus
 import com.jesjobom.ararai.chat.ChatViewModel
+import com.jesjobom.ararai.chat.ImageAttachment
 import com.jesjobom.ararai.chat.InMemoryChatSessionStore
 import com.jesjobom.ararai.chat.InstructionDefaults
 import com.jesjobom.ararai.chat.InstructionSettings
@@ -50,6 +53,7 @@ import com.jesjobom.ararai.model.ModelTask
 import com.jesjobom.ararai.settings.ThemeMode
 import com.jesjobom.ararai.ui.ChatAudioPlayerFactory
 import com.jesjobom.ararai.ui.ChatAudioRecorderFactory
+import com.jesjobom.ararai.ui.ChatCameraFileFactory
 import com.jesjobom.ararai.ui.ChatDraftCleaner
 import com.jesjobom.ararai.ui.ChatImageDecoder
 import com.jesjobom.ararai.ui.ChatImageImportService
@@ -277,6 +281,42 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithText("Incomplete response").assertIsDisplayed()
         composeRule.onNodeWithText("partial reasoning").assertIsDisplayed()
         composeRule.onAllNodesWithText("...").assertCountEquals(0)
+    }
+
+    @Test
+    fun historicalChatImageOpensAndClosesExpandedView() {
+        val mediaServices =
+            fakeMediaServices().copy(
+                imageDecoder = ChatImageDecoder { _, _ ->
+                    Bitmap.createBitmap(32, 24, Bitmap.Config.ARGB_8888)
+                },
+            )
+        composeRule.setContent {
+            MaterialTheme {
+                MessageContentView(
+                    content =
+                    MessageContent.TextPrompt(
+                        text = "Photo context",
+                        imageAttachments =
+                        listOf(
+                            ImageAttachment(
+                                uri = "/test/photo.jpg",
+                                mimeType = "image/jpeg",
+                                displayName = "Captured photo",
+                            ),
+                        ),
+                    ),
+                    showReasoning = false,
+                    showAudioTranscriptions = false,
+                    mediaServices = mediaServices,
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Captured photo").assertHasClickAction().performClick()
+        composeRule.onNodeWithTag("expanded-chat-image").assertIsDisplayed()
+        composeRule.onNodeWithText("Close").performClick()
+        composeRule.onAllNodesWithTag("expanded-chat-image").assertCountEquals(0)
     }
 
     @Test
@@ -517,11 +557,17 @@ class CriticalComposeJourneysTest {
                         spokenRange = 6..11,
                         readingAnchor = 11,
                     ),
+                    mediaServices = fakeMediaServices(),
                     onEnter = {},
                     onStart = {},
                     onStop = {},
                     onDismissError = {},
                     onSettings = {},
+                    onCameraOpened = {},
+                    onCameraPreviewReady = {},
+                    onCameraClosed = {},
+                    onCapturedImage = {},
+                    onRemoveCapturedImage = {},
                     onOpenModels = {},
                     onBack = {},
                 )
@@ -542,11 +588,17 @@ class CriticalComposeJourneysTest {
             MaterialTheme {
                 VoiceChatScreen(
                     state = VoiceChatUiState(canEnableReasoning = true),
+                    mediaServices = fakeMediaServices(),
                     onEnter = {},
                     onStart = {},
                     onStop = {},
                     onDismissError = {},
                     onSettings = { savedSettings = it },
+                    onCameraOpened = {},
+                    onCameraPreviewReady = {},
+                    onCameraClosed = {},
+                    onCapturedImage = {},
+                    onRemoveCapturedImage = {},
                     onOpenModels = {},
                     onBack = {},
                 )
@@ -634,6 +686,7 @@ class CriticalComposeJourneysTest {
         audioPlayerFactory = ChatAudioPlayerFactory { _, _ -> error("unused") },
         imageDecoder = ChatImageDecoder { _, _ -> null },
         draftCleaner = ChatDraftCleaner {},
+        cameraFileFactory = ChatCameraFileFactory { error("unused") },
     )
 
     private class NoOpTextToSpeechService : ChatTextToSpeechService {

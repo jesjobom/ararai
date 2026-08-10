@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.voice
 
 import com.jesjobom.ararai.chat.ChatSessionUiState
+import com.jesjobom.ararai.chat.ImageAttachment
 import com.jesjobom.ararai.knowledge.KnowledgeSource
 import com.jesjobom.ararai.ui.UserMessageKey
 
@@ -65,6 +66,7 @@ data class VoiceChatUiState(
     val phase: VoiceChatPhase = VoiceChatPhase.Idle,
     val modelAvailable: Boolean = false,
     val modelSupportsAudio: Boolean = false,
+    val modelSupportsImage: Boolean = false,
     val canEnableReasoning: Boolean = false,
     val transcriptionAvailable: Boolean = false,
     val isLoadingModel: Boolean = false,
@@ -83,6 +85,9 @@ data class VoiceChatUiState(
     val errorKey: UserMessageKey? = null,
     val sessions: List<ChatSessionUiState> = emptyList(),
     val selectedSessionId: String? = null,
+    val pendingImageAttachment: ImageAttachment? = null,
+    val cameraFlowActive: Boolean = false,
+    val automaticPhotoCaptureRequestId: Long? = null,
 ) {
     val canStart: Boolean get() =
         modelAvailable &&
@@ -91,4 +96,8 @@ data class VoiceChatUiState(
             phase == VoiceChatPhase.Idle
     val isActive: Boolean get() = phase != VoiceChatPhase.Idle && phase != VoiceChatPhase.Error
     val canDeleteCurrentSession: Boolean get() = selectedSessionId != null && sessions.size > 1
+    val canCapturePhoto: Boolean get() =
+        phase == VoiceChatPhase.Listening &&
+            modelSupportsImage &&
+            (modelSupportsAudio || transcriptionAvailable)
 }

@@ -54,7 +54,10 @@ data class PromptRequest(
         get() = (content as? MessageContent.TextPrompt)?.text
 
     val imageAttachments: List<ImageAttachment>
-        get() = (content as? MessageContent.TextPrompt)?.imageAttachments.orEmpty()
+        get() = when (content) {
+            is MessageContent.TextPrompt -> content.imageAttachments
+            is MessageContent.AudioPromptContent -> content.imageAttachments
+        }
 
     val audioPrompt: AudioPrompt?
         get() = (content as? MessageContent.AudioPromptContent)?.audio

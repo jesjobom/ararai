@@ -25,6 +25,7 @@ import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import com.konovalov.vad.silero.config.FrameSize as SileroFrameSize
 import com.konovalov.vad.silero.config.Mode as SileroMode
 import com.konovalov.vad.silero.config.SampleRate as SileroSampleRate
@@ -59,6 +60,7 @@ data class CapturedVoiceTurn(
 
 interface VoiceTurnCapture : Closeable {
     fun start(onTurn: (CapturedVoiceTurn) -> Unit, onError: (String) -> Unit)
+    fun resetSilenceWindow() = Unit
     fun cancel()
 }
 
@@ -68,6 +70,7 @@ class AndroidVoiceTurnCapture(
     private val settings: VoiceChatSettings,
 ) : VoiceTurnCapture {
     private val active = AtomicBoolean(false)
+    private val silenceWindowReset = AtomicLong(0L)
     private var recorder: AudioRecord? = null
     private var thread: Thread? = null
     private var file: File? = null
@@ -113,6 +116,7 @@ class AndroidVoiceTurnCapture(
     ) {
         var bytes = 0L
         var turnCommitted = false
+        var observedSilenceWindowReset = silenceWindowReset.get()
         val frameMillis = detector.frameBytes * 1_000L / (SAMPLE_RATE * 2L)
         val gate = VoiceCaptureGate(settings, frameMillis)
         val bufferedFrames = ArrayDeque<ByteArray>()
@@ -130,6 +134,11 @@ class AndroidVoiceTurnCapture(
                     } else {
                         output.write(frame)
                         bytes += read
+                    }
+                    val requestedSilenceWindowReset = silenceWindowReset.get()
+                    if (requestedSilenceWindowReset != observedSilenceWindowReset) {
+                        gate.resetSilenceWindow()
+                        observedSilenceWindowReset = requestedSilenceWindowReset
                     }
                     when (gate.accept(detector.isSpeech(frame))) {
                         VoiceCaptureDecision.Commit -> {
@@ -171,6 +180,10 @@ class AndroidVoiceTurnCapture(
         releasePlatformCapture()
         file?.delete()
         file = null
+    }
+
+    override fun resetSilenceWindow() {
+        silenceWindowReset.incrementAndGet()
     }
 
     override fun close() = cancel()

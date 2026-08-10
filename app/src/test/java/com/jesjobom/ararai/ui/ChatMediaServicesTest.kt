@@ -32,6 +32,7 @@ class ChatMediaServicesTest {
                 },
                 imageDecoder = ChatImageDecoder { _, _ -> null },
                 draftCleaner = ChatDraftCleaner(deleted::add),
+                cameraFileFactory = ChatCameraFileFactory { File(root, "camera.jpg") },
             )
 
         assertSame(importedFile, services.imageImporter.import(Uri.EMPTY).file)

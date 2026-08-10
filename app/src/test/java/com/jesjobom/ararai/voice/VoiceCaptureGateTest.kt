@@ -37,4 +37,17 @@ class VoiceCaptureGateTest {
         assertEquals(VoiceCaptureDecision.Reset, gate.accept(speech = false))
         assertEquals(0, gate.voicedMillis)
     }
+
+    @Test fun `resetting silence window preserves committed speech and restarts trailing pause`() {
+        val gate = VoiceCaptureGate(settings, frameMillis = 100)
+
+        repeat(4) { assertEquals(VoiceCaptureDecision.Continue, gate.accept(speech = true)) }
+        assertEquals(VoiceCaptureDecision.Commit, gate.accept(speech = true))
+        repeat(10) { assertEquals(VoiceCaptureDecision.Continue, gate.accept(speech = false)) }
+
+        gate.resetSilenceWindow()
+
+        repeat(14) { assertEquals(VoiceCaptureDecision.Continue, gate.accept(speech = false)) }
+        assertEquals(VoiceCaptureDecision.Finish, gate.accept(speech = false))
+    }
 }

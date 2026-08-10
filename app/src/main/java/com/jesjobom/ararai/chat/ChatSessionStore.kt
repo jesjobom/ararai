@@ -240,7 +240,7 @@ class DeferredNewChatSessionStore(
 
 fun MessageContent.mediaUris(): Set<String> = when (this) {
     is MessageContent.TextPrompt -> imageAttachments.mapTo(linkedSetOf()) { it.uri }
-    is MessageContent.AudioPromptContent -> setOf(audio.uri)
+    is MessageContent.AudioPromptContent -> imageAttachments.mapTo(linkedSetOf(audio.uri)) { it.uri }
 }
 
 class InMemoryChatSessionStore : ChatSessionStore {
@@ -779,6 +779,15 @@ private object MessageContentCodec {
                     content.transcriptionDiagnostic.orEmpty(),
                     content.transcriptionMayBeIncomplete.toString(),
                     content.transcriptionIncompleteReason.orEmpty(),
+                    content.imageAttachments.size.toString(),
+                    *content.imageAttachments.flatMap { image ->
+                        listOf(
+                            image.uri,
+                            image.mimeType,
+                            image.displayName.orEmpty(),
+                            image.byteSize?.toString().orEmpty(),
+                        )
+                    }.toTypedArray(),
                 ).joinToString(separator = "\t") { it.encodeField() },
             )
     }
@@ -810,9 +819,24 @@ private object MessageContentCodec {
                     transcriptionDiagnostic = fields.getOrNull(9)?.takeIf { it.isNotBlank() },
                     transcriptionMayBeIncomplete = fields.getOrNull(10)?.toBooleanStrictOrNull() ?: false,
                     transcriptionIncompleteReason = fields.getOrNull(11)?.takeIf { it.isNotBlank() },
+                    imageAttachments = decodeAudioImages(fields),
                 )
             } ?: MessageContent.TextPrompt(legacyText)
         else -> decodeTextPrompt(payload, legacyText)
+    }
+
+    private fun decodeAudioImages(fields: List<String>): List<ImageAttachment> {
+        val count = fields.getOrNull(12)?.toIntOrNull()?.coerceAtLeast(0) ?: return emptyList()
+        return (0 until count).mapNotNull { index ->
+            val offset = 13 + index * 4
+            val uri = fields.getOrNull(offset)?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            ImageAttachment(
+                uri = uri,
+                mimeType = fields.getOrNull(offset + 1)?.takeIf(String::isNotBlank) ?: "image/jpeg",
+                displayName = fields.getOrNull(offset + 2)?.takeIf(String::isNotBlank),
+                byteSize = fields.getOrNull(offset + 3)?.toLongOrNull(),
+            )
+        }
     }
 
     private fun encodeTextPrompt(content: MessageContent.TextPrompt): String = buildString {

@@ -89,6 +89,7 @@ sealed interface MessageContent {
 
     data class AudioPromptContent(
         val audio: AudioPrompt,
+        val imageAttachments: List<ImageAttachment> = emptyList(),
         val transcript: String? = null,
         val transcriptionStatus: AudioTranscriptionStatus = AudioTranscriptionStatus.NotRequested,
         val transcriptionError: String? = null,

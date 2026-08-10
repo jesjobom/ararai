@@ -100,6 +100,12 @@ class ChatViewModel(
                 canUseAudioPrompt = initialModel.canUseRecordedAudio(),
                 canEnableReasoning = initialModel?.reasoningCapabilities?.request == true,
                 canShowReasoning = initialModel?.reasoningCapabilities?.output == true,
+                reasoningEnabled =
+                preferences.reasoningEnabled.value &&
+                    initialModel?.reasoningCapabilities?.request == true,
+                showReasoning =
+                preferences.showReasoning.value &&
+                    initialModel?.reasoningCapabilities?.output == true,
                 sessions = sessionStore.listSessions().toUiState(),
                 selectedSessionId = initialSession.id,
                 messages = displayedMessages(initialSession.id),
@@ -150,7 +156,6 @@ class ChatViewModel(
             } else {
                 it.copy(
                     prompt = "",
-                    imageAttachments = emptyList(),
                     audioPrompt = audio,
                     error = null,
                     errorKey = null,
@@ -158,7 +163,7 @@ class ChatViewModel(
             }
         }
         if (current.canUseAudioPrompt) {
-            deleteDraftMedia(current.imageAttachments.map { it.uri } + listOfNotNull(current.audioPrompt?.uri))
+            deleteDraftMedia(listOfNotNull(current.audioPrompt?.uri))
         }
     }
 
@@ -174,22 +179,18 @@ class ChatViewModel(
     }
 
     fun setReasoningEnabled(enabled: Boolean) {
+        if (!_uiState.value.canEnableReasoning && enabled) return
+        preferences.setReasoningEnabled(enabled)
         _uiState.update {
-            if (!it.canEnableReasoning && enabled) {
-                it
-            } else {
-                it.copy(reasoningEnabled = enabled && it.canEnableReasoning, error = null, errorKey = null)
-            }
+            it.copy(reasoningEnabled = enabled && it.canEnableReasoning, error = null, errorKey = null)
         }
     }
 
     fun setShowReasoning(show: Boolean) {
+        if (!_uiState.value.canShowReasoning && show) return
+        preferences.setShowReasoning(show)
         _uiState.update {
-            if (!it.canShowReasoning && show) {
-                it
-            } else {
-                it.copy(showReasoning = show && it.canShowReasoning, error = null, errorKey = null)
-            }
+            it.copy(showReasoning = show && it.canShowReasoning, error = null, errorKey = null)
         }
     }
 
@@ -464,8 +465,10 @@ class ChatViewModel(
                         canUseAudioPrompt = state.model.canUseRecordedAudio(),
                         canEnableReasoning = state.model.reasoningCapabilities.request,
                         canShowReasoning = state.model.reasoningCapabilities.output,
-                        reasoningEnabled = it.reasoningEnabled && state.model.reasoningCapabilities.request,
-                        showReasoning = it.showReasoning && state.model.reasoningCapabilities.output,
+                        reasoningEnabled =
+                        preferences.reasoningEnabled.value && state.model.reasoningCapabilities.request,
+                        showReasoning =
+                        preferences.showReasoning.value && state.model.reasoningCapabilities.output,
                         imageAttachments = if (state.model.inputCapabilities.image) it.imageAttachments else emptyList(),
                         audioPrompt = if (state.model.canUseRecordedAudio()) it.audioPrompt else null,
                         error = null,
@@ -607,6 +610,7 @@ class ChatViewModel(
                             !modelForRequest.inputCapabilities.audio
                         ) {
                             MessageContent.TextPrompt(effectiveContent.transcript.orEmpty())
+                                .copy(imageAttachments = effectiveContent.imageAttachments)
                         } else {
                             projected.requestContent
                         }
@@ -1013,6 +1017,7 @@ class ChatViewModel(
     private fun ChatUiState.toSubmittedContent(transcriptionAvailable: Boolean): MessageContent = audioPrompt?.let {
         MessageContent.AudioPromptContent(
             audio = it,
+            imageAttachments = imageAttachments,
             transcriptionStatus =
             if (transcriptionAvailable) AudioTranscriptionStatus.Pending else AudioTranscriptionStatus.NotRequested,
         )

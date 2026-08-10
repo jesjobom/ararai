@@ -27,12 +27,17 @@ backend, or external database.
   compares offline WebRTC/Silero voice-activity detection, Android capture
   sources, and optional native noise suppression, then speaks streamed answers
   in ordered segments. Voice turns, app-owned audio, completed transcripts, and
-  responses use the same persisted conversation history as normal Chat.
+  responses use the same persisted conversation history as normal Chat. For
+  image-capable models, Voice Chat can open an in-app camera while the microphone
+  and VAD keep running. Camera interactions restart the trailing-silence window;
+  the user can fix a photo manually or let the next valid pause capture the
+  current frame automatically for that audio turn or its local transcript.
 - Capability-gated image and recorded-audio prompts. Chat uses a downloaded,
   integrity-validated whisper.cpp model for local transcription. Audio-capable
   models receive the original audio while transcription runs asynchronously;
   text-only models receive the transcript after synchronous recognition.
-  Imported images are normalized and recordings remain app-owned Chat media.
+  Gallery images and in-app camera photos are normalized, and recordings remain
+  app-owned Chat media.
 - Per-downloaded-model diagnostics for runtime identity and local inference or
   transcription performance.
 - Resumable model downloads continue under an Android foreground service with

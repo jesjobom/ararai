@@ -728,8 +728,8 @@ private fun List<PromptChatMessage>.toLiteRtMessages(): List<Message> = map { me
 
 private fun PromptRequest.toCurrentLiteRtContents(): Contents = Contents.of(
     buildList {
+        imageAttachments.forEach { add(Content.ImageFile(it.uri.toLiteRtFilePath())) }
         audioPrompt?.let { add(Content.AudioFile(it.uri.toLiteRtFilePath())) }
-            ?: imageAttachments.forEach { add(Content.ImageFile(it.uri.toLiteRtFilePath())) }
         if (audioPrompt == null) {
             chatMessages
                 .lastOrNull { it.role == PromptChatRole.User }
@@ -765,11 +765,10 @@ internal sealed interface LiteRtInputPart {
 }
 
 internal fun PromptRequest.toLiteRtInputParts(): List<LiteRtInputPart> = buildList {
-    audioPrompt?.let { audio ->
-        add(LiteRtInputPart.AudioFile(audio.uri.toLiteRtFilePath()))
-    } ?: imageAttachments.forEach { image ->
+    imageAttachments.forEach { image ->
         add(LiteRtInputPart.ImageFile(image.uri.toLiteRtFilePath()))
     }
+    audioPrompt?.let { audio -> add(LiteRtInputPart.AudioFile(audio.uri.toLiteRtFilePath())) }
 
     val contextText =
         if (audioPrompt != null) {

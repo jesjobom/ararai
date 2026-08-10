@@ -1,4 +1,10 @@
-@file:Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod", "MaxLineLength")
+@file:Suppress(
+    "LongParameterList",
+    "LongMethod",
+    "CyclomaticComplexMethod",
+    "MaxLineLength",
+    "TooGenericExceptionCaught",
+)
 
 package com.jesjobom.ararai.ui
 
@@ -21,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
@@ -46,6 +53,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,12 +67,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.R
+import com.jesjobom.ararai.chat.ImageAttachment
 import com.jesjobom.ararai.voice.VadMode
 import com.jesjobom.ararai.voice.VadProvider
 import com.jesjobom.ararai.voice.VoiceCaptureSource
 import com.jesjobom.ararai.voice.VoiceChatPhase
 import com.jesjobom.ararai.voice.VoiceChatSettings
 import com.jesjobom.ararai.voice.VoiceChatUiState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -72,11 +85,17 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun VoiceChatScreen(
     state: VoiceChatUiState,
+    mediaServices: ChatMediaServices,
     onEnter: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onDismissError: () -> Unit,
     onSettings: (VoiceChatSettings) -> Unit,
+    onCameraOpened: () -> Unit,
+    onCameraPreviewReady: () -> Unit,
+    onCameraClosed: () -> Unit,
+    onCapturedImage: (ImageAttachment) -> Unit,
+    onRemoveCapturedImage: () -> Unit,
     onCreateSession: () -> Unit = {},
     onSelectSession: (String) -> Unit = {},
     onRenameSession: (String, String) -> Unit = { _, _ -> },
@@ -86,6 +105,7 @@ internal fun VoiceChatScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var showSettings by remember { mutableStateOf(false) }
     var showFullResponse by remember { mutableStateOf(false) }
     var sessionListOpen by remember { mutableStateOf(false) }
@@ -93,15 +113,39 @@ internal fun VoiceChatScreen(
     var renameDialogOpen by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var renameSessionId by remember { mutableStateOf<String?>(null) }
+    var cameraOpen by remember { mutableStateOf(false) }
+    var cameraError by remember { mutableStateOf<String?>(null) }
     val currentSessionTitle =
         state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title
             ?: stringResource(R.string.voice_new_chat)
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) onStart()
     }
+    val cameraPermissionDenied = stringResource(R.string.chat_camera_permission_denied)
+    val cameraCaptureFailed = stringResource(R.string.chat_camera_capture_failed)
+    val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            cameraOpen = true
+        } else {
+            cameraError = cameraPermissionDenied
+            onCameraClosed()
+        }
+    }
+    fun openCamera() {
+        cameraError = null
+        onCameraOpened()
+        if (context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            cameraOpen = true
+        } else {
+            cameraPermission.launch(Manifest.permission.CAMERA)
+        }
+    }
     DisposableEffect(Unit) {
         onEnter()
         onDispose(onStop)
+    }
+    LaunchedEffect(state.cameraFlowActive) {
+        if (!state.cameraFlowActive) cameraOpen = false
     }
     Scaffold(
         topBar = {
@@ -163,6 +207,15 @@ internal fun VoiceChatScreen(
                 (state.errorKey?.localizedText() ?: state.error)?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
+                cameraError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                state.pendingImageAttachment?.let { image ->
+                    AttachmentRow(
+                        label = image.displayName ?: stringResource(R.string.chat_attachment_image),
+                        imageUri = image.uri,
+                        onRemove = onRemoveCapturedImage,
+                        mediaServices = mediaServices,
+                    )
+                }
                 if (state.responsePreview.isNotBlank()) {
                     ResponseReadingViewport(
                         text = state.responsePreview,
@@ -195,6 +248,14 @@ internal fun VoiceChatScreen(
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
+                if (state.canCapturePhoto) {
+                    IconButton(
+                        onClick = ::openCamera,
+                        modifier = Modifier.align(Alignment.BottomEnd).size(64.dp),
+                    ) {
+                        Icon(Icons.Filled.CameraAlt, stringResource(R.string.chat_take_photo), Modifier.size(36.dp))
+                    }
+                }
             }
         }
     }
@@ -220,6 +281,43 @@ internal fun VoiceChatScreen(
             spokenRange = state.spokenRange,
             readingAnchor = state.readingAnchor,
             onDismiss = { showFullResponse = false },
+        )
+    }
+    if (cameraOpen) {
+        ChatCameraCaptureDialog(
+            mediaServices = mediaServices,
+            onCaptured = { uri ->
+                cameraOpen = false
+                coroutineScope.launch {
+                    try {
+                        val imported = withContext(Dispatchers.IO) { mediaServices.imageImporter.import(uri) }
+                        onCapturedImage(
+                            ImageAttachment(
+                                uri = imported.file.absolutePath,
+                                mimeType = "image/jpeg",
+                                displayName = imported.displayName,
+                                byteSize = imported.file.length(),
+                            ),
+                        )
+                    } catch (error: Exception) {
+                        if (error is kotlinx.coroutines.CancellationException) throw error
+                        cameraError = error.message ?: cameraCaptureFailed
+                    } finally {
+                        if (uri.scheme == "file") File(uri.path.orEmpty()).delete()
+                    }
+                }
+            },
+            onDismiss = {
+                cameraOpen = false
+                onCameraClosed()
+            },
+            onError = {
+                cameraOpen = false
+                cameraError = it
+                onCameraClosed()
+            },
+            automaticCaptureRequestId = state.automaticPhotoCaptureRequestId,
+            onReady = onCameraPreviewReady,
         )
     }
     if (sessionListOpen) {

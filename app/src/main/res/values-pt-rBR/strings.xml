@@ -60,6 +60,13 @@
     <string name="chat_empty_description">Sua mensagem permanece neste dispositivo e é processada pelo modelo local selecionado.</string>
     <string name="chat_cancel_generation">Cancelar geração</string>
     <string name="chat_attachment_image">Imagem</string>
+    <string name="chat_image_source_title">Adicionar imagem</string>
+    <string name="chat_take_photo">Tirar foto</string>
+    <string name="chat_choose_gallery">Escolher da galeria</string>
+    <string name="chat_capture_photo">Capturar foto</string>
+    <string name="chat_camera_permission_denied">A permissão da câmera é necessária para tirar uma foto.</string>
+    <string name="chat_camera_unavailable">A câmera não está disponível.</string>
+    <string name="chat_camera_capture_failed">Não foi possível capturar a foto.</string>
     <string name="chat_attachment_audio">Áudio</string>
     <string name="chat_message_label">Mensagem</string>
     <string name="chat_audio_prompt">Mensagem de áudio</string>

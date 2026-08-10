@@ -5,6 +5,7 @@ import com.jesjobom.ararai.chat.AudioPrompt
 import com.jesjobom.ararai.chat.ChatMediaRepository
 import com.jesjobom.ararai.chat.ChatRole
 import com.jesjobom.ararai.chat.FileChatMediaRepository
+import com.jesjobom.ararai.chat.ImageAttachment
 import com.jesjobom.ararai.chat.InMemoryChatSessionStore
 import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.engine.GenerationEvent
@@ -168,6 +169,114 @@ class VoiceChatViewModelTest {
         assertEquals(VoiceChatPhase.Idle, harness.viewModel.state.value.phase)
     }
 
+    @Test
+    fun `camera interactions restart silence window without stopping capture`() {
+        val harness = harness(RecordingEngine(flowOf(GenerationEvent.Completed)))
+        val imageModel = model.copy(inputCapabilities = ModelInputCapabilities(text = true, image = true, audio = true))
+        harness.viewModel.onModelStartupState(ModelStartupState.Available(imageModel, inference))
+        harness.viewModel.onEnteringVoiceChat()
+        waitUntil { harness.viewModel.state.value.canStart }
+        harness.viewModel.start()
+        waitUntil { harness.captureFactory.latest?.started == true }
+
+        harness.viewModel.onCameraOpened()
+        harness.viewModel.onCameraPreviewReady()
+        harness.viewModel.onCameraClosed()
+
+        assertEquals(3, harness.captureFactory.latest!!.silenceWindowResets)
+        assertEquals(0, harness.captureFactory.latest!!.cancellations)
+        assertEquals(VoiceChatPhase.Listening, harness.viewModel.state.value.phase)
+    }
+
+    @Test
+    fun `valid pause with open camera requests automatic photo before generation`() {
+        val engine = RecordingEngine(flowOf(GenerationEvent.Completed))
+        val harness = harness(engine)
+        val imageModel = model.copy(inputCapabilities = ModelInputCapabilities(text = true, image = true, audio = true))
+        harness.viewModel.onModelStartupState(ModelStartupState.Available(imageModel, inference))
+        harness.viewModel.onEnteringVoiceChat()
+        waitUntil { harness.viewModel.state.value.canStart }
+        harness.viewModel.start()
+        waitUntil { harness.captureFactory.latest?.started == true }
+        harness.viewModel.onCameraOpened()
+
+        harness.captureFactory.latest!!.emitNewTurn()
+        waitUntil { harness.viewModel.state.value.automaticPhotoCaptureRequestId != null }
+
+        assertTrue(harness.store.allMessages().isEmpty())
+        assertEquals(0, engine.generateCalls)
+        val image = File(harness.mediaDirectory, "automatic.jpg").apply {
+            parentFile?.mkdirs()
+            writeBytes(byteArrayOf(7, 8, 9))
+        }
+        harness.viewModel.useCapturedImage(ImageAttachment(image.absolutePath, "image/jpeg"))
+        waitUntil { harness.store.allMessages().any { it.role == ChatRole.Assistant } }
+
+        val content =
+            harness.store.allMessages().first { it.role == ChatRole.User }.content
+                as MessageContent.AudioPromptContent
+        assertEquals(image.absolutePath, content.imageAttachments.single().uri)
+        assertFalse(harness.viewModel.state.value.cameraFlowActive)
+        assertEquals(null, harness.viewModel.state.value.automaticPhotoCaptureRequestId)
+    }
+
+    @Test
+    fun `closing camera after automatic request submits completed audio without image`() {
+        val engine = RecordingEngine(flowOf(GenerationEvent.Completed))
+        val harness = harness(engine)
+        val imageModel = model.copy(inputCapabilities = ModelInputCapabilities(text = true, image = true, audio = true))
+        harness.viewModel.onModelStartupState(ModelStartupState.Available(imageModel, inference))
+        harness.viewModel.onEnteringVoiceChat()
+        waitUntil { harness.viewModel.state.value.canStart }
+        harness.viewModel.start()
+        waitUntil { harness.captureFactory.latest?.started == true }
+        harness.viewModel.onCameraOpened()
+        harness.captureFactory.latest!!.emitNewTurn()
+        waitUntil { harness.viewModel.state.value.automaticPhotoCaptureRequestId != null }
+
+        harness.viewModel.onCameraClosed()
+        waitUntil { harness.store.allMessages().any { it.role == ChatRole.Assistant } }
+
+        val content =
+            harness.store.allMessages().first { it.role == ChatRole.User }.content
+                as MessageContent.AudioPromptContent
+        assertTrue(content.imageAttachments.isEmpty())
+        assertEquals(1, engine.generateCalls)
+    }
+
+    @Test
+    fun `captured image is persisted with the next direct audio turn`() {
+        val engine = RecordingEngine(flowOf(GenerationEvent.Completed))
+        val harness = harness(engine)
+        val imageModel = model.copy(inputCapabilities = ModelInputCapabilities(text = true, image = true, audio = true))
+        harness.viewModel.onModelStartupState(ModelStartupState.Available(imageModel, inference))
+        harness.viewModel.onEnteringVoiceChat()
+        waitUntil { harness.viewModel.state.value.canStart }
+        harness.viewModel.start()
+        waitUntil { harness.captureFactory.latest?.started == true }
+        harness.viewModel.onCameraOpened()
+        val image = File(harness.mediaDirectory, "captured.jpg").apply {
+            parentFile?.mkdirs()
+            writeBytes(byteArrayOf(4, 5, 6))
+        }
+        harness.viewModel.useCapturedImage(ImageAttachment(image.absolutePath, "image/jpeg"))
+
+        assertFalse(harness.viewModel.state.value.cameraFlowActive)
+        assertEquals(2, harness.captureFactory.latest!!.silenceWindowResets)
+
+        harness.captureFactory.latest!!.emitNewTurn()
+        waitUntil { harness.store.allMessages().any { it.role == ChatRole.Assistant } }
+
+        val content =
+            harness.store
+                .allMessages()
+                .first { it.role == ChatRole.User }
+                .content as MessageContent.AudioPromptContent
+        assertEquals(image.absolutePath, content.imageAttachments.single().uri)
+        assertEquals(null, harness.viewModel.state.value.automaticPhotoCaptureRequestId)
+        assertEquals(LocalLlmWorkload(image = true, audio = true), engine.preparedWorkloads.last())
+    }
+
     private fun prepareAndStart(harness: Harness) {
         harness.viewModel.onModelStartupState(ModelStartupState.Available(model, inference))
         harness.viewModel.onEnteringVoiceChat()
@@ -282,6 +391,7 @@ private class RecordingCapture(
         private set
     var cancellations = 0
         private set
+    var silenceWindowResets = 0
     private var onTurn: ((CapturedVoiceTurn) -> Unit)? = null
 
     override fun start(onTurn: (CapturedVoiceTurn) -> Unit, onError: (String) -> Unit) {
@@ -299,6 +409,10 @@ private class RecordingCapture(
             ),
         )
         return file
+    }
+
+    override fun resetSilenceWindow() {
+        silenceWindowResets++
     }
 
     override fun cancel() {

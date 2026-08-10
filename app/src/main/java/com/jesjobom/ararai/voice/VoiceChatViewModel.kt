@@ -6,6 +6,7 @@
     "MaxLineLength",
     "LongParameterList",
     "CyclomaticComplexMethod",
+    "LargeClass",
 )
 
 package com.jesjobom.ararai.voice
@@ -23,6 +24,7 @@ import com.jesjobom.ararai.chat.ConversationContextProjector
 import com.jesjobom.ararai.chat.ConversationCoordinator
 import com.jesjobom.ararai.chat.ConversationSelection
 import com.jesjobom.ararai.chat.ConversationTurnSettings
+import com.jesjobom.ararai.chat.ImageAttachment
 import com.jesjobom.ararai.chat.InMemoryChatSessionStore
 import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.chat.NoOpChatMediaRepository
@@ -89,6 +91,8 @@ internal class VoiceChatViewModel(
     private var firstTokenAt: Long? = null
     private var firstSpeechAt: Long? = null
     private var currentCapture: CapturedVoiceTurn? = null
+    private var deferredCameraTurn: Pair<Long, CapturedVoiceTurn>? = null
+    private var automaticPhotoCaptureSequence = 0L
     private var currentSessionId: String? = null
     private val sessionMutationPending = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
@@ -111,6 +115,7 @@ internal class VoiceChatViewModel(
                 it.copy(
                     modelAvailable = true,
                     modelSupportsAudio = startup.model.inputCapabilities.audio,
+                    modelSupportsImage = startup.model.inputCapabilities.image,
                     canEnableReasoning = startup.model.reasoningCapabilities.request,
                     transcriptionAvailable = audioTranscriber.isAvailable,
                     isModelLoaded = it.isModelLoaded && !modelChanged,
@@ -124,6 +129,7 @@ internal class VoiceChatViewModel(
                 it.copy(
                     modelAvailable = false,
                     modelSupportsAudio = false,
+                    modelSupportsImage = false,
                     canEnableReasoning = false,
                     transcriptionAvailable = audioTranscriber.isAvailable,
                     isLoadingModel = false,
@@ -180,6 +186,60 @@ internal class VoiceChatViewModel(
     }
 
     fun updateSettings(settings: VoiceChatSettings) = preferences.update(settings)
+
+    fun onCameraOpened() {
+        if (state.value.phase != VoiceChatPhase.Listening) return
+        capture?.resetSilenceWindow()
+        mutableState.update { it.copy(cameraFlowActive = true) }
+    }
+
+    fun onCameraPreviewReady() {
+        if (!state.value.cameraFlowActive) return
+        capture?.resetSilenceWindow()
+    }
+
+    fun onCameraClosed() {
+        val deferred = deferredCameraTurn.also { deferredCameraTurn = null }
+        mutableState.update {
+            it.copy(
+                cameraFlowActive = false,
+                automaticPhotoCaptureRequestId = null,
+            )
+        }
+        if (deferred != null) {
+            processTurn(deferred.first, deferred.second)
+        } else if (state.value.phase == VoiceChatPhase.Listening) {
+            capture?.resetSilenceWindow()
+        }
+    }
+
+    fun useCapturedImage(image: ImageAttachment) {
+        if (!state.value.canCapturePhoto) {
+            mediaRepository.deleteDraft(image.uri, sessionStore.referencedMediaUris())
+            return
+        }
+        val previous = state.value.pendingImageAttachment
+        val deferred = deferredCameraTurn.also { deferredCameraTurn = null }
+        mutableState.update {
+            it.copy(
+                pendingImageAttachment = image,
+                cameraFlowActive = false,
+                automaticPhotoCaptureRequestId = null,
+            )
+        }
+        previous?.uri?.let { mediaRepository.deleteDraft(it, sessionStore.referencedMediaUris()) }
+        if (deferred != null) {
+            processTurn(deferred.first, deferred.second)
+        } else {
+            capture?.resetSilenceWindow()
+        }
+    }
+
+    fun removeCapturedImage() {
+        val previous = state.value.pendingImageAttachment
+        mutableState.update { it.copy(pendingImageAttachment = null) }
+        previous?.uri?.let { mediaRepository.deleteDraft(it, sessionStore.referencedMediaUris()) }
+    }
 
     fun createSession() {
         runSessionMutation(::createSessionAfterPersistenceDispatch)
@@ -285,11 +345,28 @@ internal class VoiceChatViewModel(
         capture?.close()
         capture = captureFactory(preferences.settings.value).also { newCapture ->
             newCapture.start(
-                onTurn = { turn -> scope.launch { processTurn(activeRun, turn) } },
+                onTurn = { turn -> scope.launch { onCapturedTurn(activeRun, turn) } },
                 onError = { message -> scope.launch { fail(message) } },
             )
         }
         mutableState.update { it.copy(phase = VoiceChatPhase.Listening, error = null, errorKey = null) }
+    }
+
+    private fun onCapturedTurn(activeRun: Long, captured: CapturedVoiceTurn) {
+        if (activeRun != runId) {
+            File(captured.prompt.uri).delete()
+            return
+        }
+        if (state.value.cameraFlowActive && state.value.pendingImageAttachment == null) {
+            capture = null
+            deferredCameraTurn = activeRun to captured
+            automaticPhotoCaptureSequence++
+            mutableState.update {
+                it.copy(automaticPhotoCaptureRequestId = automaticPhotoCaptureSequence)
+            }
+            return
+        }
+        processTurn(activeRun, captured)
     }
 
     @Suppress("LongMethod", "CyclomaticComplexMethod")
@@ -301,6 +378,7 @@ internal class VoiceChatViewModel(
         capture = null
         currentAudio = File(captured.prompt.uri)
         currentCapture = captured
+        val capturedImage = state.value.pendingImageAttachment
         generationStartedAt = System.currentTimeMillis()
         firstTokenAt = null
         firstSpeechAt = null
@@ -329,6 +407,7 @@ internal class VoiceChatViewModel(
                 val initialContent =
                     MessageContent.AudioPromptContent(
                         audio = persistentPrompt,
+                        imageAttachments = listOfNotNull(capturedImage),
                         transcriptionStatus =
                         if (audioTranscriber.isAvailable) {
                             AudioTranscriptionStatus.Pending
@@ -364,7 +443,10 @@ internal class VoiceChatViewModel(
                     } else {
                         conversationCoordinator.project(
                             history,
-                            MessageContent.TextPrompt(effectiveContent.transcript.orEmpty()),
+                            MessageContent.TextPrompt(
+                                text = effectiveContent.transcript.orEmpty(),
+                                imageAttachments = effectiveContent.imageAttachments,
+                            ),
                             activeInference,
                             turnSettings.systemInstruction,
                         )
@@ -373,7 +455,10 @@ internal class VoiceChatViewModel(
                 engine.load(activeModel, activeInference)
                 val loadMillis = loadStartedAt.elapsedMillis()
                 val prepareStartedAt = System.nanoTime()
-                val workload = if (activeModel.inputCapabilities.audio) LocalLlmWorkload.Audio else LocalLlmWorkload()
+                val workload = LocalLlmWorkload(
+                    image = effectiveContent.imageAttachments.isNotEmpty(),
+                    audio = activeModel.inputCapabilities.audio,
+                )
                 engine.prepare(workload)
                 Log.d(
                     LOG_TAG,
@@ -431,6 +516,7 @@ internal class VoiceChatViewModel(
                         }
                         is GenerationEvent.Failed -> fail(event.message)
                         GenerationEvent.Completed -> {
+                            mutableState.update { it.copy(pendingImageAttachment = null) }
                             val incomplete = answer.isBlank() && reasoning.isNotBlank()
                             conversationCoordinator.appendAssistant(
                                 sessionId,
@@ -580,12 +666,15 @@ internal class VoiceChatViewModel(
 
     fun stop() {
         runId++
+        deferredCameraTurn?.second?.prompt?.uri?.let { File(it).delete() }
+        deferredCameraTurn = null
         capture?.cancel()
         capture = null
         generationJob?.cancel()
         generationJob = null
         speechQueue.stop()
         deleteCurrentAudio()
+        removeCapturedImage()
         mutableState.update {
             it.copy(
                 phase = VoiceChatPhase.Idle,
@@ -598,11 +687,15 @@ internal class VoiceChatViewModel(
                 noticeKey = null,
                 error = null,
                 errorKey = null,
+                cameraFlowActive = false,
+                automaticPhotoCaptureRequestId = null,
             )
         }
     }
 
     fun fail(message: String) {
+        deferredCameraTurn?.second?.prompt?.uri?.let { File(it).delete() }
+        deferredCameraTurn = null
         capture?.cancel()
         capture = null
         generationJob?.cancel()
@@ -610,6 +703,7 @@ internal class VoiceChatViewModel(
         speechQueue.stop()
         recordDiagnostic("failed")
         deleteCurrentAudio()
+        removeCapturedImage()
         mutableState.update {
             it.copy(
                 phase = VoiceChatPhase.Error,
@@ -622,6 +716,8 @@ internal class VoiceChatViewModel(
     }
 
     private fun fail(messageKey: UserMessageKey) {
+        deferredCameraTurn?.second?.prompt?.uri?.let { File(it).delete() }
+        deferredCameraTurn = null
         capture?.cancel()
         capture = null
         generationJob?.cancel()
@@ -629,6 +725,7 @@ internal class VoiceChatViewModel(
         speechQueue.stop()
         recordDiagnostic("failed")
         deleteCurrentAudio()
+        removeCapturedImage()
         mutableState.update {
             it.copy(
                 phase = VoiceChatPhase.Error,

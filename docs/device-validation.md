@@ -66,6 +66,17 @@ downloading a production model.
 - Confirm Voice Chat uses the selected persisted session shared with normal
   Chat, carries bounded reconstructible history across modes, and clears only
   transient diagnostics when its owner is destroyed.
+- With an image-capable model, open the in-app camera while speaking. Confirm the
+  microphone and VAD continue, prior audio is retained, and opening or closing
+  the camera restarts only the trailing-silence window.
+- Let a valid pause capture a frame automatically, then repeat with a manual
+  photo captured before speech finishes. Confirm the manual photo takes
+  precedence, each camera closes after the current turn, and the next turn does
+  not reopen it.
+- Complete both a direct-audio turn and a Whisper-routed turn. Confirm the model
+  and persisted message receive the photo with the matching audio/transcript and
+  no abandoned draft file remains. Force camera capture failure and confirm the
+  completed audio continues without being lost or repeated.
 
 ## Wikipedia skill
 
@@ -170,6 +181,9 @@ measurements remain release-validation checks rather than claims of this change.
 ## Media, permissions, storage, and privacy
 
 - Deny microphone permission, retry, grant it, record, cancel, record again, and send.
+- Deny camera permission, retry, grant it, cancel capture, and take a photo from
+  normal Chat and Voice Chat. Confirm gallery selection remains available and no
+  camera source or normalized draft is orphaned.
 - Import a valid image, malformed image, image over 20 MB, and image over 8192 px
   on one axis. Confirm controlled errors and no orphan temporary files.
 - Delete a media session and clear all sessions; verify storage decreases and media

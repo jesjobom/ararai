@@ -44,6 +44,11 @@ internal class VoiceCaptureGate(
         return decision
     }
 
+    fun resetSilenceWindow() {
+        silenceMillis = 0L
+        consecutiveSpeechMillis = 0L
+    }
+
     private fun reset() {
         voicedMillis = 0
         consecutiveSpeechMillis = 0

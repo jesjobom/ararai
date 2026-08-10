@@ -181,29 +181,19 @@ class ChatViewModelTest {
                 engine = FailingEngine("generation failed"),
                 initialModel = model,
                 inferenceConfig = inferenceConfig,
+                scope = this,
             )
 
-        viewModel.uiState.test {
-            awaitItem()
-            viewModel.onPromptChanged("oi")
-            awaitItem()
-            viewModel.submitPrompt()
+        viewModel.onPromptChanged("oi")
+        viewModel.submitPrompt()
+        runCurrent()
 
-            var loading = awaitItem()
-            while (!loading.isGenerating) loading = awaitItem()
-            assertEquals(2, loading.messages.size)
-            assertTrue(loading.isGenerating)
-
-            var failed = awaitItem()
-            while (failed.error == null) {
-                failed = awaitItem()
-            }
-            assertFalse(failed.isGenerating)
-            assertEquals("generation failed", failed.error)
-            assertEquals("oi", failed.messages.first().text)
-            assertEquals("oi", failed.prompt)
-            cancelAndIgnoreRemainingEvents()
-        }
+        val failed = viewModel.uiState.value
+        assertFalse(failed.isGenerating)
+        assertEquals("generation failed", failed.error)
+        assertEquals(2, failed.messages.size)
+        assertEquals("oi", failed.messages.first().text)
+        assertEquals("oi", failed.prompt)
     }
 
     @Test
@@ -662,7 +652,7 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `audio prompt is mutually exclusive with text and images`() = runTest {
+    fun `audio prompt excludes typed text but retains current images`() = runTest {
         val engine = CapturingEngine()
         val viewModel =
             ChatViewModel(
@@ -677,14 +667,18 @@ class ChatViewModelTest {
         viewModel.useAudioPrompt(AudioPrompt("file:///tmp/audio.wav", "audio/wav", "audio.wav"))
 
         assertEquals("", viewModel.uiState.value.prompt)
-        assertEquals(emptyList<ImageAttachment>(), viewModel.uiState.value.imageAttachments)
+        assertEquals(
+            listOf(ImageAttachment("file:///tmp/image.png", "image/png")),
+            viewModel.uiState.value.imageAttachments,
+        )
         assertTrue(viewModel.uiState.value.canSubmit)
 
         viewModel.onPromptChanged("should be ignored")
         viewModel.submitPrompt()
         runCurrent()
 
-        assertTrue(engine.lastRequest!!.content is MessageContent.AudioPromptContent)
+        val submitted = engine.lastRequest!!.content as MessageContent.AudioPromptContent
+        assertEquals("file:///tmp/image.png", submitted.imageAttachments.single().uri)
         assertEquals("", viewModel.uiState.value.prompt)
     }
 
@@ -906,6 +900,39 @@ class ChatViewModelTest {
         assertFalse(viewModel.uiState.value.canShowReasoning)
         assertFalse(viewModel.uiState.value.reasoningEnabled)
         assertFalse(viewModel.uiState.value.showReasoning)
+    }
+
+    @Test
+    fun `restores persisted reasoning choices after recreation and capability changes`() {
+        val reasoningModel =
+            model.copy(
+                reasoningCapabilities = ModelReasoningCapabilities(request = true, output = true),
+            )
+        val preferences =
+            InMemoryChatPreferences(
+                initialReasoningEnabled = true,
+                initialShowReasoning = true,
+            )
+        val recreated =
+            ChatViewModel(
+                engine = CapturingEngine(),
+                initialModel = reasoningModel,
+                inferenceConfig = inferenceConfig,
+                preferences = preferences,
+            )
+
+        assertTrue(recreated.uiState.value.reasoningEnabled)
+        assertTrue(recreated.uiState.value.showReasoning)
+
+        recreated.onModelStartupState(ModelStartupState.Available(model, inferenceConfig))
+        assertFalse(recreated.uiState.value.reasoningEnabled)
+        assertFalse(recreated.uiState.value.showReasoning)
+        assertTrue(preferences.reasoningEnabled.value)
+        assertTrue(preferences.showReasoning.value)
+
+        recreated.onModelStartupState(ModelStartupState.Available(reasoningModel, inferenceConfig))
+        assertTrue(recreated.uiState.value.reasoningEnabled)
+        assertTrue(recreated.uiState.value.showReasoning)
     }
 
     @Test

@@ -538,6 +538,24 @@ class LiteRtLmLocalLlmEngineTest {
     }
 
     @Test
+    fun `builds LiteRT contents with current image and audio in one turn`() {
+        val request =
+            PromptRequest(
+                content =
+                MessageContent.AudioPromptContent(
+                    audio = AudioPrompt("file:///tmp/current.wav", "audio/wav"),
+                    imageAttachments =
+                    listOf(com.jesjobom.ararai.chat.ImageAttachment("file:///tmp/current.jpg", "image/jpeg")),
+                ),
+            )
+
+        val contents = request.toLiteRtInputParts()
+
+        assertEquals(listOf("/tmp/current.jpg"), contents.filterIsInstance<LiteRtInputPart.ImageFile>().map { it.path })
+        assertEquals(listOf("/tmp/current.wav"), contents.filterIsInstance<LiteRtInputPart.AudioFile>().map { it.path })
+    }
+
+    @Test
     fun `rejects unsupported audio request before session generation`() = runTest {
         val bridge = RecordingBridge()
         val engine =

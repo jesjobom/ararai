@@ -352,11 +352,17 @@ internal fun ArarAiApp(
             val voiceState by voiceChatViewModel.state.collectAsState()
             VoiceChatScreen(
                 state = voiceState,
+                mediaServices = chatMediaServices,
                 onEnter = voiceChatViewModel::onEnteringVoiceChat,
                 onStart = voiceChatViewModel::start,
                 onStop = voiceChatViewModel::stop,
                 onDismissError = voiceChatViewModel::dismissError,
                 onSettings = voiceChatViewModel::updateSettings,
+                onCameraOpened = voiceChatViewModel::onCameraOpened,
+                onCameraPreviewReady = voiceChatViewModel::onCameraPreviewReady,
+                onCameraClosed = voiceChatViewModel::onCameraClosed,
+                onCapturedImage = voiceChatViewModel::useCapturedImage,
+                onRemoveCapturedImage = voiceChatViewModel::removeCapturedImage,
                 onCreateSession = voiceChatViewModel::createSession,
                 onSelectSession = voiceChatViewModel::selectSession,
                 onRenameSession = voiceChatViewModel::renameSession,

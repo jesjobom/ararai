@@ -40,7 +40,8 @@ inference remains device-, driver-, model-, and workload-dependent.
 - Reasoning-only terminal generations are persisted as incomplete assistant
   responses. Normal Chat can show partial reasoning, while Voice Chat avoids
   empty TTS and recovers its loop.
-- Structured prompts can contain text, normalized images, or recorded audio.
+- Structured prompts can contain text, normalized images, recorded audio, or a
+  current image paired with an audio turn.
   Audio-capable models receive recordings directly. With a valid downloaded
   Whisper model, text-only models receive a locally produced transcript
   instead, and new audio messages persist transcript state for reconstructible
@@ -48,7 +49,10 @@ inference remains device-, driver-, model-, and workload-dependent.
 - Experimental Voice Chat runs contextual half-duplex turns for direct-audio
   models or text models backed by local Whisper transcription, compares offline
   WebRTC/Silero VAD and Android capture preprocessing, speaks streamed answers
-  incrementally, and shares persisted conversations with normal Chat.
+  incrementally, and shares persisted conversations with normal Chat. Its
+  per-turn in-app camera keeps audio capture and VAD active, restarts the silence
+  window at camera interactions, and can capture automatically at the next valid
+  pause or preserve a manually fixed photo.
 - Per-model diagnostics expose model/runtime metadata and local benchmark
   measurements.
 - Conversations, preferences, models, runtime caches, and Chat media are local.
@@ -70,6 +74,7 @@ local model is sufficient for the core Chat inference flow.
 - whisper.cpp through JNI/NDK for transcription artifacts
 - Bundled ML Kit Language ID 17.0.6 for offline response-language detection
 - EvalEx 3.7.0 for bounded DECIMAL128 local calculation
+- CameraX 1.5.0 for lifecycle-aware in-app photo preview and capture
 - Android VAD 2.0.10 WebRTC/Silero adapters and ONNX Runtime Android 1.22.0 for
   experimental offline pause-detection comparison
 - Plain SQLite for Chat sessions/messages and local preferences for model

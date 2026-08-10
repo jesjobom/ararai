@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -27,6 +29,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -39,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -287,7 +291,11 @@ internal fun MessageContentView(
                 }
                 content.imageAttachments.forEach { image ->
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        ImageThumbnail(uri = image.uri, sizeDp = 156, mediaServices = mediaServices)
+                        HistoricalImage(
+                            uri = image.uri,
+                            label = image.displayName ?: stringResource(R.string.chat_attachment_image),
+                            mediaServices = mediaServices,
+                        )
                         Text(
                             text = image.displayName ?: stringResource(R.string.chat_attachment_image),
                             style = MaterialTheme.typography.labelMedium,
@@ -354,6 +362,17 @@ private fun AudioPromptContentView(
     mediaServices: ChatMediaServices,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        content.imageAttachments.forEach { image ->
+            HistoricalImage(
+                uri = image.uri,
+                label = image.displayName ?: stringResource(R.string.chat_attachment_image),
+                mediaServices = mediaServices,
+            )
+            Text(
+                text = image.displayName ?: stringResource(R.string.chat_attachment_image),
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
         AudioPlaybackRow(audio = content.audio, mediaServices = mediaServices)
         when (content.transcriptionStatus) {
             AudioTranscriptionStatus.Pending -> Text(
@@ -392,10 +411,71 @@ private fun TranscriptionFailureView(content: MessageContent.AudioPromptContent)
 }
 
 @Composable
+private fun HistoricalImage(
+    uri: String,
+    label: String,
+    mediaServices: ChatMediaServices,
+) {
+    var expanded by remember(uri) { mutableStateOf(false) }
+    ImageThumbnail(
+        uri = uri,
+        sizeDp = 156,
+        mediaServices = mediaServices,
+        contentDescription = label,
+        onClick = { expanded = true },
+    )
+    if (expanded) {
+        EnlargedImageDialog(
+            uri = uri,
+            label = label,
+            mediaServices = mediaServices,
+            onDismiss = { expanded = false },
+        )
+    }
+}
+
+@Composable
+private fun EnlargedImageDialog(
+    uri: String,
+    label: String,
+    mediaServices: ChatMediaServices,
+    onDismiss: () -> Unit,
+) {
+    val bitmap = remember(uri, mediaServices.imageDecoder) {
+        mediaServices.imageDecoder.decodeThumbnail(uri, 2_048)
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(label) },
+        text = {
+            bitmap?.let {
+                Image(
+                    bitmap = it.asImageBitmap(),
+                    contentDescription = label,
+                    modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(it.width.toFloat() / it.height.coerceAtLeast(1))
+                        .testTag("expanded-chat-image"),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        },
+    )
+}
+
+@Composable
 internal fun ImageThumbnail(
     uri: String,
     sizeDp: Int,
     mediaServices: ChatMediaServices,
+    contentDescription: String? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     val bitmap = remember(uri, mediaServices.imageDecoder) {
         mediaServices.imageDecoder.decodeThumbnail(uri, 256)
@@ -403,8 +483,17 @@ internal fun ImageThumbnail(
     bitmap?.let {
         Image(
             bitmap = it.asImageBitmap(),
-            contentDescription = null,
-            modifier = Modifier.size(sizeDp.dp),
+            contentDescription = contentDescription,
+            modifier =
+            Modifier
+                .size(sizeDp.dp)
+                .then(
+                    if (onClick == null) {
+                        Modifier
+                    } else {
+                        Modifier.clickable(role = Role.Button, onClick = onClick)
+                    },
+                ),
             contentScale = ContentScale.Crop,
         )
     }

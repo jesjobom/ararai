@@ -15,6 +15,7 @@ internal data class ChatMediaServices(
     val audioPlayerFactory: ChatAudioPlayerFactory,
     val imageDecoder: ChatImageDecoder,
     val draftCleaner: ChatDraftCleaner,
+    val cameraFileFactory: ChatCameraFileFactory,
 )
 
 internal fun Context.androidChatMediaServices(mediaRepository: ChatMediaRepository): ChatMediaServices = ChatMediaServices(
@@ -28,7 +29,12 @@ internal fun Context.androidChatMediaServices(mediaRepository: ChatMediaReposito
     audioPlayerFactory = AndroidChatAudioPlayerFactory(this),
     imageDecoder = AndroidChatImageDecoder,
     draftCleaner = ChatDraftCleaner { uri -> mediaRepository.deleteDraft(uri, emptySet()) },
+    cameraFileFactory = ChatCameraFileFactory { mediaRepository.createDraftFile("camera-", ".jpg") },
 )
+
+internal fun interface ChatCameraFileFactory {
+    fun create(): File
+}
 
 internal fun interface ChatDraftCleaner {
     fun delete(uri: String)
