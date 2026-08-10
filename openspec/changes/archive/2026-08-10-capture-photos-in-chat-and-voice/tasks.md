@@ -70,8 +70,10 @@
   disclosures, and device-validation instructions for camera capture.
 - [x] 6.2 Run targeted unit and Robolectric tests while implementing, then run
   `scripts/quality-gate.sh` and `openspec validate --all --strict`.
-- [ ] 6.3 On representative physical devices, verify camera permission flows,
+- [x] 6.3 On representative physical devices, verify camera permission flows,
   uninterrupted microphone capture, suspended/resumed silence detection, memory
   and thermal behavior, lifecycle cleanup, and real direct-audio-plus-image
   inference; record model, build, and device evidence without inferring it from
   automated tests.
+  - Validated by JJ on a physical device on 2026-08-10 using debug APK SHA-256
+    `b9b3f28c6f6a8956fad38cf5f804dcc142954b580dba7614fb5913d6d1c26ec3`.
