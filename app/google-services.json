@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "366416562673",
+    "project_id": "ararai-report",
+    "storage_bucket": "ararai-report.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:366416562673:android:16b1af5db05f0b52379c50",
+        "android_client_info": {
+          "package_name": "com.jesjobom.ararai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCw9-wHYF9bh-qgazGWM6jqP31jdxP9Gi4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

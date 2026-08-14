@@ -115,6 +115,11 @@ import com.jesjobom.ararai.model.requireInference
 import com.jesjobom.ararai.model.resolve
 import com.jesjobom.ararai.model.supportsPurpose
 import com.jesjobom.ararai.model.supportsTask
+import com.jesjobom.ararai.reporting.GeneratedContentReportingController
+import com.jesjobom.ararai.reporting.PendingReportQueue
+import com.jesjobom.ararai.reporting.ReportDeliveryReceiptStore
+import com.jesjobom.ararai.reporting.ReportDeliveryScheduler
+import com.jesjobom.ararai.reporting.ReportTechnicalMetadata
 import com.jesjobom.ararai.settings.ApplicationLanguage
 import com.jesjobom.ararai.settings.ThemeMode
 import com.jesjobom.ararai.voice.AndroidVoiceTurnCapture
@@ -152,6 +157,9 @@ internal fun ArarAiApp(
     chatMediaRepository: ChatMediaRepository,
     chatMediaServices: ChatMediaServices,
     chatPreferences: ChatPreferences,
+    pendingReportQueue: PendingReportQueue,
+    reportDeliveryReceiptStore: ReportDeliveryReceiptStore,
+    reportDeliveryScheduler: ReportDeliveryScheduler = ReportDeliveryScheduler { },
     instructionPreferences: InstructionPreferences = InMemoryInstructionPreferences(),
     generationPreferences: GenerationPreferences = InMemoryGenerationPreferences(),
     webSearchPreferences: WebSearchPreferences = InMemoryWebSearchPreferences(),
@@ -201,6 +209,22 @@ internal fun ArarAiApp(
     val webSearchSettings by webSearchPreferences.settings.collectAsState()
     val startupState = modelCatalogState.selectedStartupState
     val modelConfig = modelCatalogState.selectedConfig
+    val reportController = remember(chatSessionStore, pendingReportQueue) {
+        GeneratedContentReportingController(
+            chatSessionStore,
+            pendingReportQueue,
+            reportDeliveryScheduler,
+        )
+    }
+    val reportQueueRevision by pendingReportQueue.revision.collectAsState()
+    val pendingReports = remember(reportQueueRevision) { reportController.pendingReports() }
+    val latestReportReceipt by reportDeliveryReceiptStore.latestReceipt.collectAsState()
+    fun reportMetadata() = ReportTechnicalMetadata(
+        appVersion = appVersionLabel,
+        localeTag = java.util.Locale.getDefault().toLanguageTag(),
+        modelId = modelConfig.id,
+        runtime = modelConfig.runtime.name,
+    )
     var destination by remember { mutableStateOf(AppDestination.Home) }
     var showExitConfirmation by remember { mutableStateOf(false) }
     var disableExitConfirmation by remember { mutableStateOf(false) }
@@ -347,6 +371,24 @@ internal fun ArarAiApp(
             languageIdentifierFactory = chatLanguageIdentifierFactory,
             onBack = { returnHome() },
             onRetryModelDownload = { modelController.retry(modelCatalogState.selectedModelId) },
+            onReportResponse = { messageId ->
+                chatViewModel.uiState.value.selectedSessionId?.let { sessionId ->
+                    reportController.draftFor(sessionId, messageId, reportMetadata())
+                }
+            },
+            onReportLatestResponse = {
+                chatViewModel.uiState.value.selectedSessionId?.let { sessionId ->
+                    reportController.latestDraft(sessionId, reportMetadata())
+                }
+            },
+            onSubmitReport = { draft, reason, comment, contextIds ->
+                reportController.submit(draft, reason, comment, contextIds)
+            },
+            pendingReports = pendingReports,
+            latestReportReceipt = latestReportReceipt,
+            onDeletePendingReport = { reportId ->
+                reportController.deletePending(reportId)
+            },
         )
         AppDestination.VoiceChat -> {
             val voiceState by voiceChatViewModel.state.collectAsState()
@@ -373,6 +415,19 @@ internal fun ArarAiApp(
                     destination = AppDestination.ModelStatus
                 },
                 onBack = { returnHome() },
+                onReportLatestResponse = {
+                    voiceState.selectedSessionId?.let { sessionId ->
+                        reportController.latestDraft(sessionId, reportMetadata())
+                    }
+                },
+                onSubmitReport = { draft, reason, comment, contextIds ->
+                    reportController.submit(draft, reason, comment, contextIds)
+                },
+                pendingReports = pendingReports,
+                latestReportReceipt = latestReportReceipt,
+                onDeletePendingReport = { reportId ->
+                    reportController.deletePending(reportId)
+                },
             )
         }
         AppDestination.Diagnostics -> BenchmarkScreen(

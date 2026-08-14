@@ -68,6 +68,10 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.R
 import com.jesjobom.ararai.chat.ImageAttachment
+import com.jesjobom.ararai.reporting.GeneratedContentReportDraft
+import com.jesjobom.ararai.reporting.PendingReport
+import com.jesjobom.ararai.reporting.ReportDeliveryReceipt
+import com.jesjobom.ararai.reporting.ReportReason
 import com.jesjobom.ararai.voice.VadMode
 import com.jesjobom.ararai.voice.VadProvider
 import com.jesjobom.ararai.voice.VoiceCaptureSource
@@ -103,6 +107,11 @@ internal fun VoiceChatScreen(
     onClearAllSessions: () -> Unit = {},
     onOpenModels: () -> Unit,
     onBack: () -> Unit,
+    onReportLatestResponse: () -> GeneratedContentReportDraft? = { null },
+    onSubmitReport: (GeneratedContentReportDraft, ReportReason, String?, Set<String>) -> Unit = { _, _, _, _ -> },
+    pendingReports: List<PendingReport> = emptyList(),
+    latestReportReceipt: ReportDeliveryReceipt? = null,
+    onDeletePendingReport: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -115,6 +124,9 @@ internal fun VoiceChatScreen(
     var renameSessionId by remember { mutableStateOf<String?>(null) }
     var cameraOpen by remember { mutableStateOf(false) }
     var cameraError by remember { mutableStateOf<String?>(null) }
+    var reportDraft by remember { mutableStateOf<GeneratedContentReportDraft?>(null) }
+    var reportCenterOpen by remember { mutableStateOf(false) }
+    var reportCenterDraft by remember { mutableStateOf<GeneratedContentReportDraft?>(null) }
     val currentSessionTitle =
         state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title
             ?: stringResource(R.string.voice_new_chat)
@@ -163,6 +175,13 @@ internal fun VoiceChatScreen(
                     }
                 },
                 actions = {
+                    ReportCenterButton(
+                        pendingReports = pendingReports,
+                        latestReceipt = latestReportReceipt,
+                    ) {
+                        reportCenterDraft = onReportLatestResponse()
+                        reportCenterOpen = true
+                    }
                     IconButton(
                         onClick = { showSettings = true },
                         enabled = !state.isActive,
@@ -370,6 +389,28 @@ internal fun VoiceChatScreen(
                 renameSessionId = null
                 renameDialogOpen = false
             },
+        )
+    }
+    reportDraft?.let { draft ->
+        GeneratedContentReportDialog(
+            draft = draft,
+            onSubmit = { reason, comment, contextIds ->
+                onSubmitReport(draft, reason, comment, contextIds)
+                reportDraft = null
+            },
+            onDismiss = { reportDraft = null },
+        )
+    }
+    if (reportCenterOpen) {
+        ReportCenterDialog(
+            draft = reportCenterDraft,
+            pendingReports = pendingReports,
+            onSubmit = { reason, comment, contextIds ->
+                reportCenterDraft?.let { onSubmitReport(it, reason, comment, contextIds) }
+                reportCenterOpen = false
+            },
+            onDeletePendingReport = onDeletePendingReport,
+            onDismiss = { reportCenterOpen = false },
         )
     }
 }

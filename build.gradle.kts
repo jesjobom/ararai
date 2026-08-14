@@ -3,6 +3,7 @@ plugins {
     id("com.android.library") version "9.2.1" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.3.21" apply false
     id("com.mikepenz.aboutlibraries.plugin.android") version "14.1.0" apply false
+    id("com.google.gms.google-services") version "4.4.3" apply false
     id("com.diffplug.spotless") version "7.2.1"
     id("dev.detekt") version "2.0.0-alpha.5" apply false
 }

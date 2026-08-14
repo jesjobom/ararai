@@ -135,6 +135,24 @@ from the environment that has ADB access.
 
 ## Local data and privacy
 
+The [privacy policy](docs/privacy.md) applies to the official Google Play
+distribution published by Jesjobom. Generated-content reporting is an explicit,
+user-initiated exception to local-only conversation handling: only the selected
+assistant response, individually approved textual context, reason, optional
+comment, and bounded allowlisted metadata are sent to the official Firebase
+project. Raw image/audio media, reasoning, hidden instructions, paths, and
+unselected history are excluded. Operational controls are documented in
+[`docs/reporting-operations.md`](docs/reporting-operations.md), and the proposed
+Google Play declaration is maintained in
+[`docs/google-play-data-safety.md`](docs/google-play-data-safety.md).
+
+When GitHub Pages is enabled from the `main` branch `/docs` folder, the public
+policy is available at <https://jesjobom.github.io/ararai/privacy/>.
+
+Forks and third-party distributions must use independent backend configuration,
+privacy disclosures, operational ownership, and Google Play Data safety answers;
+the official report service is not a shared backend for derived builds.
+
 ArarAI stores conversations in local SQLite, Chat media and downloaded models
 in app-owned files, model-selection preferences locally, and runtime caches on
 the current device. Android cloud backup and device-to-device transfer are

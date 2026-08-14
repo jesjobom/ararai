@@ -41,8 +41,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.R
+import com.jesjobom.ararai.chat.AssistantCompletionStatus
 import com.jesjobom.ararai.chat.ChatMessage
+import com.jesjobom.ararai.chat.ChatRole
 import com.jesjobom.ararai.chat.ChatViewModel
+import com.jesjobom.ararai.chat.MessageContent
+import com.jesjobom.ararai.reporting.GeneratedContentReportDraft
+import com.jesjobom.ararai.reporting.PendingReport
+import com.jesjobom.ararai.reporting.ReportDeliveryReceipt
+import com.jesjobom.ararai.reporting.ReportReason
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,6 +60,12 @@ internal fun ChatScreen(
     languageIdentifierFactory: () -> ChatLanguageIdentifier,
     onBack: () -> Unit,
     onRetryModelDownload: () -> Unit = {},
+    onReportResponse: (String) -> GeneratedContentReportDraft? = { null },
+    onReportLatestResponse: () -> GeneratedContentReportDraft? = { null },
+    onSubmitReport: (GeneratedContentReportDraft, ReportReason, String?, Set<String>) -> Unit = { _, _, _, _ -> },
+    pendingReports: List<PendingReport> = emptyList(),
+    latestReportReceipt: ReportDeliveryReceipt? = null,
+    onDeletePendingReport: (String) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
     var sessionListOpen by remember { mutableStateOf(false) }
@@ -61,6 +74,9 @@ internal fun ChatScreen(
     var renameDialogOpen by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var renameSessionId by remember { mutableStateOf<String?>(null) }
+    var reportDraft by remember { mutableStateOf<GeneratedContentReportDraft?>(null) }
+    var reportCenterOpen by remember { mutableStateOf(false) }
+    var reportCenterDraft by remember { mutableStateOf<GeneratedContentReportDraft?>(null) }
     var textToSpeechState by remember { mutableStateOf(ChatTextToSpeechState()) }
     val textToSpeechController = remember(textToSpeechServiceFactory, languageIdentifierFactory) {
         ChatTextToSpeechController(
@@ -153,6 +169,13 @@ internal fun ChatScreen(
                     }
                 },
                 actions = {
+                    ReportCenterButton(
+                        pendingReports = pendingReports,
+                        latestReceipt = latestReportReceipt,
+                    ) {
+                        reportCenterDraft = onReportLatestResponse()
+                        reportCenterOpen = true
+                    }
                     IconButton(onClick = { settingsOpen = true }) {
                         Icon(
                             imageVector = Icons.Filled.Settings,
@@ -265,6 +288,11 @@ internal fun ChatScreen(
                                 textToSpeechController.clearError()
                                 textToSpeechController.toggle(message.id, message.text)
                             },
+                            onReport = if (message.isReportable() && !isStreaming) {
+                                { reportDraft = onReportResponse(message.id) }
+                            } else {
+                                null
+                            },
                         )
                     }
                     item(key = "message-list-bottom") {
@@ -353,6 +381,35 @@ internal fun ChatScreen(
             },
         )
     }
+    reportDraft?.let { draft ->
+        GeneratedContentReportDialog(
+            draft = draft,
+            onSubmit = { reason, comment, contextIds ->
+                onSubmitReport(draft, reason, comment, contextIds)
+                reportDraft = null
+            },
+            onDismiss = { reportDraft = null },
+        )
+    }
+    if (reportCenterOpen) {
+        ReportCenterDialog(
+            draft = reportCenterDraft,
+            pendingReports = pendingReports,
+            onSubmit = { reason, comment, contextIds ->
+                reportCenterDraft?.let { onSubmitReport(it, reason, comment, contextIds) }
+                reportCenterOpen = false
+            },
+            onDeletePendingReport = onDeletePendingReport,
+            onDismiss = { reportCenterOpen = false },
+        )
+    }
+}
+
+private fun ChatMessage.isReportable(): Boolean {
+    val text = content as? MessageContent.TextPrompt ?: return false
+    return role == ChatRole.Assistant &&
+        text.completionStatus == AssistantCompletionStatus.Complete &&
+        text.text.isNotBlank()
 }
 
 internal fun knowledgeToolStatusText(

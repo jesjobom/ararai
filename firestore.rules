@@ -1,0 +1,90 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function authenticated() {
+      return request.auth != null;
+    }
+
+    function validContextItem(item) {
+      return item is map
+        && item.keys().hasOnly(['role', 'text'])
+        && item.role is string
+        && item.role in ['User', 'Assistant']
+        && item.text is string
+        && item.text.size() > 0
+        && item.text.size() <= 8000;
+    }
+
+    function validContext(context) {
+      return context is list
+        && context.size() <= 4
+        && (context.size() < 1 || validContextItem(context[0]))
+        && (context.size() < 2 || validContextItem(context[1]))
+        && (context.size() < 3 || validContextItem(context[2]))
+        && (context.size() < 4 || validContextItem(context[3]));
+    }
+
+    function validMedia(media) {
+      return media is map
+        && media.keys().hasOnly(['image', 'audio', 'transcript'])
+        && media.image is bool
+        && media.audio is bool
+        && media.transcript is bool;
+    }
+
+    function validMetadata(metadata) {
+      return metadata is map
+        && metadata.keys().hasOnly(['appVersion', 'localeTag', 'modelId', 'runtime'])
+        && metadata.appVersion is string
+        && metadata.appVersion.size() <= 64
+        && metadata.localeTag is string
+        && metadata.localeTag.size() <= 35
+        && metadata.modelId is string
+        && metadata.modelId.size() <= 128
+        && metadata.runtime is string
+        && metadata.runtime.size() <= 64;
+    }
+
+    function validReport(reportId) {
+      let data = request.resource.data;
+      return authenticated()
+        && data.keys().hasOnly([
+          'schemaVersion', 'reportId', 'ownerUid', 'reportedResponse', 'reason',
+          'comment', 'context', 'media', 'metadata', 'reportedAt', 'createdAt',
+          'expiresAt'
+        ])
+        && data.schemaVersion == 1
+        && data.reportId is string
+        && data.reportId.matches('^[0-9a-fA-F-]{36}$')
+        && reportId == request.auth.uid + '_' + data.reportId
+        && data.ownerUid == request.auth.uid
+        && data.reportedResponse is string
+        && data.reportedResponse.size() > 0
+        && data.reportedResponse.size() <= 8000
+        && data.reason in [
+          'HateOrHarassment', 'SexualContent', 'ViolenceOrSelfHarm',
+          'DangerousOrIllegal', 'Privacy', 'FalseOrMisleading', 'Other'
+        ]
+        && (data.comment == null || (data.comment is string && data.comment.size() <= 500))
+        && validContext(data.context)
+        && validMedia(data.media)
+        && validMetadata(data.metadata)
+        && data.reportedAt is timestamp
+        && data.reportedAt <= request.time
+        && data.reportedAt >= request.time - duration.value(7, 'd')
+        && data.createdAt == request.time
+        && data.expiresAt == data.reportedAt + duration.value(90, 'd');
+    }
+
+    match /generated_content_reports/{reportId} {
+      allow create: if validReport(reportId);
+      allow get: if authenticated() && resource.data.ownerUid == request.auth.uid;
+      allow list, update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

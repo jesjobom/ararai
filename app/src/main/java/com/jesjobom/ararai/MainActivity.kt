@@ -67,6 +67,8 @@ class MainActivity : ComponentActivity() {
         val chatMediaRepository = FileChatMediaRepository(java.io.File(filesDir, "chat_media"))
         val chatMediaServices = androidChatMediaServices(chatMediaRepository)
         val chatPreferences = SharedPreferencesChatPreferences(this)
+        val pendingReportQueue = app.pendingReportQueue
+        val reportDeliveryReceiptStore = app.reportDeliveryReceiptStore
         val instructionPreferences = SharedPreferencesInstructionPreferences(this)
         val generationPreferences = SharedPreferencesGenerationPreferences(this)
         val webSearchPreferences = EncryptedWebSearchPreferences(this)
@@ -113,6 +115,9 @@ class MainActivity : ComponentActivity() {
                         chatMediaRepository = chatMediaRepository,
                         chatMediaServices = chatMediaServices,
                         chatPreferences = chatPreferences,
+                        pendingReportQueue = pendingReportQueue,
+                        reportDeliveryReceiptStore = reportDeliveryReceiptStore,
+                        reportDeliveryScheduler = app.reportDeliveryScheduler,
                         instructionPreferences = instructionPreferences,
                         generationPreferences = generationPreferences,
                         webSearchPreferences = webSearchPreferences,

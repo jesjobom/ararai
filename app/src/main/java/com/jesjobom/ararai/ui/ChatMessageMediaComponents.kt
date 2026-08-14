@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -180,6 +181,7 @@ internal fun MessageRow(
     isSpeaking: Boolean = false,
     isSpeechPrepared: Boolean = false,
     onToggleSpeech: () -> Unit = {},
+    onReport: (() -> Unit)? = null,
 ) {
     val isUser = message.role == ChatRole.User
     val containerColor = if (isUser) {
@@ -237,20 +239,41 @@ internal fun MessageRow(
                         )
                     }
                 }
-                if (message.isEligibleForTextToSpeech(isStreaming)) {
-                    IconButton(
-                        onClick = onToggleSpeech,
-                        enabled = isSpeaking || isSpeechPrepared,
-                        modifier = Modifier
-                            .align(Alignment.End)
-                            .size(36.dp),
-                    ) {
-                        Icon(
-                            imageVector = if (isSpeaking) Icons.Filled.Stop else Icons.AutoMirrored.Filled.VolumeUp,
-                            contentDescription = stringResource(
-                                if (isSpeaking) R.string.stop_response_speech else R.string.play_response_speech,
-                            ),
-                        )
+                if (message.isEligibleForTextToSpeech(isStreaming) || onReport != null) {
+                    Row(modifier = Modifier.align(Alignment.End)) {
+                        onReport?.let { report ->
+                            IconButton(
+                                onClick = report,
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Flag,
+                                    contentDescription = stringResource(R.string.report_response_action),
+                                )
+                            }
+                        }
+                        if (message.isEligibleForTextToSpeech(isStreaming)) {
+                            IconButton(
+                                onClick = onToggleSpeech,
+                                enabled = isSpeaking || isSpeechPrepared,
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                val speechIcon = if (isSpeaking) {
+                                    Icons.Filled.Stop
+                                } else {
+                                    Icons.AutoMirrored.Filled.VolumeUp
+                                }
+                                val speechDescription = if (isSpeaking) {
+                                    R.string.stop_response_speech
+                                } else {
+                                    R.string.play_response_speech
+                                }
+                                Icon(
+                                    imageVector = speechIcon,
+                                    contentDescription = stringResource(speechDescription),
+                                )
+                            }
+                        }
                     }
                 }
             }
