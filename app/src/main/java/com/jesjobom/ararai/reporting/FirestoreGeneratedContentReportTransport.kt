@@ -42,7 +42,7 @@ class FirestoreGeneratedContentReportTransport(
     }
 }
 
-private fun GeneratedContentReportPayload.toFirestoreDocument(ownerUid: String): Map<String, Any?> = mapOf(
+internal fun GeneratedContentReportPayload.toFirestoreDocument(ownerUid: String): Map<String, Any?> = mapOf(
     "schemaVersion" to schemaVersion,
     "reportId" to reportId,
     "ownerUid" to ownerUid,
@@ -71,7 +71,7 @@ private fun GeneratedContentReportPayload.toFirestoreDocument(ownerUid: String):
     "expiresAt" to Timestamp(Date(reportedAtEpochMillis + REPORT_RETENTION_DAYS * MILLIS_PER_DAY)),
 )
 
-private fun Exception.toDeliveryResult(): ReportDeliveryResult = when (this) {
+internal fun Exception.toDeliveryResult(): ReportDeliveryResult = when (this) {
     is FirebaseFirestoreException -> when (code) {
         FirebaseFirestoreException.Code.ABORTED,
         FirebaseFirestoreException.Code.ALREADY_EXISTS,

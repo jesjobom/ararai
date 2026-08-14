@@ -1,0 +1,16 @@
+{
+  "name": "ararai-firebase-tests",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test:firestore-rules": "node --test tests/firestore-rules.test.mjs",
+    "test:firestore-rules:emulator": "firebase emulators:exec --project ararai-report-test --only firestore \"npm run test:firestore-rules\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.1",
+    "firebase": "12.17.1",
+    "firebase-tools": "15.27.0"
+  }
+}

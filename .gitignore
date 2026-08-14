@@ -5,6 +5,10 @@ app/build/
 app/.cxx/
 whisper-runtime/build/
 whisper-runtime/.cxx/
+node_modules/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
 
 # Android Studio
 .idea/

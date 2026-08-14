@@ -48,7 +48,7 @@
   deterministic owner-scoped document IDs, server timestamps, 90-day
   `expiresAt`, idempotent create-conflict verification, and precise retry/error
   classification.
-- [ ] 4.4 Add strict Security Rules permitting only authenticated bounded creates
+- [x] 4.4 Add strict Security Rules permitting only authenticated bounded creates
   and owner-only point reads while denying list/update/delete; add Emulator Suite
   tests, least-privilege administrative access guidance, and quota monitoring.
 - [ ] 4.5 Configure App Check initially with one-hour TTL, `PLAY_RECOGNIZED`
@@ -57,12 +57,12 @@
 
 ## 5. Documentation and validation
 
-- [ ] 5.1 Add unit, persistence, WorkManager, Compose, transport, and Security
+- [x] 5.1 Add unit, persistence, WorkManager, Compose, transport, and Security
   Rules tests covering privacy projection, limits, retries, races, lifecycle,
   owner isolation, and Chat/Voice parity.
 - [x] 5.2 Update consolidated project documentation for the ancillary reporting
   backend, privacy boundary, setup, operations, and intentionally excluded media.
-- [ ] 5.3 Run focused tests, the complete project quality gate, Firestore Security
+- [x] 5.3 Run focused tests, the complete project quality gate, Firestore Security
   Rules tests, and strict OpenSpec validation.
 - [ ] 5.4 Validate an internal Play-distributed release on a physical device for
   genuine Play Integrity attestation, successful receipt, abuse rejection,

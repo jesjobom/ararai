@@ -87,14 +87,18 @@ The supported local and CI entry point is:
 scripts/quality-gate.sh
 ```
 
-It runs pinned Kotlin formatting and static analysis, JVM/Robolectric tests,
-Android lint, the debug app build, the debug instrumentation APK build, and
-strict validation of every OpenSpec change. The same command is used by
+It runs Firestore Security Rules tests in the local Emulator Suite, pinned
+Kotlin formatting and static analysis, JVM/Robolectric tests, Android lint, the
+debug app build, the debug instrumentation APK build, and strict validation of
+every OpenSpec change. The Firebase emulator requires Node.js 22+ and Java 21.
+The same command is used by
 `.github/workflows/android-quality-gate.yml`.
 
 Individual commands remain useful while iterating:
 
 ```sh
+npm ci --include=dev --ignore-scripts
+npm run test:firestore-rules:emulator
 ./gradlew spotlessCheck detekt
 ./gradlew testDebugUnitTest
 ./gradlew lintDebug

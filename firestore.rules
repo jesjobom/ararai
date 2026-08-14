@@ -56,7 +56,9 @@ service cloud.firestore {
         ])
         && data.schemaVersion == 1
         && data.reportId is string
-        && data.reportId.matches('^[0-9a-fA-F-]{36}$')
+        && data.reportId.matches(
+          '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        )
         && reportId == request.auth.uid + '_' + data.reportId
         && data.ownerUid == request.auth.uid
         && data.reportedResponse is string
