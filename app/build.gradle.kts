@@ -23,6 +23,25 @@ val configuredDebugKeystore =
         ?.takeIf(String::isNotBlank)
         ?.let(::file)
 
+fun requiredReleaseSigningEnvironment(name: String): String =
+    providers
+        .environmentVariable(name)
+        .orNull
+        ?.takeIf(String::isNotBlank)
+        ?: error("Missing required release-signing environment variable: $name")
+
+fun releaseSigningPassword(pathEnvironmentName: String): String =
+    file(requiredReleaseSigningEnvironment(pathEnvironmentName))
+        .readText()
+        .trimEnd()
+        .takeIf(String::isNotEmpty)
+        ?: error("Release-signing password file is empty: $pathEnvironmentName")
+
+val releaseSigningRequested =
+    gradle.startParameter.taskNames.any { taskName ->
+        taskName.contains("release", ignoreCase = true)
+    }
+
 val liteRtLmVersion = "0.14.0"
 
 android {
@@ -45,6 +64,17 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseSigningRequested) {
+            create("release") {
+                storeFile = file(requiredReleaseSigningEnvironment("ARARAI_UPLOAD_STORE_FILE"))
+                storePassword = releaseSigningPassword("ARARAI_UPLOAD_STORE_PASSWORD_FILE")
+                keyAlias = requiredReleaseSigningEnvironment("ARARAI_UPLOAD_KEY_ALIAS")
+                keyPassword = releaseSigningPassword("ARARAI_UPLOAD_KEY_PASSWORD_FILE")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isDebuggable = true
@@ -57,6 +87,9 @@ android {
             }
         }
         release {
+            if (releaseSigningRequested) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

@@ -51,7 +51,7 @@
 - [x] 4.4 Add strict Security Rules permitting only authenticated bounded creates
   and owner-only point reads while denying list/update/delete; add Emulator Suite
   tests, least-privilege administrative access guidance, and quota monitoring.
-- [ ] 4.5 Configure App Check initially with one-hour TTL, `PLAY_RECOGNIZED`
+- [x] 4.5 Configure App Check initially with one-hour TTL, `PLAY_RECOGNIZED`
   required, `LICENSED` not yet required, and no explicit device-integrity level;
   keep enforcement disabled until SDK and debug-provider validation is complete.
 
@@ -64,9 +64,33 @@
   backend, privacy boundary, setup, operations, and intentionally excluded media.
 - [x] 5.3 Run focused tests, the complete project quality gate, Firestore Security
   Rules tests, and strict OpenSpec validation.
-- [ ] 5.4 Validate an internal Play-distributed release on a physical device for
+- [x] 5.4 Validate an internal Play-distributed release on a physical device for
   genuine Play Integrity attestation, successful receipt, abuse rejection,
   offline queue/retry, accessibility, and unaffected local Chat; record evidence.
-- [ ] 5.5 After internal Play validation, require `LICENSED` for production while
+- [x] 5.5 After internal Play validation, require `LICENSED` for production while
   retaining `PLAY_RECOGNIZED`, one-hour TTL, and no explicit device-integrity
   requirement; verify both licensed acceptance and sideload rejection.
+
+## Completion evidence
+
+- On 2026-08-16, version code 2 was installed from the Google Play internal-test
+  track on a physical device. Local model download, Chat generation, report
+  review, authenticated submission, and Firestore receipt succeeded without
+  affecting subsequent local Chat.
+- A report submitted offline remained queued and was delivered after network
+  restoration without a duplicate document.
+- The Firestore Emulator Security Rules suite passed 11/11 tests, including
+  rejection of unauthenticated, owner-mismatched, malformed, oversized,
+  out-of-retention, list, update, delete, and overwrite attempts.
+- The effective SHA-256 certificate fingerprint from the Play-installed split
+  APK was added to the Firebase Android registration after verifying that Google
+  Play was the installer. App Check then classified the request as verified.
+- `PLAY_RECOGNIZED` and `LICENSED` are required with a one-hour token lifetime,
+  no explicit device-integrity verdict, and Cloud Firestore enforcement enabled.
+  The Play-installed app continued to submit successfully; the manually
+  sideloaded debug app received a permanent attestation failure and did not
+  persist its report.
+- Manual assistive-technology validation was explicitly deferred by the product
+  owner for this release. Existing automated accessibility coverage remains in
+  place; this exception does not claim that a physical-device accessibility
+  review was performed.

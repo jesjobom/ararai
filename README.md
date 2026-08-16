@@ -70,7 +70,8 @@ memory, thermal, and multimodal behavior require physical-device validation.
 - Bundled ML Kit Language ID 17.0.6
 - Android VAD 2.0.10 (WebRTC and Silero) plus ONNX Runtime Android 1.22.0
   transitively for the experimental Silero comparison
-- Debug signing/builds only; release signing is not configured
+- Debug builds use debug signing. Release builds require an external upload
+  keystore and password files; no signing material is stored in this repository.
 
 Model definitions and their runtime, artifact, acceleration, capability,
 integrity, and inference metadata live in
@@ -136,6 +137,29 @@ scripts/copy-debug-apk.sh
 The resulting file is
 `/home/node/.openclaw/jarvis/artifacts/ararai/app-debug.apk`. Install and test it
 from the environment that has ADB access.
+
+## Signed Play release
+
+Release signing reads the upload keystore and password files from an external
+environment file. The supported entry point resolves that file relative to the
+repository, validates the secret-file permissions, builds and verifies the
+signed bundle, and copies it to the shared artifacts area:
+
+```sh
+scripts/build-release-bundle.sh
+```
+
+The expected environment file is
+`../../secrets/ararai/release-signing.env`, relative to the repository root. It
+defines `ARARAI_UPLOAD_STORE_FILE`, `ARARAI_UPLOAD_STORE_PASSWORD_FILE`,
+`ARARAI_UPLOAD_KEY_ALIAS`, and `ARARAI_UPLOAD_KEY_PASSWORD_FILE`. The concrete
+host paths remain outside this repository.
+
+The password files must contain only their respective password. Keep the
+keystore and password files outside the repository with restrictive filesystem
+permissions and maintain an encrypted backup outside the build host. Google
+Play App Signing owns the distribution signing key; this local key is the upload
+key and must not be reused for other applications.
 
 ## Local data and privacy
 

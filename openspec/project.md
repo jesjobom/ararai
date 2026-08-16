@@ -79,7 +79,9 @@ local model is sufficient for the core Chat inference flow.
   experimental offline pause-detection comparison
 - Plain SQLite for Chat sessions/messages and local preferences for model
   selection
-- Debug builds/signing only
+- Debug builds use debug signing. Release builds require an external, explicitly
+  configured upload keystore and password files; signing material is never
+  stored in the repository.
 
 Exact dependency versions and Android settings come from the checked-in Gradle
 configuration. Exact Gemma 4 and Whisper model support comes from
@@ -179,7 +181,8 @@ physical device.
 
 - The model catalog is static; arbitrary user-provided model entries are not
   supported.
-- Release signing and a production release pipeline are not configured.
+- Release signing supports a locally controlled external upload key. Automated
+  production release publication is not configured.
 - The generic GitHub runner builds the instrumentation APK but does not execute
   device tests.
 - Runtime compatibility and acceleration vary by device and require the
