@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change harden-build-supply-chain. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Forward-compatible Gradle configuration
 
 The build SHALL configure every project without invoking APIs scheduled for
@@ -50,3 +52,36 @@ versions, lockfiles, verification metadata, and the wrapper checksum.
 - **WHEN** a dependency or plugin version changes intentionally
 - **THEN** the maintainer regenerates and reviews locks and verification metadata
 - **AND** reruns the complete quality gate before accepting the change
+
+### Requirement: Android builds use a reproducible Java runtime
+
+The repository SHALL declare one supported Java runtime for the canonical
+Android Gradle quality gate and SHALL keep workflow configuration, workflow
+labels, local prerequisites, and project documentation aligned with that choice.
+
+#### Scenario: CI runs the Android quality gate
+
+- **WHEN** the canonical Android workflow configures Java and invokes Gradle
+- **THEN** it uses the same Java runtime declared for local Android builds
+
+#### Scenario: Firebase tooling needs another runtime
+
+- **WHEN** Firebase emulator tooling requires a different Java version
+- **THEN** that invocation is isolated and documented without changing the Android Gradle baseline implicitly
+
+### Requirement: Release shrinking is validated and diagnosable
+
+Release artifacts SHALL use optimized code/resource shrinking only with
+evidence-backed keep rules, SHALL preserve mapping artifacts for diagnostics,
+and SHALL pass release-like smoke checks across reflection, JNI, Firebase,
+Compose, persistence, and local model execution boundaries.
+
+#### Scenario: Release artifact is assembled
+
+- **WHEN** the release build runs R8
+- **THEN** it completes with maintained keep rules and produces retrievable mapping metadata
+
+#### Scenario: Shrunk artifact is accepted
+
+- **WHEN** a shrunk release-like artifact is evaluated for delivery
+- **THEN** critical runtime smoke checks pass on a physical device in addition to automated build checks

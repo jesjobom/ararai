@@ -14,9 +14,11 @@ import javax.crypto.spec.GCMParameterSpec
 data class WebSearchSettings(
     val enabledProviders: Set<WebSearchProvider> = emptySet(),
     val configuredProviders: Set<WebSearchProvider> = emptySet(),
+    val unreadableProviders: Set<WebSearchProvider> = emptySet(),
 ) {
     fun isConfigured(provider: WebSearchProvider): Boolean = provider in configuredProviders
     fun isEnabled(provider: WebSearchProvider): Boolean = provider in enabledProviders
+    fun isUnreadable(provider: WebSearchProvider): Boolean = provider in unreadableProviders
     fun isPreferred(provider: WebSearchProvider): Boolean = preferredProvider == provider
 
     val orderedEnabledProviders: List<WebSearchProvider>
@@ -101,13 +103,19 @@ class InMemoryWebSearchPreferences(
 }
 
 @Suppress("TooManyFunctions")
-class EncryptedWebSearchPreferences(context: Context) : WebSearchPreferences {
+class EncryptedWebSearchPreferences internal constructor(
+    context: Context,
+    private val cipher: ProviderTokenCipher,
+    credentialPreferencesName: String = CREDENTIAL_PREFERENCES,
+    configurationPreferencesName: String = CONFIGURATION_PREFERENCES,
+) : WebSearchPreferences {
+    constructor(context: Context) : this(context, AndroidProviderTokenCipher())
+
     private val credentials =
-        context.getSharedPreferences(CREDENTIAL_PREFERENCES, Context.MODE_PRIVATE)
+        context.getSharedPreferences(credentialPreferencesName, Context.MODE_PRIVATE)
     private val configuration =
-        context.getSharedPreferences(CONFIGURATION_PREFERENCES, Context.MODE_PRIVATE)
+        context.getSharedPreferences(configurationPreferencesName, Context.MODE_PRIVATE)
     private val lock = Any()
-    private val cipher = AndroidProviderTokenCipher()
     private val mutableSettings = MutableStateFlow(loadSettings())
     override val settings = mutableSettings.asStateFlow()
 
@@ -140,7 +148,7 @@ class EncryptedWebSearchPreferences(context: Context) : WebSearchPreferences {
         enabled: Boolean,
     ) {
         synchronized(lock) {
-            require(!enabled || hasTokenLocked(provider)) {
+            require(!enabled || credentialStateLocked(provider) is CredentialState.Readable) {
                 "Provider must have a configured credential before enablement"
             }
             val current = loadSettings()
@@ -159,23 +167,37 @@ class EncryptedWebSearchPreferences(context: Context) : WebSearchPreferences {
     }
 
     override fun token(provider: WebSearchProvider): String? = synchronized(lock) {
-        credentials.getString(provider.tokenKey(), null)
-            ?.let { encrypted -> runCatching { cipher.decrypt(encrypted) }.getOrNull() }
+        when (val state = credentialStateLocked(provider)) {
+            CredentialState.Absent -> null
+            is CredentialState.Readable -> state.token
+            CredentialState.Unreadable -> {
+                disableProviderLocked(provider)
+                publishLocked()
+                null
+            }
+        }
     }
 
     private fun loadSettings(): WebSearchSettings = synchronized(lock) {
-        val configured = WebSearchProvider.entries.filter(::hasTokenLocked).toSet()
-        val legacySelected = selectedProviderLocked()?.takeIf(configured::contains)
-        val enabled =
+        val credentialStates = WebSearchProvider.entries.associateWith(::credentialStateLocked)
+        val configured = credentialStates.filterValues { it is CredentialState.Readable }.keys
+        val unreadable = credentialStates.filterValues { it == CredentialState.Unreadable }.keys
+        val selectedProvider = selectedProviderLocked()
+        val legacySelected = selectedProvider?.takeIf(configured::contains)
+        val storedEnabled =
             configuration.getStringSet(KEY_ENABLED_PROVIDERS, null)
                 ?.mapNotNull { name -> WebSearchProvider.entries.firstOrNull { it.name == name } }
-                ?.filter(configured::contains)
                 ?.toSet()
                 ?: legacySelected?.let(::setOf).orEmpty()
-        WebSearchSettings(
-            enabledProviders = enabled,
+        val settings = WebSearchSettings(
+            enabledProviders = storedEnabled,
             configuredProviders = configured,
+            unreadableProviders = unreadable,
         ).normalized()
+        if (settings.enabledProviders != storedEnabled || selectedProvider in unreadable) {
+            persistConfigurationLocked(settings)
+        }
+        settings
     }
 
     private fun publishLocked() {
@@ -192,11 +214,28 @@ class EncryptedWebSearchPreferences(context: Context) : WebSearchPreferences {
             .commit()
     }
 
-    private fun hasTokenLocked(provider: WebSearchProvider): Boolean = credentials.contains(provider.tokenKey())
+    private fun credentialStateLocked(provider: WebSearchProvider): CredentialState {
+        val encrypted = credentials.getString(provider.tokenKey(), null) ?: return CredentialState.Absent
+        return runCatching { validateProviderToken(cipher.decrypt(encrypted)) }
+            .fold(
+                onSuccess = CredentialState::Readable,
+                onFailure = { CredentialState.Unreadable },
+            )
+    }
+
+    private fun disableProviderLocked(provider: WebSearchProvider) {
+        val enabled = configuration.getStringSet(KEY_ENABLED_PROVIDERS, emptySet()).orEmpty()
+        val selected = selectedProviderLocked()
+        if (provider.name !in enabled && selected != provider) return
+        configuration.edit()
+            .putStringSet(KEY_ENABLED_PROVIDERS, enabled - provider.name)
+            .remove(KEY_SELECTED_PROVIDER)
+            .commit()
+    }
 
     private fun WebSearchProvider.tokenKey(): String = "token_${name.lowercase()}"
 
-    private companion object {
+    internal companion object {
         const val CREDENTIAL_PREFERENCES = "web_search_credentials"
         const val CONFIGURATION_PREFERENCES = "web_search_configuration"
         const val KEY_SELECTED_PROVIDER = "selected_provider"
@@ -204,22 +243,39 @@ class EncryptedWebSearchPreferences(context: Context) : WebSearchPreferences {
     }
 }
 
+private sealed interface CredentialState {
+    data object Absent : CredentialState
+
+    data class Readable(
+        val token: String,
+    ) : CredentialState
+
+    data object Unreadable : CredentialState
+}
+
 private fun WebSearchSettings.normalized(): WebSearchSettings {
     val enabled = enabledProviders.intersect(configuredProviders)
-    return copy(enabledProviders = enabled)
+    val unreadable = unreadableProviders - configuredProviders
+    return copy(enabledProviders = enabled, unreadableProviders = unreadable)
 }
 
 private val WEB_SEARCH_PROVIDER_PRIORITY = listOf(WebSearchProvider.Exa, WebSearchProvider.Tavily)
 
-private class AndroidProviderTokenCipher {
-    fun encrypt(value: String): String {
+internal interface ProviderTokenCipher {
+    fun encrypt(value: String): String
+
+    fun decrypt(value: String): String
+}
+
+internal class AndroidProviderTokenCipher : ProviderTokenCipher {
+    override fun encrypt(value: String): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, secretKey())
         val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
         return "${cipher.iv.base64()}.${encrypted.base64()}"
     }
 
-    fun decrypt(value: String): String {
+    override fun decrypt(value: String): String {
         val parts = value.split('.', limit = 2)
         require(parts.size == 2)
         val cipher = Cipher.getInstance(TRANSFORMATION)

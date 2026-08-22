@@ -26,11 +26,20 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up Firebase JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
+
+      - name: Preserve Firebase JDK 21
+        run: echo "FIREBASE_JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+
+      - name: Set up Android JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
           cache: gradle
 
       - name: Set up Node.js

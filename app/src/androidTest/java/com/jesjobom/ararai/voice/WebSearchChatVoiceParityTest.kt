@@ -5,6 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.jesjobom.ararai.chat.ChatRole
 import com.jesjobom.ararai.chat.ChatViewModel
 import com.jesjobom.ararai.chat.ConversationTurnSettings
+import com.jesjobom.ararai.chat.FileChatMediaRepository
 import com.jesjobom.ararai.chat.InMemoryChatSessionStore
 import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.engine.GenerationEvent
@@ -71,6 +72,7 @@ class WebSearchChatVoiceParityTest {
         waitUntil { !chat.uiState.value.isGenerating }
 
         val voiceStore = InMemoryChatSessionStore()
+        val voiceMedia = testMediaRepository()
         val captureFactory = RecordingCaptureFactory()
         val speech = CompletingSpeechQueueFactory()
         val voice =
@@ -82,6 +84,7 @@ class WebSearchChatVoiceParityTest {
                 captureFactory = captureFactory::create,
                 speechQueueFactory = speech::create,
                 sessionStore = voiceStore,
+                mediaRepository = voiceMedia,
             )
         voice.onModelStartupState(ModelStartupState.Available(model, inference))
         voice.onEnteringVoiceChat()
@@ -121,6 +124,7 @@ class WebSearchChatVoiceParityTest {
         waitUntil { chatEngine.cancellations.get() == 1 }
 
         val voiceEngine = CancellableWebSearchEngine()
+        val voiceMedia = testMediaRepository()
         val captureFactory = RecordingCaptureFactory()
         val voice =
             VoiceChatViewModel(
@@ -131,6 +135,7 @@ class WebSearchChatVoiceParityTest {
                 captureFactory = captureFactory::create,
                 speechQueueFactory = CompletingSpeechQueueFactory()::create,
                 sessionStore = InMemoryChatSessionStore(),
+                mediaRepository = voiceMedia,
             )
         voice.onModelStartupState(ModelStartupState.Available(model, inference))
         voice.onEnteringVoiceChat()
@@ -157,6 +162,11 @@ class WebSearchChatVoiceParityTest {
             speechMillis = 1_000L,
             noiseSuppressionActive = true,
         )
+    }
+
+    private fun testMediaRepository(): FileChatMediaRepository {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        return FileChatMediaRepository(File(context.cacheDir, "voice-web-search-media-${System.nanoTime()}"))
     }
 
     private fun waitUntil(timeoutMillis: Long = 10_000L, condition: () -> Boolean) {

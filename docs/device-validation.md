@@ -205,3 +205,105 @@ measurements remain release-validation checks rather than claims of this change.
 - Environment-only exclusions:
 - Sanitized artifact locations:
 - Reviewer and date:
+
+### 2026-08-19 release-candidate partial pass
+
+- Tester: JIA DEV, automated over ADB.
+- Device: Samsung Galaxy S22 (`SM-S901E`), Android 16 / API 36, arm64-v8a.
+- Artifact: locally signed, R8-minified `releaseCandidate`, app version
+  `v202608191647`, SHA-256
+  `78895cc955161f13c884003b61bfafbfce49a1213b820aa599514dcd0daf48ff`.
+- Model: installed Gemma 4 E2B IT LiteRT-LM artifact.
+- Passed: cold startup, Home-to-Chat navigation, existing SQLite conversation
+  restore, model initialization, completed local text generation (`R8_PASS`),
+  benchmark retrieval, and process survival after generation.
+- Automated device suite: all 30 debug instrumentation tests passed, covering
+  lifecycle recreation, real `ContentResolver` image import, UI journeys,
+  reporting UI states, credential encryption/failure handling, and Chat/Voice
+  fake-provider parity without real service tokens. The current rerun used the
+  app-scoped `en-US` locale on the `pt-BR` device because the Compose tests use
+  literal English semantics. Twenty-nine tests passed together; the lifecycle
+  test then passed separately after the fresh-install notification, microphone,
+  and camera permission prompts were resolved.
+- Current shrunk-runtime follow-up: the E2B model initialized through LiteRT-LM,
+  selected the GPU/OpenCL delegate, completed a persisted Chat generation, and
+  survived force-stop/restart. Home, Chat, Voice Chat, Models, Assistant
+  configuration, and Settings all opened successfully. The on-demand diagnostic
+  completed with 389 ms first-token latency, 11,069 ms generation time, 28
+  prefill tokens at 82.37 tokens/s, and 92 decode tokens. Voice Chat reached
+  Ready, entered Listening, and returned to Ready after Stop; Android
+  AudioService recorded a matching `VOICE_RECOGNITION` start/stop pair.
+- Follow-up live-provider validation used user-entered credentials without
+  reading or exporting either token. Exa completed a focused web-search turn
+  with three persisted Exa sources. After disabling Exa through the UI, Tavily
+  remained enabled across a process restart and completed a turn with two
+  persisted Tavily sources. The original Exa-preferred/Tavily-fallback
+  configuration was restored afterward.
+- A reported Voice Chat profile race was reproduced from the retained logs and
+  corrected. Physical follow-up proved that entry from a text-only runtime now
+  keeps Start disabled while showing model loading, then enables it only after
+  the audio profile is initialized.
+- A reported completed generation with no text or reasoning was confirmed in
+  SQLite history. Empty completed output is now persisted and presented as an
+  incomplete response instead of the ambiguous `...` placeholder.
+- The first live-token follow-up exposed that the credential instrumentation
+  tests reused production preference filenames and could clear credentials on
+  an already configured debug installation. The tests now use isolated
+  preference files; a focused rerun passed all three credential scenarios and
+  byte-for-byte hashes proved the production preference files were unchanged.
+- R8 defects found and corrected during this run: Room WorkManager database
+  construction, EvalEx annotation discovery, and LiteRT-LM JNI access to
+  `SamplerConfig` and `BenchmarkInfo`.
+- Exclusions: Whisper model load/transcription, a repeated physical
+  microphone/camera turn on the corrected build, new persisted media round trip
+  in the release candidate, full Voice Chat, provider quota/rate-limit failures,
+  and Firebase reporting through an official App Check distribution path. These
+  exclusions keep OpenSpec task 3.2 open.
+
+### 2026-08-22 release-shrinking acceptance follow-up
+
+- The remaining local physical-device flows from the 2026-08-19 partial pass
+  were confirmed as tested: Whisper model load/transcription, repeated
+  microphone/camera use, persisted media round trip, and full Voice Chat.
+- Provider quota/rate-limit failure handling and Firebase reporting through an
+  official App Check distribution path were explicitly accepted as exclusions
+  and were not executed.
+- With those exclusions recorded, OpenSpec change
+  `enable-safe-release-shrinking` task 3.2 is complete.
+
+### 2026-08-22 Voice Chat navigation stress failure
+
+- User validation repeatedly entered Voice Chat and immediately returned with
+  the Android system Back action while model loading was still in progress.
+- Result: the device became progressively slower and Android eventually closed
+  the application. The earlier load-serialization fix was therefore
+  insufficient and is not accepted as physical evidence.
+- Follow-up implementation now requests the audio workload during the initial
+  native engine load instead of creating and replacing an intermediate
+  text-only engine. The same stress sequence still failed on the first
+  follow-up build.
+- Captured Logcat proves Android's low-memory killer terminated
+  `com.jesjobom.ararai`: the process had 342,448 kB RSS and 854,212 kB swap,
+  with 317% thrashing. Two audio-profile engine initializations ran in the same
+  process. The first completed after its requesting screen had left, but its
+  native session was not published before coroutine cancellation was
+  re-observed; the next entry consequently started a second engine.
+- The ownership transfer is now part of the same non-cancellable serialized
+  transition as native initialization. A regression test cancels the original
+  requester while bridge loading is suspended, completes loading, and proves
+  that the next request reuses the published session with exactly one bridge
+  load. Engine identity is logged on initialization and close for the next
+  physical verification.
+- Physical follow-up with the corrected ownership-transfer build repeated the
+  original rapid Voice Chat entry/system-Back stress sequence. Voice Chat
+  remained functional afterward and the application was not terminated.
+- The follow-up exposed a presentation-only Chat issue after the audio profile
+  was loaded: the persisted empty assistant placeholder was normalized as an
+  incomplete response while the shared runtime was still switching back to the
+  text profile. The final response replaced it correctly. Active generation
+  now suppresses that terminal incomplete-response card; a genuinely empty
+  completed generation still displays it after generation ends.
+- Physical follow-up also confirmed that application startup and splash duration
+  are materially improved on the test device. Together with the successful
+  repeated Voice Chat navigation stress test, this completes OpenSpec change
+  `harden-navigation-load-and-startup` physical validation task 2.4.

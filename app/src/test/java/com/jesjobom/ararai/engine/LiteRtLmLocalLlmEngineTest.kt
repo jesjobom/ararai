@@ -12,11 +12,15 @@ import com.jesjobom.ararai.model.ModelAccelerationPolicy
 import com.jesjobom.ararai.model.ModelInputCapabilities
 import com.jesjobom.ararai.model.ModelRuntime
 import com.jesjobom.ararai.model.ModelToolCapabilities
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -116,6 +120,37 @@ class LiteRtLmLocalLlmEngineTest {
 
         assertEquals(2, bridge.loadCalls)
         assertEquals(256, bridge.loadedConfig?.contextTokens)
+    }
+
+    @Test
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun `concurrent requests for the same model share one native load`() = runTest {
+        val release = CompletableDeferred<Unit>()
+        val delegate = RecordingBridge()
+        val bridge = object : LiteRtLmBridge {
+            override suspend fun load(
+                modelPath: String,
+                config: InferenceConfig,
+                useGpu: Boolean,
+                inputCapabilities: ModelInputCapabilities,
+                toolNames: Set<String>,
+                profile: LiteRtLmWorkloadProfile,
+            ): LiteRtLmSession {
+                release.await()
+                return delegate.load(modelPath, config, useGpu, inputCapabilities, toolNames, profile)
+            }
+        }
+        val engine = LiteRtLmLocalLlmEngine(bridge, StandardTestDispatcher(testScheduler))
+
+        val first = async { engine.load(model, config) }
+        val second = async { engine.load(model, config) }
+        runCurrent()
+        release.complete(Unit)
+        advanceUntilIdle()
+
+        first.await()
+        second.await()
+        assertEquals(1, delegate.loadCalls)
     }
 
     @Test

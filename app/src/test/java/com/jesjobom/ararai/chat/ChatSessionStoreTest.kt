@@ -90,6 +90,24 @@ class ChatSessionStoreTest {
     }
 
     @Test
+    fun `treats persisted blank completed assistant output as incomplete`() {
+        val store = store()
+        val session = store.createSession("Blank response")
+
+        val message =
+            store.appendMessage(
+                sessionId = session.id,
+                role = ChatRole.Assistant,
+                content = MessageContent.TextPrompt(""),
+            )
+
+        val restored = store.getMessages(session.id).single { it.id == message.id }
+        val content = restored.content as MessageContent.TextPrompt
+
+        assertEquals(AssistantCompletionStatus.Incomplete, content.completionStatus)
+    }
+
+    @Test
     fun `in memory and sqlite stores return the same distinct media references`() {
         val sqlite = store()
         val memory = InMemoryChatSessionStore()

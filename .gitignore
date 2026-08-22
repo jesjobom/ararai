@@ -16,3 +16,13 @@ ui-debug.log
 
 # Handoff artifacts live outside the Git-tracked project.
 /artifacts/
+
+# Release signing material and generated R8 diagnostics are never source files.
+*.jks
+*.keystore
+release-signing.env
+*-password.txt
+**/outputs/mapping/
+
+# Local static-analysis databases, logs, SARIF, and other raw audit output.
+/.audit/

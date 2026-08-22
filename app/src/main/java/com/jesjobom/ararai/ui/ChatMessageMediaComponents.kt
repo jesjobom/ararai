@@ -236,6 +236,7 @@ internal fun MessageRow(
                             showReasoning = showReasoning,
                             showAudioTranscriptions = showAudioTranscriptions,
                             mediaServices = mediaServices,
+                            isStreaming = isStreaming,
                         )
                     }
                 }
@@ -288,6 +289,7 @@ internal fun MessageContentView(
     showReasoning: Boolean,
     showAudioTranscriptions: Boolean,
     mediaServices: ChatMediaServices,
+    isStreaming: Boolean = false,
 ) {
     when (content) {
         is MessageContent.TextPrompt -> {
@@ -325,7 +327,7 @@ internal fun MessageContentView(
                         )
                     }
                 }
-                if (content.completionStatus == AssistantCompletionStatus.Incomplete) {
+                if (content.completionStatus == AssistantCompletionStatus.Incomplete && !isStreaming) {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.onErrorContainer,

@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.lifecycleScope
 import com.jesjobom.ararai.chat.DeferredNewChatSessionStore
 import com.jesjobom.ararai.chat.FileChatMediaRepository
 import com.jesjobom.ararai.chat.SharedPreferencesChatPreferences
@@ -35,6 +36,8 @@ import com.jesjobom.ararai.model.SharedPreferencesGenerationPreferences
 import com.jesjobom.ararai.settings.SharedPreferencesApplicationExitPreferenceStore
 import com.jesjobom.ararai.settings.SharedPreferencesApplicationLanguagePreferenceStore
 import com.jesjobom.ararai.settings.SharedPreferencesThemePreferenceStore
+import com.jesjobom.ararai.settings.SharedPreferencesTranscriptionLanguagePreferences
+import com.jesjobom.ararai.settings.resolveLanguageTag
 import com.jesjobom.ararai.ui.AndroidChatTextToSpeechService
 import com.jesjobom.ararai.ui.ArarAiApp
 import com.jesjobom.ararai.ui.ArarAiTheme
@@ -42,7 +45,9 @@ import com.jesjobom.ararai.ui.MlKitChatLanguageIdentifier
 import com.jesjobom.ararai.ui.androidChatMediaServices
 import com.jesjobom.ararai.voice.SharedPreferencesVoiceChatPreferences
 import com.jesjobom.ararai.voice.reconcileVoiceTemporaryFiles
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val openModelManagementRequests = MutableStateFlow(0)
@@ -71,9 +76,18 @@ class MainActivity : ComponentActivity() {
         val reportDeliveryReceiptStore = app.reportDeliveryReceiptStore
         val instructionPreferences = SharedPreferencesInstructionPreferences(this)
         val generationPreferences = SharedPreferencesGenerationPreferences(this)
+        val transcriptionLanguagePreferences = SharedPreferencesTranscriptionLanguagePreferences(this)
         val webSearchPreferences = EncryptedWebSearchPreferences(this)
         val audioTranscriber = WhisperCppAudioTranscriber(
             models = { modelController.state.value.models },
+            languageTag = {
+                transcriptionLanguagePreferences.language.value.resolveLanguageTag(
+                    systemLanguageTag = {
+                        android.content.res.Resources.getSystem().configuration.locales[0].toLanguageTag()
+                    },
+                    interfaceLanguageTag = { resources.configuration.locales[0].toLanguageTag() },
+                )
+            },
         )
         val themePreferenceStore = SharedPreferencesThemePreferenceStore(this)
         val languagePreferenceStore = SharedPreferencesApplicationLanguagePreferenceStore(this)
@@ -82,7 +96,9 @@ class MainActivity : ComponentActivity() {
         val voiceChatPreferences = SharedPreferencesVoiceChatPreferences(this)
         val voiceTemporaryDirectory = java.io.File(cacheDir, "voice_chat")
         reconcileVoiceTemporaryFiles(voiceTemporaryDirectory)
-        chatMediaRepository.reconcile(chatSessionStore.referencedMediaUris())
+        lifecycleScope.launch(Dispatchers.IO) {
+            chatMediaRepository.reconcile(chatSessionStore.referencedMediaUris())
+        }
 
         setContent {
             var selectedApplicationLanguage by remember { mutableStateOf(appliedApplicationLanguage) }
@@ -120,6 +136,7 @@ class MainActivity : ComponentActivity() {
                         reportDeliveryScheduler = app.reportDeliveryScheduler,
                         instructionPreferences = instructionPreferences,
                         generationPreferences = generationPreferences,
+                        transcriptionLanguagePreferences = transcriptionLanguagePreferences,
                         webSearchPreferences = webSearchPreferences,
                         audioTranscriber = audioTranscriber,
                         chatTextToSpeechServiceFactory = { AndroidChatTextToSpeechService(this) },

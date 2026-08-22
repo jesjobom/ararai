@@ -1,6 +1,8 @@
 package com.jesjobom.ararai.model
 
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.security.MessageDigest
 
 sealed interface ModelFileValidation {
@@ -28,6 +30,13 @@ object ModelFileIntegrity {
             )
         }
 
+        val verificationFile = file.verificationFile()
+        val verification = verificationFile.takeIf(File::isFile)?.readVerification()
+        if (verification == ModelVerification.forFile(file, config)) {
+            return ModelFileValidation.Valid
+        }
+
+        verificationFile.delete()
         val actualSha256 = file.sha256()
         if (actualSha256 != config.sha256) {
             return ModelFileValidation.Invalid(
@@ -35,7 +44,66 @@ object ModelFileIntegrity {
             )
         }
 
+        verificationFile.writeVerification(ModelVerification.forFile(file, config))
         return ModelFileValidation.Valid
+    }
+
+    fun invalidate(file: File) {
+        file.verificationFile().delete()
+    }
+
+    fun promoteVerification(source: File, destination: File) {
+        val sourceVerification = source.verificationFile()
+        if (!sourceVerification.isFile) return
+        runCatching {
+            Files.move(
+                sourceVerification.toPath(),
+                destination.verificationFile().toPath(),
+                REPLACE_EXISTING,
+            )
+        }
+    }
+}
+
+private data class ModelVerification(
+    val sha256: String,
+    val bytes: Long,
+    val lastModifiedMillis: Long,
+) {
+    companion object {
+        fun forFile(file: File, config: ModelConfig): ModelVerification = ModelVerification(
+            sha256 = config.sha256,
+            bytes = file.length(),
+            lastModifiedMillis = file.lastModified(),
+        )
+    }
+}
+
+private fun File.verificationFile() = File(parentFile, ".$name.verified")
+
+private fun File.readVerification(): ModelVerification? = runCatching {
+    val values = readLines().associate { line ->
+        val separator = line.indexOf('=')
+        require(separator > 0)
+        line.substring(0, separator) to line.substring(separator + 1)
+    }
+    require(values["version"] == "1")
+    ModelVerification(
+        sha256 = checkNotNull(values["sha256"]),
+        bytes = checkNotNull(values["bytes"]).toLong(),
+        lastModifiedMillis = checkNotNull(values["lastModifiedMillis"]).toLong(),
+    )
+}.getOrNull()
+
+private fun File.writeVerification(verification: ModelVerification) {
+    runCatching {
+        parentFile?.mkdirs()
+        writeText(
+            "version=1\n" +
+                "sha256=${verification.sha256}\n" +
+                "bytes=${verification.bytes}\n" +
+                "lastModifiedMillis=${verification.lastModifiedMillis}\n",
+        )
     }
 }
 

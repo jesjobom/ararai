@@ -9,6 +9,8 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.jesjobom.ararai.settings.ThemeMode
@@ -18,6 +20,8 @@ internal fun ThemeMode.resolveDarkTheme(systemDarkTheme: Boolean): Boolean = whe
     ThemeMode.Light -> false
     ThemeMode.Dark -> true
 }
+
+internal val LocalArarAiDarkTheme = staticCompositionLocalOf { false }
 
 private val ArarAiLightColorScheme: ColorScheme = lightColorScheme(
     primary = Color(0xFF006A60),
@@ -81,8 +85,10 @@ fun ArarAiTheme(
         else -> ArarAiLightColorScheme
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        content = content,
-    )
+    CompositionLocalProvider(LocalArarAiDarkTheme provides darkTheme) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            content = content,
+        )
+    }
 }

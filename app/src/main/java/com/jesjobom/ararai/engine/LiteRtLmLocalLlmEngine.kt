@@ -36,11 +36,14 @@ import com.jesjobom.ararai.model.ModelInputCapabilities
 import com.jesjobom.ararai.model.ModelRuntime
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
@@ -51,6 +54,7 @@ class LiteRtLmLocalLlmEngine(
 ) : LocalLlmEngine {
     override val supportsIncrementalConversation: Boolean = true
     private val lock = Any()
+    private val transitionMutex = Mutex()
     private var loadedSession: LiteRtLmSession? = null
     private var loadedModelId: String? = null
     private var loadedModelPath: String? = null
@@ -63,50 +67,69 @@ class LiteRtLmLocalLlmEngine(
     override suspend fun load(
         model: LocalModel,
         config: InferenceConfig,
-    ) {
-        check(model.runtime == ModelRuntime.LiteRtLm) {
-            "Unsupported local model runtime: ${model.runtime.displayName}"
-        }
+    ) = loadProfile(model, config, LiteRtLmWorkloadProfile.TextOnly)
 
-        val alreadyLoaded =
-            synchronized(lock) {
-                val isLoaded =
-                    loadedSession != null &&
-                        loadedModelId == model.id &&
-                        loadedModelPath == model.filePath &&
-                        loadedConfig?.contextTokens == config.contextTokens
-                if (isLoaded) {
-                    loadedConfig = config
-                    loadedInputCapabilities = model.inputCapabilities
-                    loadedToolNames = model.toolCapabilities.toolNames
+    override suspend fun loadForWorkload(
+        model: LocalModel,
+        config: InferenceConfig,
+        workload: LocalLlmWorkload,
+    ) = loadProfile(
+        model,
+        config,
+        LiteRtLmWorkloadProfile(image = workload.image, audio = workload.audio),
+    )
+
+    private suspend fun loadProfile(
+        model: LocalModel,
+        config: InferenceConfig,
+        profile: LiteRtLmWorkloadProfile,
+    ) = withContext(dispatcher + NonCancellable) {
+        transitionMutex.withLock {
+            check(model.runtime == ModelRuntime.LiteRtLm) {
+                "Unsupported local model runtime: ${model.runtime.displayName}"
+            }
+
+            val alreadyLoaded =
+                synchronized(lock) {
+                    val isLoaded =
+                        loadedSession != null &&
+                            loadedModelId == model.id &&
+                            loadedModelPath == model.filePath &&
+                            loadedConfig?.contextTokens == config.contextTokens &&
+                            loadedProfile == profile
+                    if (isLoaded) {
+                        loadedConfig = config
+                        loadedInputCapabilities = model.inputCapabilities
+                        loadedToolNames = model.toolCapabilities.toolNames
+                    }
+                    isLoaded
                 }
-                isLoaded
+            if (alreadyLoaded) return@withLock
+
+            unloadLocked()
+
+            // Native loading is not cooperatively cancellable. The ownership transfer must be
+            // non-cancellable too: returning to a cancelled caller before publishing [session]
+            // would orphan the native engine and allow the next screen entry to load another.
+            val session = bridge.load(
+                modelPath = model.filePath,
+                config = config,
+                useGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred,
+                inputCapabilities = model.inputCapabilities,
+                toolNames = model.toolCapabilities.toolNames,
+                profile = profile,
+            )
+
+            synchronized(lock) {
+                loadedSession = session
+                loadedModelId = model.id
+                loadedModelPath = model.filePath
+                loadedConfig = config
+                loadedInputCapabilities = model.inputCapabilities
+                loadedToolNames = model.toolCapabilities.toolNames
+                loadedUseGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred
+                loadedProfile = profile
             }
-        if (alreadyLoaded) return
-
-        unload()
-
-        val session =
-            withContext(dispatcher) {
-                bridge.load(
-                    modelPath = model.filePath,
-                    config = config,
-                    useGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred,
-                    inputCapabilities = model.inputCapabilities,
-                    toolNames = model.toolCapabilities.toolNames,
-                    profile = LiteRtLmWorkloadProfile.TextOnly,
-                )
-            }
-
-        synchronized(lock) {
-            loadedSession = session
-            loadedModelId = model.id
-            loadedModelPath = model.filePath
-            loadedConfig = config
-            loadedInputCapabilities = model.inputCapabilities
-            loadedToolNames = model.toolCapabilities.toolNames
-            loadedUseGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred
-            loadedProfile = LiteRtLmWorkloadProfile.TextOnly
         }
     }
 
@@ -140,7 +163,9 @@ class LiteRtLmLocalLlmEngine(
                         trySend(GenerationEvent.Failed("Selected model does not support the requested tools"))
                         return@launch
                     }
-                    val session = ensureProfile(LiteRtLmWorkloadProfile.from(request))
+                    val session = transitionMutex.withLock {
+                        ensureProfile(LiteRtLmWorkloadProfile.from(request))
+                    }
                     session.generate(request, initialState.config).collect { chunk ->
                         chunk.toGenerationEvents().forEach { trySend(it) }
                     }
@@ -162,13 +187,18 @@ class LiteRtLmLocalLlmEngine(
         }
     }
 
-    override suspend fun prepare(workload: LocalLlmWorkload) {
-        withContext(dispatcher) {
+    override suspend fun prepare(workload: LocalLlmWorkload) = transitionMutex.withLock {
+        withContext(dispatcher + NonCancellable) {
             ensureProfile(LiteRtLmWorkloadProfile(image = workload.image, audio = workload.audio))
+            Unit
         }
     }
 
-    override suspend fun unload() {
+    override suspend fun unload() = transitionMutex.withLock {
+        unloadLocked()
+    }
+
+    private suspend fun unloadLocked() {
         val session =
             synchronized(lock) {
                 val current = loadedSession
@@ -362,7 +392,8 @@ class AndroidLiteRtLmBridge(
             engine.initialize()
             Log.d(
                 LOG_TAG,
-                "Engine initialized: profile=$profile, elapsed=${startedAt.elapsedMillis()} ms",
+                "Engine initialized: id=${System.identityHashCode(engine)}, " +
+                    "profile=$profile, elapsed=${startedAt.elapsedMillis()} ms",
             )
             AndroidLiteRtLmSession(
                 engine,
@@ -638,6 +669,7 @@ private class AndroidLiteRtLmSession(
     }
 
     override fun close() {
+        Log.d(LOG_TAG, "Engine closing: id=${System.identityHashCode(engine)}")
         conversations.closeAll()
         engine.close()
     }

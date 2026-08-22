@@ -24,7 +24,7 @@ class ModelResolver(
     private val appFilesRoot: File,
 ) {
     fun resolve(config: ModelConfig): ModelResolutionState {
-        val file = File(appFilesRoot, config.relativePath)
+        val file = ModelPathPolicy.resolveContained(appFilesRoot, config.relativePath)
 
         if (!file.exists()) {
             return ModelResolutionState.Missing(config)

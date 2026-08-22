@@ -70,6 +70,37 @@ class ModelFileIntegrityTest {
         assertTrue((validation as ModelFileValidation.Invalid).reason.startsWith("Expected SHA-256"))
     }
 
+    @Test
+    fun `successful validation records reusable file metadata`() {
+        val root = Files.createTempDirectory("ararai-integrity").toFile()
+        val file = File(root, "models/hello.gguf")
+        file.parentFile!!.mkdirs()
+        file.writeText("hello")
+
+        assertEquals(ModelFileValidation.Valid, ModelFileIntegrity.validate(file, helloConfig(expectedBytes = 5)))
+
+        val verificationFile = File(file.parentFile, ".${file.name}.verified")
+        assertTrue(verificationFile.isFile)
+        assertTrue(verificationFile.readText().contains("sha256=2cf24dba"))
+        assertEquals(ModelFileValidation.Valid, ModelFileIntegrity.validate(file, helloConfig(expectedBytes = 5)))
+    }
+
+    @Test
+    fun `changed file metadata invalidates successful verification`() {
+        val root = Files.createTempDirectory("ararai-integrity").toFile()
+        val file = File(root, "models/hello.gguf")
+        file.parentFile!!.mkdirs()
+        file.writeText("hello")
+        val config = helloConfig(expectedBytes = 5)
+        assertEquals(ModelFileValidation.Valid, ModelFileIntegrity.validate(file, config))
+
+        file.writeText("jello")
+        file.setLastModified(file.lastModified() + 2_000)
+
+        assertTrue(ModelFileIntegrity.validate(file, config) is ModelFileValidation.Invalid)
+        assertTrue(!File(file.parentFile, ".${file.name}.verified").exists())
+    }
+
     private fun helloConfig(
         sha256: String = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
         expectedBytes: Long?,

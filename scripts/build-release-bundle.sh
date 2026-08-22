@@ -6,7 +6,22 @@ jarvis_root="$(cd "$repo_root/../.." && pwd)"
 signing_environment="$jarvis_root/secrets/ararai/release-signing.env"
 source_aab="$repo_root/app/build/outputs/bundle/release/app-release.aab"
 target_dir="$jarvis_root/artifacts/ararai"
-target_aab="$target_dir/ararai-release-vc2.aab"
+
+version_code="${ARARAI_VERSION_CODE:-$(( $(date +%s) / 60 ))}"
+if [[ ! "$version_code" =~ ^[0-9]+$ ]] || (( version_code < 1 || version_code > 2100000000 )); then
+  echo "ARARAI_VERSION_CODE must be an integer from 1 to 2100000000." >&2
+  exit 1
+fi
+export ARARAI_VERSION_CODE="$version_code"
+
+target_aab="$target_dir/ararai-release-vc${version_code}.aab"
+target_diagnostics="$target_dir/release-diagnostics-vc${version_code}"
+
+java_major="$(java -XshowSettings:properties -version 2>&1 | sed -n 's/^[[:space:]]*java.version = \([0-9][0-9]*\).*/\1/p' | head -1)"
+if [[ "$java_major" != "17" ]]; then
+  echo "Release assembly requires the canonical JDK 17 runtime; found Java ${java_major:-unknown}." >&2
+  exit 1
+fi
 
 if [[ ! -f "$signing_environment" ]]; then
   echo "Release-signing environment not found: ../../secrets/ararai/release-signing.env" >&2
@@ -58,6 +73,7 @@ done
 
 cd "$repo_root"
 ./gradlew bundleRelease
+scripts/verify-release-artifacts.sh release
 
 if [[ ! -f "$source_aab" ]]; then
   echo "Release AAB was not produced: $source_aab" >&2
@@ -74,9 +90,12 @@ echo "Release AAB signature verified."
 
 mkdir -p "$target_dir"
 cp "$source_aab" "$target_aab"
+mkdir -p "$target_diagnostics"
+cp app/build/outputs/mapping/release/{mapping,seeds,usage,configuration}.txt "$target_diagnostics/"
 
 echo "Release AAB: $target_aab"
 sha256sum "$target_aab"
+sha256sum "$target_diagnostics"/*.txt
 keytool \
   -list \
   -v \

@@ -64,7 +64,7 @@ memory, thermal, and multimodal behavior require physical-device validation.
 - Application ID: `com.jesjobom.ararai`
 - Android: min SDK 28, compile/target SDK 36, arm64-v8a
 - Kotlin 2.3.21 and Compose BOM 2026.06.00
-- JDK 17, AGP 9.2.x, Gradle wrapper 9.4.1
+- JDK 17 for Android Gradle builds, AGP 9.2.x, Gradle wrapper 9.4.1
 - Build Tools 36.0.0; Whisper uses NDK 28.2.13676358 and CMake 3.22.1
 - LLM runtime: LiteRT-LM 0.14.0; transcription runtime: whisper.cpp
 - Bundled ML Kit Language ID 17.0.6
@@ -72,6 +72,10 @@ memory, thermal, and multimodal behavior require physical-device validation.
   transitively for the experimental Silero comparison
 - Debug builds use debug signing. Release builds require an external upload
   keystore and password files; no signing material is stored in this repository.
+- Production release and locally signed release-candidate builds use optimized
+  R8/resource shrinking and verify mapping, seeds, usage, and configuration
+  outputs. Physical smoke validation remains mandatory before delivery; see
+  `docs/release-shrinking.md`.
 
 Model definitions and their runtime, artifact, acceleration, capability,
 integrity, and inference metadata live in
@@ -91,20 +95,24 @@ scripts/quality-gate.sh
 It runs Firestore Security Rules tests in the local Emulator Suite, pinned
 Kotlin formatting and static analysis, JVM/Robolectric tests, Android lint, the
 debug app build, the debug instrumentation APK build, and strict validation of
-every OpenSpec change. The Firebase emulator requires Node.js 22+ and Java 21.
-The same command is used by
+every OpenSpec change. Gradle/AGP builds require JDK 17; Firebase Emulator tests require a full JDK 21.
+Set `JAVA_HOME` to JDK 17 and `FIREBASE_JAVA_HOME` to JDK 21 before invoking the
+gate. The Firebase toolchain also requires Node.js 22+. The same command is used by
 `.github/workflows/android-quality-gate.yml`.
 
 Individual commands remain useful while iterating:
 
 ```sh
 npm ci --include=dev --ignore-scripts
-npm run test:firestore-rules:emulator
+FIREBASE_JAVA_HOME=/path/to/jdk-21 scripts/run-firestore-rules-tests.sh
+scripts/check-java-runtime-alignment.sh
 ./gradlew spotlessCheck detekt
 ./gradlew testDebugUnitTest
 ./gradlew lintDebug
 ./gradlew assembleDebug
 ./gradlew assembleDebugAndroidTest
+./gradlew assembleReleaseCandidate
+scripts/verify-release-artifacts.sh releaseCandidate
 openspec validate --all --strict
 ```
 
@@ -281,6 +289,11 @@ an independent output-token limit, so the app reports that limitation instead
 of presenting a control it cannot enforce. Runtime-backed metrics from the last
 conversational turn are shown when available; benchmark parameters and metrics
 remain fixed and isolated.
+
+The **Audio** tab controls the global language hint for local Whisper
+transcription in both Chat modes. Automatic detection is the default; users can
+instead follow the Android system language, follow the ArarAI interface, or fix
+transcription to English or Portuguese. Changes affect only new transcriptions.
 
 If a reasoning-enabled generation finishes without final answer text, ArarAI
 persists and displays an explicit incomplete response. Partial reasoning remains

@@ -222,6 +222,22 @@
     <string name="assistant_tab_prompts">Prompts</string>
     <string name="assistant_tab_tools">Tools</string>
     <string name="assistant_tab_generation">Generation</string>
+    <string name="assistant_tab_audio">Audio</string>
+    <string name="assistant_tabs_more_back">Show previous tabs</string>
+    <string name="assistant_tabs_more_forward">Show more tabs</string>
+    <string name="audio_transcription_title">Audio transcription</string>
+    <string name="audio_transcription_description">Choose the language hint used by local Whisper transcription in Chat and Voice Chat.</string>
+    <string name="audio_transcription_future_only">Changes apply to new transcriptions. Existing transcripts are not modified.</string>
+    <string name="transcription_language_automatic">Automatic</string>
+    <string name="transcription_language_automatic_description">Let Whisper detect the spoken language. Recommended for multilingual use.</string>
+    <string name="transcription_language_system">System language</string>
+    <string name="transcription_language_system_description">Use the Android device’s current primary language.</string>
+    <string name="transcription_language_interface">Interface language</string>
+    <string name="transcription_language_interface_description">Use the language currently applied to the ArarAI interface.</string>
+    <string name="transcription_language_english">English</string>
+    <string name="transcription_language_english_description">Always transcribe audio as English.</string>
+    <string name="transcription_language_portuguese">Portuguese</string>
+    <string name="transcription_language_portuguese_description">Always transcribe audio as Portuguese.</string>
     <string name="generation_unavailable">The selected model does not expose generation settings.</string>
     <string name="generation_scope_description">Settings are saved separately for each model and apply to future Chat and Voice Chat turns.</string>
     <string name="generation_context_window">Context window</string>
@@ -257,6 +273,7 @@
     <string name="tools_web_search_description">Experimental providers send the query and retrieval metadata directly from this device. Your own provider token and provider terms, retention, quota, and charges apply. When both are enabled, Exa runs first and Tavily is used only after a controlled provider failure. A fallback can send the same request to both services and consume quota from both.</string>
     <string name="tools_create_token">Create account / API token ↗</string>
     <string name="tools_credential_configured">Credential configured. The stored token is never displayed again.</string>
+    <string name="tools_credential_unreadable">The stored credential can no longer be read. This provider was disabled. Save a replacement token to recover it.</string>
     <string name="tools_enter_token">Enter a user-owned token. It is saved only after a successful verification.</string>
     <string name="tools_api_token_label">%1$s API token</string>
     <string name="tools_disclosure">I understand that my query and retrieval metadata are sent to %1$s under my account.</string>
@@ -328,4 +345,6 @@
     <string name="report_status_sending">Sending</string>
     <string name="report_status_failed">Delivery failed permanently</string>
     <string name="report_pending_content_description">Unsent reports</string>
+    <string name="voice_session_fallback_title">Voice chat · %1$s</string>
+    <string name="audio_message_session_fallback_title">Voice message · %1$s</string>
 </resources>

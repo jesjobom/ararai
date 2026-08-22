@@ -13,7 +13,8 @@ object LegacyModelArtifactMigration {
 
     fun run(appFilesRoot: File) {
         removedRelativePaths.forEach { relativePath ->
-            val managedFile = File(appFilesRoot, relativePath)
+            val managedFile = ModelPathPolicy.resolveContained(appFilesRoot, relativePath)
+            ModelFileIntegrity.invalidate(managedFile)
             managedFile.delete()
             File(managedFile.parentFile, "${managedFile.name}.part").delete()
         }

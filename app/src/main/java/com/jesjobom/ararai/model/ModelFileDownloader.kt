@@ -6,6 +6,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FilterInputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -13,6 +14,7 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
+import java.util.concurrent.atomic.AtomicBoolean
 
 interface ModelByteSource {
     fun open(config: ModelConfig): InputStream
@@ -23,54 +25,92 @@ interface ModelByteSource {
     ): ModelByteResponse = ModelByteResponse(open(config), acceptedOffset = 0L)
 }
 
-data class ModelByteResponse(
+class ModelByteResponse(
     val input: InputStream,
     val acceptedOffset: Long,
-)
+    private val closeAction: () -> Unit = input::close,
+) : AutoCloseable {
+    private val closed = AtomicBoolean(false)
+
+    override fun close() {
+        if (closed.compareAndSet(false, true)) closeAction()
+    }
+}
 
 data class ModelDownloadProgress(
     val bytesDownloaded: Long,
     val totalBytes: Long?,
 )
 
-class UrlModelByteSource : ModelByteSource {
-    override fun open(config: ModelConfig): InputStream = open(config, requestedOffset = 0L).input
+fun interface ModelHttpConnectionFactory {
+    fun open(url: URL): HttpURLConnection
+}
+
+class UrlModelByteSource(
+    private val connectionFactory: ModelHttpConnectionFactory =
+        ModelHttpConnectionFactory { url -> url.openConnection() as HttpURLConnection },
+) : ModelByteSource {
+    override fun open(config: ModelConfig): InputStream {
+        val response = open(config, requestedOffset = 0L)
+        return object : FilterInputStream(response.input) {
+            override fun close() = response.close()
+        }
+    }
 
     override fun open(
         config: ModelConfig,
         requestedOffset: Long,
     ): ModelByteResponse {
-        val connection = URL(config.url).openConnection() as HttpURLConnection
-        connection.connectTimeout = 15_000
-        connection.readTimeout = 30_000
-        connection.instanceFollowRedirects = true
-        connection.requestMethod = "GET"
-        if (requestedOffset > 0L) {
-            connection.setRequestProperty("Range", "bytes=$requestedOffset-")
-        }
-        if (connection.responseCode !in 200..299) {
-            val host = connection.url.host
-            val hint =
-                if (connection.responseCode == HttpURLConnection.HTTP_FORBIDDEN && host.contains("xethub.hf.co")) {
-                    " via Hugging Face Xet/CAS"
-                } else {
-                    ""
-                }
-            throw ModelDownloadException("HTTP ${connection.responseCode}$hint while downloading ${config.id}")
-        }
-        val acceptedOffset =
-            if (connection.responseCode == HttpURLConnection.HTTP_PARTIAL) {
-                connection
-                    .getHeaderField("Content-Range")
-                    ?.substringAfter("bytes ")
-                    ?.substringBefore('-')
-                    ?.toLongOrNull()
-                    ?.takeIf { it == requestedOffset }
-                    ?: 0L
-            } else {
-                0L
+        val connection = connectionFactory.open(URL(config.url))
+        var ownershipTransferred = false
+        try {
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
+            connection.instanceFollowRedirects = true
+            connection.requestMethod = "GET"
+            if (requestedOffset > 0L) {
+                connection.setRequestProperty("Range", "bytes=$requestedOffset-")
             }
-        return ModelByteResponse(connection.inputStream, acceptedOffset)
+            val responseCode = connection.responseCode
+            if (responseCode !in 200..299) {
+                val host = connection.url.host
+                val hint =
+                    if (responseCode == HttpURLConnection.HTTP_FORBIDDEN && host.contains("xethub.hf.co")) {
+                        " via Hugging Face Xet/CAS"
+                    } else {
+                        ""
+                    }
+                throw ModelDownloadException("HTTP $responseCode$hint while downloading ${config.id}")
+            }
+            val acceptedOffset =
+                if (responseCode == HttpURLConnection.HTTP_PARTIAL) {
+                    connection
+                        .getHeaderField("Content-Range")
+                        ?.substringAfter("bytes ")
+                        ?.substringBefore('-')
+                        ?.toLongOrNull()
+                        ?.takeIf { it == requestedOffset }
+                        ?: 0L
+                } else {
+                    0L
+                }
+            val input = connection.inputStream
+            val response = ModelByteResponse(
+                input = input,
+                acceptedOffset = acceptedOffset,
+                closeAction = {
+                    try {
+                        input.close()
+                    } finally {
+                        connection.disconnect()
+                    }
+                },
+            )
+            ownershipTransferred = true
+            return response
+        } finally {
+            if (!ownershipTransferred) connection.disconnect()
+        }
     }
 }
 
@@ -99,7 +139,7 @@ class ModelFileDownloader(
     ): ModelResolutionState.Available = withContext(Dispatchers.IO) {
         val downloadUrls = listOf(config.url) + config.fallbackUrls
         val failures = mutableListOf<String>()
-        val finalFile = File(appFilesRoot, config.relativePath)
+        val finalFile = ModelPathPolicy.resolveContained(appFilesRoot, config.relativePath)
         val parent =
             finalFile.parentFile
                 ?: throw ModelDownloadException("Configured model path has no parent directory")
@@ -119,8 +159,10 @@ class ModelFileDownloader(
                     val requestedOffset = tempFile.takeIf(File::isFile)?.length() ?: 0L
                     val response = byteSource.open(attemptConfig, requestedOffset)
                     var appendedToPartial = false
-                    response.input.use { input ->
+                    response.use {
+                        val input = response.input
                         appendedToPartial = requestedOffset > 0L && response.acceptedOffset == requestedOffset
+                        ModelFileIntegrity.invalidate(tempFile)
                         java.io.FileOutputStream(tempFile, appendedToPartial).use { output ->
                             input.copyToWithProgress(
                                 output = output,
@@ -144,7 +186,9 @@ class ModelFileDownloader(
                     }
 
                     try {
+                        ModelFileIntegrity.invalidate(finalFile)
                         Files.move(tempFile.toPath(), finalFile.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
+                        ModelFileIntegrity.promoteVerification(tempFile, finalFile)
                     } catch (error: AtomicMoveNotSupportedException) {
                         tempFile.delete()
                         throw ModelDownloadException("Atomic model promotion is not supported", error)

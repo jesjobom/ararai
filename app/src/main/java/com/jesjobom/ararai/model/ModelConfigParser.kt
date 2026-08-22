@@ -74,7 +74,7 @@ object ModelConfigParser {
         url = required("${modelPrefix}url"),
         fallbackUrls = optionalList("${modelPrefix}fallbackUrls"),
         fileName = required("${modelPrefix}fileName"),
-        relativePath = required("${modelPrefix}relativePath"),
+        relativePath = ModelPathPolicy.requireValidRelativePath(required("${modelPrefix}relativePath")),
         sha256 = required("${modelPrefix}sha256").lowercase(),
         expectedBytes = getProperty("${modelPrefix}expectedBytes")?.toLong(),
         recommendedFreeRamBytes = getProperty("${modelPrefix}recommendedFreeRamBytes")?.toLong(),
@@ -160,9 +160,6 @@ object ModelConfigParser {
 
     @Suppress("LongMethod", "CyclomaticComplexMethod")
     private fun ModelConfig.validate() {
-        require(relativePath.startsWith("models/")) {
-            "model.relativePath must be under models/"
-        }
         require(family.isNotBlank()) { "model.family must not be blank" }
         require(
             (runtime == ModelRuntime.LiteRtLm && artifactFormat == ModelArtifactFormat.LiteRtLmBundle) ||

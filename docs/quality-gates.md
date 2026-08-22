@@ -20,18 +20,35 @@
 
 `scripts/quality-gate.sh` is the local and CI entry point. It runs:
 
-1. `spotlessCheck` with Spotless 7.2.1 and ktlint 1.7.1
-2. Detekt 2.0.0-alpha.5 with the reviewed baseline in `config/detekt/baseline.xml`
-3. `testDebugUnitTest`
-4. `lintDebug`
-5. `assembleDebug`
-6. `assembleDebugAndroidTest`
-7. `openspec validate --all --strict`
+1. Java runtime declaration and active-runtime checks
+2. Firestore Security Rules tests with the isolated JDK 21 Firebase runtime
+3. `spotlessCheck` with Spotless 7.2.1 and ktlint 1.7.1
+4. Detekt 2.0.0-alpha.5 with the reviewed baseline in `config/detekt/baseline.xml`
+5. `testDebugUnitTest`
+6. `lintDebug`
+7. `assembleDebug`
+8. `assembleDebugAndroidTest`
+9. shrunk `assembleReleaseCandidate` plus R8 diagnostic-artifact verification
+10. `openspec validate --all --strict`
 
 Any failure makes the gate fail. GitHub Actions runs the same script for pull
-requests, pushes to `main`, and manual dispatches. Toolchain inputs are pinned to
-JDK 17, Android 36, Build Tools 36.0.0, NDK 28.2.13676358, CMake 3.22.1, Gradle
+requests, pushes to `main`, and manual dispatches. The canonical Android Gradle runtime is Temurin JDK 17.
+The workflow installs Temurin JDK 21 first, preserves it as
+`FIREBASE_JAVA_HOME`, then installs JDK 17 last so every Gradle invocation uses
+the declared Android baseline. `scripts/run-firestore-rules-tests.sh` temporarily
+selects only the preserved JDK 21 for the Firebase Emulator process. Local runs
+must provide the same `JAVA_HOME`/`FIREBASE_JAVA_HOME` split.
+
+Toolchain inputs are pinned to JDK 17 for Gradle, JDK 21 for Firebase, Android
+36, Build Tools 36.0.0, NDK 28.2.13676358, CMake 3.22.1, Gradle
 9.4.1 through the wrapper, and OpenSpec 1.6.0.
+
+`scripts/check-java-runtime-alignment.sh` fails when workflow labels, configured
+Java versions, setup order, README prerequisites, quality-gate documentation,
+or project context disagree. The quality gate separately rejects execution when
+the active Gradle Java is not version 17 or `FIREBASE_JAVA_HOME` is not a full
+Java 21 installation. These runtime choices do not change Kotlin/JVM bytecode
+targets, which remain Java 17.
 
 Spotless is check-only in the gate; use `./gradlew spotlessApply` as an explicit
 local formatting action. Detekt builds on its pinned default rules plus
@@ -60,7 +77,8 @@ otherwise-compatible cache deliberately. CI must still run the full gate after
 any restore; a cache hit is an optimization, never validation evidence.
 
 CI retains synthetic unit-test results, lint reports, the debug APK, and the
-instrumentation APK for seven days. It does not upload app data, device logs,
+instrumentation APK for seven days. The release-candidate build is a compile and
+R8 verification boundary; it is not uploaded as a release. It does not upload app data, device logs,
 models, prompts, Chat databases, or media.
 
 ## Environment-only exclusions

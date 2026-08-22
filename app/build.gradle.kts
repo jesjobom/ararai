@@ -16,6 +16,14 @@ fun buildTimestampVersion(): String =
             .now(ZoneId.of("America/Toronto"))
             .format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"))
 
+fun buildTimestampVersionCode(): Int =
+    providers
+        .environmentVariable("ARARAI_VERSION_CODE")
+        .orNull
+        ?.toIntOrNull()
+        ?.takeIf { it in 1..2_100_000_000 }
+        ?: (System.currentTimeMillis() / 60_000L).toInt()
+
 val configuredDebugKeystore =
     providers
         .environmentVariable("ANDROID_DEBUG_KEYSTORE")
@@ -39,7 +47,7 @@ fun releaseSigningPassword(pathEnvironmentName: String): String =
 
 val releaseSigningRequested =
     gradle.startParameter.taskNames.any { taskName ->
-        taskName.contains("release", ignoreCase = true)
+        taskName.substringAfterLast(':').endsWith("Release", ignoreCase = true)
     }
 
 val liteRtLmVersion = "0.14.0"
@@ -52,7 +60,7 @@ android {
         applicationId = "com.jesjobom.ararai"
         minSdk = 28
         targetSdk = 36
-        versionCode = 2
+        versionCode = buildTimestampVersionCode()
         versionName = buildTimestampVersion()
         buildConfigField("String", "LITERT_LM_VERSION", "\"$liteRtLmVersion\"")
         buildConfigField("boolean", "EXPERIMENTAL_WEB_SEARCH", "false")
@@ -90,11 +98,17 @@ android {
             if (releaseSigningRequested) {
                 signingConfig = signingConfigs.getByName("release")
             }
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+        create("releaseCandidate") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
         }
     }
 
@@ -117,6 +131,11 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
+
+    sourceSets
+        .getByName("releaseCandidate")
+        .kotlin.directories
+        .add("src/release/java")
 }
 
 detekt {

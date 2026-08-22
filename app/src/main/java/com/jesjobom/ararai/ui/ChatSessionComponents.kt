@@ -289,7 +289,7 @@ internal fun ChatSettingSwitch(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -308,6 +308,7 @@ internal fun ChatSettingSwitch(
             }
         }
         Switch(
+            modifier = modifier,
             checked = checked,
             enabled = enabled,
             onCheckedChange = onCheckedChange,

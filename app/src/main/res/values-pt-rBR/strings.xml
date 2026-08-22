@@ -222,6 +222,22 @@
     <string name="assistant_tab_prompts">Prompts</string>
     <string name="assistant_tab_tools">Ferramentas</string>
     <string name="assistant_tab_generation">Geração</string>
+    <string name="assistant_tab_audio">Áudio</string>
+    <string name="assistant_tabs_more_back">Mostrar abas anteriores</string>
+    <string name="assistant_tabs_more_forward">Mostrar mais abas</string>
+    <string name="audio_transcription_title">Transcrição de áudio</string>
+    <string name="audio_transcription_description">Escolha o idioma usado como referência pela transcrição local do Whisper no Chat e Chat de Voz.</string>
+    <string name="audio_transcription_future_only">A alteração vale para novas transcrições. Transcrições existentes não são modificadas.</string>
+    <string name="transcription_language_automatic">Automático</string>
+    <string name="transcription_language_automatic_description">Permite que o Whisper detecte o idioma falado. Recomendado para uso multilíngue.</string>
+    <string name="transcription_language_system">Idioma do sistema</string>
+    <string name="transcription_language_system_description">Usa o idioma principal atual do dispositivo Android.</string>
+    <string name="transcription_language_interface">Idioma da interface</string>
+    <string name="transcription_language_interface_description">Usa o idioma aplicado atualmente à interface do ArarAI.</string>
+    <string name="transcription_language_english">Inglês</string>
+    <string name="transcription_language_english_description">Sempre transcreve o áudio como inglês.</string>
+    <string name="transcription_language_portuguese">Português</string>
+    <string name="transcription_language_portuguese_description">Sempre transcreve o áudio como português.</string>
     <string name="generation_unavailable">O modelo selecionado não disponibiliza configurações de geração.</string>
     <string name="generation_scope_description">As configurações são salvas separadamente para cada modelo e se aplicam às próximas interações no Chat e Chat por voz.</string>
     <string name="generation_context_window">Janela de contexto</string>
@@ -257,6 +273,7 @@
     <string name="tools_web_search_description">Provedores experimentais enviam a consulta e os metadados de recuperação diretamente deste dispositivo. Aplicam-se seu token, os termos, a retenção, a cota e os custos do provedor. Quando ambos estão ativos, o Exa é executado primeiro e o Tavily é usado somente após uma falha controlada. O fallback pode enviar a mesma solicitação aos dois serviços e consumir a cota de ambos.</string>
     <string name="tools_create_token">Criar conta/token de API ↗</string>
     <string name="tools_credential_configured">Credencial configurada. O token armazenado nunca é exibido novamente.</string>
+    <string name="tools_credential_unreadable">A credencial armazenada não pode mais ser lida. Este provedor foi desativado. Salve um novo token para recuperá-lo.</string>
     <string name="tools_enter_token">Informe um token de sua propriedade. Ele só será salvo após uma verificação bem-sucedida.</string>
     <string name="tools_api_token_label">Token de API do %1$s</string>
     <string name="tools_disclosure">Entendo que minha consulta e os metadados de recuperação serão enviados ao %1$s usando minha conta.</string>
@@ -328,4 +345,6 @@
     <string name="report_status_sending">Enviando</string>
     <string name="report_status_failed">Falha permanente no envio</string>
     <string name="report_pending_content_description">Denúncias não enviadas</string>
+    <string name="voice_session_fallback_title">Conversa por voz · %1$s</string>
+    <string name="audio_message_session_fallback_title">Mensagem de voz · %1$s</string>
 </resources>

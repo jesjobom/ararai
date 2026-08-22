@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import com.jesjobom.ararai.R
 import com.jesjobom.ararai.reporting.GeneratedContentReportDraft
@@ -79,7 +80,10 @@ class GeneratedContentReportingComposeTest {
         composeRule.onNodeWithText(resources.getString(R.string.report_tab_pending, 1)).assertIsDisplayed()
         composeRule.onNodeWithText("reported response").assertIsDisplayed()
         composeRule.onNodeWithText(resources.getString(R.string.report_submit)).assertIsNotEnabled()
-        composeRule.onNodeWithText(resources.getString(R.string.report_us_hosting_disclosure)).assertIsDisplayed()
+        composeRule
+            .onNodeWithText(resources.getString(R.string.report_us_hosting_disclosure))
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     private fun draft() = GeneratedContentReportDraft(

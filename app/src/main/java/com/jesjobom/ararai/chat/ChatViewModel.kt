@@ -39,6 +39,7 @@ class ChatViewModel(
     private val mediaRepository: ChatMediaRepository = NoOpChatMediaRepository,
     promptContextBuilder: PromptContextBuilder = PromptContextBuilder(),
     private val audioTranscriber: AudioTranscriber = UnavailableAudioTranscriber,
+    private val audioSessionTitleProvider: () -> String = { "Voice message" },
     private val preferences: ChatPreferences = InMemoryChatPreferences(),
     private val conversationSelection: ConversationSelection = ConversationSelection(),
     private val conversationCoordinator: ConversationCoordinator =
@@ -548,6 +549,9 @@ class ChatViewModel(
         val begunTurn = conversationCoordinator.beginUserTurn(sessionId, submittedContent)
         val history = begunTurn.history
         val userMessage = begunTurn.userMessage
+        if (submittedContent is MessageContent.AudioPromptContent) {
+            maybeTitleSessionFromAudio(sessionId, userMessage.id, submittedContent)
+        }
         val requiresTranscriptionBeforeGeneration =
             submittedContent is MessageContent.AudioPromptContent && modelForRequest?.inputCapabilities?.audio != true
         if (!requiresTranscriptionBeforeGeneration) prepareAssistantMessage(sessionId, refresh = false)
@@ -796,6 +800,19 @@ class ChatViewModel(
         }
     }
 
+    private fun maybeTitleSessionFromAudio(
+        sessionId: String,
+        messageId: String,
+        content: MessageContent.AudioPromptContent,
+    ) {
+        if (content.transcriptionStatus != AudioTranscriptionStatus.NotRequested) return
+        val session = sessionStore.listSessions().firstOrNull { it.id == sessionId } ?: return
+        val isFirstMessage = sessionStore.getMessages(sessionId).firstOrNull()?.id == messageId
+        if (session.title == "New chat" && isFirstMessage) {
+            sessionStore.renameSession(sessionId, audioSessionTitleProvider())
+        }
+    }
+
     private fun deleteCurrentDraftMedia() {
         val current = _uiState.value
         deleteDraftMedia(current.imageAttachments.map { it.uri } + listOfNotNull(current.audioPrompt?.uri))
@@ -918,7 +935,7 @@ class ChatViewModel(
 
     private fun markAssistantIncompleteWhenNeeded() {
         appendAssistantContent { buffer ->
-            if (buffer.text.isBlank() && buffer.reasoning.isNotBlank()) {
+            if (buffer.text.isBlank()) {
                 buffer.completionStatus = AssistantCompletionStatus.Incomplete
             }
         }

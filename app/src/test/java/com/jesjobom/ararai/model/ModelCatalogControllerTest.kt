@@ -11,6 +11,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.nio.file.Files
 import kotlin.io.path.createDirectories
 import kotlin.io.path.writeBytes
@@ -209,6 +210,24 @@ class ModelCatalogControllerTest {
 
         assertTrue(downloader.wasCancelled)
         assertTrue(controller.state.value.selectedStartupState is ModelStartupState.Missing)
+    }
+
+    @Test
+    fun `rejects escaped deletion path without deleting outside file`() = runTest {
+        val root = Files.createTempDirectory("ararai-catalog").toFile()
+        val outside = File(root.parentFile, "outside-delete.gguf").apply { writeText("keep") }
+        val escaped = defaultConfig().copy(relativePath = "models/../../${outside.name}")
+
+        assertThrows(IllegalArgumentException::class.java) {
+            ModelCatalogController(
+                catalog = ModelCatalog(defaultModelId = escaped.id, models = listOf(escaped)),
+                appFilesRoot = root,
+                downloader = SuspendedDownloader(),
+                scope = this,
+            )
+        }
+
+        assertEquals("keep", outside.readText())
     }
 
     private fun catalog(): ModelCatalog = ModelCatalog(

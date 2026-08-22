@@ -6,7 +6,9 @@ app-owned conversations and media, and runs Chat inference locally through
 runtime-neutral boundaries without requiring an application backend, remote
 database, or hosted inference API. Native runtime, acceleration, memory,
 thermal, and real-model behavior remain subject to physical-device validation.
+
 ## Requirements
+
 ### Requirement: Android SDK 36 Target
 
 The application SHALL target Android SDK 36 for the initial MVP.
@@ -2667,15 +2669,19 @@ and SHALL use Gemma 4 E2B as its default model.
 
 The app SHALL provide an `Assistant configuration` destination for maintaining
 mode-specific user instructions, locally persisted enablement for external-
-knowledge and local-compute tools, and per-model conversational generation
-settings.
+knowledge and local-compute tools, per-model conversational generation
+settings, and global audio settings.
 
 #### Scenario: Open Assistant configuration
 
 - **GIVEN** the user is on Home
 - **WHEN** the user opens `Assistant configuration`
 - **THEN** the action appears immediately above Settings
-- **AND** the screen provides `Instructions`, `Tools`, and `Generation` tabs
+- **AND** the screen provides `Instructions`, `Tools`, `Generation`, and `Audio` tabs
+- **AND** the tab row scrolls horizontally when the labels do not fit
+- **AND** each tab label remains on one line
+- **AND** the first tab starts at the available leading edge without decorative padding
+- **AND** a directional control appears only at each edge that has hidden tab content
 - **AND** the Tools tab distinguishes external-network tools from local-compute tools.
 
 #### Scenario: Edit instructions independently
@@ -3047,11 +3053,14 @@ successful direct smoke test before that provider can be enabled.
 The application SHALL treat user-supplied provider tokens as secrets stored in
 app-private Android credential storage. Tokens MUST NOT be included in model
 context, conversation history, saved UI state, source metadata, logs,
-diagnostics, analytics, crash text, backups, or exports.
+diagnostics, analytics, crash text, backups, or exports. The application SHALL
+distinguish an absent credential from unreadable encrypted data, SHALL NOT treat
+an unreadable credential as configured or enabled, and SHALL offer a safe path
+to replace it without revealing credential contents.
 
 #### Scenario: Restore provider configuration UI
 
-- **GIVEN** a provider token is already stored
+- **GIVEN** a provider token is already stored and readable
 - **WHEN** the Tools screen is recreated
 - **THEN** it reports that a credential is configured
 - **AND** it does not display or repopulate the full token.
@@ -3068,6 +3077,17 @@ diagnostics, analytics, crash text, backups, or exports.
 - **GIVEN** one or more provider tokens are stored
 - **WHEN** Android backup or an ArarAI data export is produced
 - **THEN** provider tokens SHALL be excluded.
+
+#### Scenario: Stored credential becomes unreadable
+
+- **WHEN** encrypted provider credential data cannot be decrypted
+- **THEN** the provider is unavailable for requests and the user is prompted to save a replacement credential
+- **AND** the unreadable ciphertext is retained until explicit replacement or removal
+
+#### Scenario: Valid stored credential remains readable
+
+- **WHEN** encrypted provider credential data decrypts successfully
+- **THEN** existing provider enablement and request behavior are preserved
 
 ### Requirement: Provider-Neutral Focused Web Search
 
@@ -4012,3 +4032,137 @@ chat behavior.
 
 - **WHEN** the user does not explicitly submit a report
 - **THEN** reporting components transmit no conversation or media content.
+
+### Requirement: Application-owned model files remain contained
+
+The application SHALL accept model catalog paths only when they are normalized
+relative paths below the application-owned `models/` directory and SHALL verify
+canonical containment again before any model file read, write, promotion,
+migration, or deletion.
+
+#### Scenario: Valid nested model path
+
+- **WHEN** a catalog entry uses a normalized nested path below `models/`
+- **THEN** the application resolves and manages that model within the owned directory
+
+#### Scenario: Malformed path attempts to escape
+
+- **WHEN** a catalog path is absolute, contains traversal, is non-normalized, or resolves outside the owned directory
+- **THEN** the application rejects it before performing a filesystem side effect
+
+### Requirement: Model downloads own network resources explicitly
+
+The application SHALL deterministically close response resources and disconnect
+the underlying model-download connection after success, HTTP failure, I/O
+failure, cancellation, and each failed fallback attempt.
+
+#### Scenario: Download succeeds
+
+- **WHEN** a model response is consumed and validated
+- **THEN** its stream and connection are released after promotion completes
+
+#### Scenario: Download attempt terminates early
+
+- **WHEN** a response fails, is rejected, or is cancelled
+- **THEN** all resources owned by that attempt are released before returning or trying another URL
+
+### Requirement: Configurable Local Transcription Language
+
+The app SHALL persist a global language preference for local Whisper
+transcription independently from the application interface language, SHALL use
+automatic detection by default, and SHALL apply the resolved choice to both
+normal Chat and Voice Chat.
+
+#### Scenario: Detect spoken language automatically
+
+- **GIVEN** the transcription language is `Automatic`
+- **WHEN** a new audio turn requires local transcription
+- **THEN** the app asks Whisper to detect the spoken language.
+
+#### Scenario: Follow system or interface language
+
+- **GIVEN** the transcription language follows `System` or `Interface`
+- **WHEN** a new audio turn requires local transcription
+- **THEN** the app resolves the current corresponding locale at transcription time
+- **AND** supplies its base language to Whisper.
+
+#### Scenario: Use a fixed language
+
+- **GIVEN** the user selects English or Portuguese
+- **WHEN** a new audio turn requires local transcription
+- **THEN** the app supplies the selected base language to Whisper.
+
+#### Scenario: Preserve completed transcripts
+
+- **GIVEN** one or more audio messages were already transcribed
+- **WHEN** the user changes the transcription language
+- **THEN** the new choice applies only to later transcriptions
+- **AND** existing transcript text and diagnostics remain unchanged.
+
+### Requirement: Application startup
+
+The application SHALL present its first Compose frame without synchronously repeating successful integrity hashing of unchanged app-owned model artifacts or reconciling persisted Chat media on the UI thread. A cached integrity result SHALL be invalidated when the expected digest, file size, or file modification metadata changes.
+
+#### Scenario: Relaunch with an unchanged verified model
+
+- **WHEN** the application relaunches with a model artifact whose verification metadata still matches
+- **THEN** startup SHALL reuse the successful verification
+- **AND** SHALL NOT hash the complete artifact before the first frame
+
+### Requirement: Shared native runtime ownership
+
+The application SHALL prevent overlapping native model load transitions in its shared runtime, including when a screen-navigation cancellation occurs while a native load is not cooperatively cancellable.
+Voice Chat SHALL initialize its required workload profile directly rather than constructing an intermediate text-only native engine that is immediately replaced.
+
+#### Scenario: Voice Chat is repeatedly entered and left during loading
+
+- **WHEN** the user repeatedly enters and leaves Voice Chat before model preparation completes
+- **THEN** stale attempts SHALL NOT mark Voice Chat ready
+- **AND** the shared runtime SHALL NOT create overlapping native model instances
+
+### Requirement: Home branding
+
+The home wordmark SHALL be rendered on a black surface in the light theme and a transparent surface in the dark theme so its light lettering remains legible without introducing a background color that conflicts with the application surface.
+
+#### Scenario: Home is shown in either theme
+
+- **WHEN** the user opens Home with the light theme
+- **THEN** the wordmark SHALL appear on a black surface
+- **WHEN** the user opens Home with the dark theme
+- **THEN** the wordmark surface SHALL be transparent and blend into the application background
+
+### Requirement: Durable Voice Sessions Without Transcription
+
+Regular Chat and Voice Chat SHALL persist and distinguish a conversation after
+its first audio turn even when local transcription is unavailable, without
+requiring a remote service or an additional model invocation solely for titling.
+
+#### Scenario: Complete direct-audio turn without Whisper
+
+- **GIVEN** the selected model accepts audio directly
+- **AND** no usable local Whisper model is available
+- **WHEN** Voice Chat persists the first captured turn
+- **THEN** the session receives a localized timestamp-based Voice Chat title
+- **AND** its messages are durably associated with that session.
+
+#### Scenario: Send direct audio from regular Chat without Whisper
+
+- **GIVEN** the selected model accepts audio directly
+- **AND** no usable local Whisper model is available
+- **WHEN** the first message is recorded and sent from regular Chat
+- **THEN** the session receives a localized timestamp-based voice-message title
+- **AND** its messages are durably associated with that session.
+
+#### Scenario: Start another session after an untitled voice turn
+
+- **GIVEN** a Voice Chat session was titled by the local fallback
+- **WHEN** the user creates another session from normal Chat or idle Voice Chat
+- **THEN** the new session has a distinct identity and empty visible history
+- **AND** the prior session remains listed with its original messages.
+
+#### Scenario: Prefer a local transcript when available
+
+- **GIVEN** local Whisper transcription is available for the first voice turn
+- **WHEN** transcription completes with non-blank text
+- **THEN** the session title is derived from that transcript
+- **AND** the timestamp fallback does not replace it.

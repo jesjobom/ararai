@@ -774,6 +774,29 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `direct audio without whisper promotes regular chat with fallback title`() = runTest {
+        val store = DeferredNewChatSessionStore(InMemoryChatSessionStore())
+        val viewModel =
+            ChatViewModel(
+                engine = CapturingEngine(),
+                initialModel = model.copy(inputCapabilities = ModelInputCapabilities(audio = true)),
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                audioTranscriber = UnavailableAudioTranscriber,
+                audioSessionTitleProvider = { "Voice message · test" },
+                scope = this,
+            )
+
+        viewModel.submitAudioPrompt(AudioPrompt("/tmp/question.wav", "audio/wav"))
+        runCurrent()
+
+        assertEquals("Voice message · test", store.listSessions().single().title)
+        assertEquals("Voice message · test", viewModel.uiState.value.sessions.single().title)
+        val content = viewModel.uiState.value.messages.first().content as MessageContent.AudioPromptContent
+        assertEquals(AudioTranscriptionStatus.NotRequested, content.transcriptionStatus)
+    }
+
+    @Test
     fun `persists successful transcription diagnostics and partial warning`() = runTest {
         val store = InMemoryChatSessionStore()
         val viewModel = ChatViewModel(
@@ -1010,6 +1033,28 @@ class ChatViewModelTest {
         val content = store.getMessages(store.listSessions().first().id).last().content as MessageContent.TextPrompt
         assertEquals("", content.text)
         assertEquals("unfinished reasoning", content.reasoningText)
+        assertEquals(AssistantCompletionStatus.Incomplete, content.completionStatus)
+    }
+
+    @Test
+    fun `marks completed generation without any model output as incomplete`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val viewModel =
+            ChatViewModel(
+                engine = EventStreamingEngine(listOf(GenerationEvent.Completed)),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("answer")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        val content = store.getMessages(store.listSessions().first().id).last().content as MessageContent.TextPrompt
+        assertEquals("", content.text)
+        assertEquals("", content.reasoningText)
         assertEquals(AssistantCompletionStatus.Incomplete, content.completionStatus)
     }
 

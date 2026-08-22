@@ -66,6 +66,7 @@ internal class VoiceChatViewModel(
     private val sessionStore: ChatSessionStore = InMemoryChatSessionStore(),
     private val mediaRepository: ChatMediaRepository = NoOpChatMediaRepository,
     private val audioTranscriber: AudioTranscriber = UnavailableAudioTranscriber,
+    private val voiceSessionTitleProvider: () -> String = { "Voice chat" },
     private val conversationSelection: ConversationSelection = ConversationSelection(),
     private val conversationCoordinator: ConversationCoordinator =
         ConversationCoordinator(
@@ -83,6 +84,7 @@ internal class VoiceChatViewModel(
     private var inference: InferenceConfig? = null
     private var capture: VoiceTurnCapture? = null
     private var modelLoadJob: Job? = null
+    private var modelLoadAttempt = 0L
     private var generationJob: Job? = null
     private var runId = 0L
     private var turn = 0
@@ -141,36 +143,39 @@ internal class VoiceChatViewModel(
 
     fun onEnteringVoiceChat() {
         if (modelLoadJob?.isActive == true) return
+        val activeModel = model ?: return
+        val activeInference = inference?.let { generationConfigProvider(activeModel, it) } ?: return
+        if (!activeModel.inputCapabilities.audio && !audioTranscriber.isAvailable) return
+        // The shared runtime may have been reconfigured by normal Chat while
+        // Voice Chat was off screen. Invalidate the prior readiness state
+        // synchronously so Start cannot race ahead of multimodal preparation.
+        mutableState.update {
+            it.copy(isLoadingModel = true, isModelLoaded = false, error = null, errorKey = null)
+        }
+        val activeAttempt = ++modelLoadAttempt
         modelLoadJob = scope.launch(persistenceDispatcher) {
             val session = sessionStore.createSession("New chat")
             conversationSelection.select(session.id)
             currentSessionId = session.id
             refreshSessions(session.id)
-            val activeModel = model ?: return@launch
-            val activeInference = inference?.let { generationConfigProvider(activeModel, it) } ?: return@launch
-            if (!activeModel.inputCapabilities.audio && !audioTranscriber.isAvailable) return@launch
-            mutableState.update {
-                it.copy(isLoadingModel = true, isModelLoaded = false, error = null, errorKey = null)
-            }
             try {
                 val loadStartedAt = System.nanoTime()
-                engine.load(activeModel, activeInference)
-                val loadMillis = loadStartedAt.elapsedMillis()
-                val prepareStartedAt = System.nanoTime()
                 val workload = if (activeModel.inputCapabilities.audio) LocalLlmWorkload.Audio else LocalLlmWorkload()
-                engine.prepare(workload)
+                engine.loadForWorkload(activeModel, activeInference, workload)
+                val loadMillis = loadStartedAt.elapsedMillis()
                 Log.d(
                     LOG_TAG,
-                    "Voice model ready: load=$loadMillis ms, audioPrepare=${prepareStartedAt.elapsedMillis()} ms",
+                    "Voice model ready: workload=$workload, load=$loadMillis ms",
                 )
                 if (
+                    activeAttempt == modelLoadAttempt &&
                     model == activeModel &&
                     inference?.let { generationConfigProvider(activeModel, it) } == activeInference
                 ) {
                     mutableState.update { it.copy(isLoadingModel = false, isModelLoaded = true) }
                 }
             } catch (error: Throwable) {
-                if (error !is kotlinx.coroutines.CancellationException) {
+                if (error !is kotlinx.coroutines.CancellationException && activeAttempt == modelLoadAttempt) {
                     mutableState.update {
                         it.copy(
                             isLoadingModel = false,
@@ -596,11 +601,17 @@ internal class VoiceChatViewModel(
         messageId: String,
         content: MessageContent.AudioPromptContent,
     ) {
-        val transcript = content.transcript?.takeIf(String::isNotBlank) ?: return
         val session = sessionStore.listSessions().firstOrNull { it.id == sessionId } ?: return
         val isFirstMessage = sessionStore.getMessages(sessionId).firstOrNull()?.id == messageId
         if (session.title == "New chat" && isFirstMessage) {
-            sessionStore.renameSession(sessionId, transcript.take(42))
+            val title =
+                content.transcript
+                    ?.takeIf(String::isNotBlank)
+                    ?.take(42)
+                    ?: voiceSessionTitleProvider()
+                        .takeIf { content.transcriptionStatus == AudioTranscriptionStatus.NotRequested }
+                    ?: return
+            sessionStore.renameSession(sessionId, title)
             refreshSessions(sessionId)
         }
     }
@@ -657,9 +668,12 @@ internal class VoiceChatViewModel(
     fun clearDiagnostics() = mutableState.update { it.copy(diagnostics = emptyList()) }
 
     fun onLeavingVoiceChat() {
+        modelLoadAttempt++
         modelLoadJob?.cancel()
         modelLoadJob = null
-        mutableState.update { it.copy(isLoadingModel = false) }
+        // Readiness is profile-specific. Normal Chat can change the shared
+        // runtime before the next visit, so it must be proven again on entry.
+        mutableState.update { it.copy(isLoadingModel = false, isModelLoaded = false) }
         stop()
         clearDiagnostics()
     }

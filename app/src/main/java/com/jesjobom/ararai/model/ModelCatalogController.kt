@@ -210,8 +210,9 @@ class ModelCatalogController(
     }
 
     private fun deleteModelFiles(config: ModelConfig) {
-        val finalFile = File(appFilesRoot, config.relativePath)
+        val finalFile = ModelPathPolicy.resolveContained(appFilesRoot, config.relativePath)
         val tempFile = File(finalFile.parentFile, "${finalFile.name}.part")
+        ModelFileIntegrity.invalidate(finalFile)
         if (finalFile.exists()) finalFile.delete()
         if (tempFile.exists()) tempFile.delete()
     }

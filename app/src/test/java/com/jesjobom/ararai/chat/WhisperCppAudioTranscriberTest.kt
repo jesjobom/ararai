@@ -56,6 +56,26 @@ class WhisperCppAudioTranscriberTest {
         }
     }
 
+    @Test
+    fun `normalizes the configured application locale for Whisper`() = runTest {
+        val audio = Files.createTempFile("ararai-whisper-language", ".wav").toFile()
+        var requestedLanguage = ""
+        val transcriber = WhisperCppAudioTranscriber(
+            models = { listOf(availableWhisper("base", "/models/base.bin")) },
+            languageTag = { "pt-BR" },
+            transcribeWithRuntime = { _, _, language, threads ->
+                requestedLanguage = language
+                WhisperRuntimeResult("Teste um dois.", 10, 20, 1000, threads)
+            },
+        )
+
+        val result = transcriber.transcribe(AudioPrompt(audio.toURI().toString(), "audio/wav"))
+
+        assertEquals("pt", requestedLanguage)
+        assertEquals("Teste um dois.", result.transcript)
+        assertTrue(result.diagnosticReport.contains("language=pt"))
+    }
+
     private fun availableWhisper(id: String, path: String): ManagedModelItem {
         val config = whisperConfig(id)
         return ManagedModelItem(

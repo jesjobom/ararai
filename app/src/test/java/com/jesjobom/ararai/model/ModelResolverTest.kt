@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -53,5 +54,30 @@ class ModelResolverTest {
 
         assertTrue(state is ModelResolutionState.IntegrityFailed)
         assertEquals(modelFile.absolutePath, (state as ModelResolutionState.IntegrityFailed).file.absolutePath)
+    }
+
+    @Test
+    fun `rejects configured traversal before resolving an outside file`() {
+        val root = Files.createTempDirectory("ararai-model").toFile()
+        val outside = File(root.parentFile, "outside.gguf").apply { writeText("hello") }
+        val escapedConfig = config.copy(relativePath = "models/../../${outside.name}")
+
+        assertThrows(IllegalArgumentException::class.java) {
+            ModelResolver(root).resolve(escapedConfig)
+        }
+        assertEquals("hello", outside.readText())
+    }
+
+    @Test
+    fun `rejects a model directory symlink that escapes app files`() {
+        val root = Files.createTempDirectory("ararai-model").toFile()
+        val outside = Files.createTempDirectory("ararai-model-outside")
+        Files.createSymbolicLink(root.toPath().resolve("models"), outside)
+        outside.resolve("test.gguf").toFile().writeText("hello")
+
+        assertThrows(IllegalArgumentException::class.java) {
+            ModelResolver(root).resolve(config)
+        }
+        assertEquals("hello", outside.resolve("test.gguf").toFile().readText())
     }
 }

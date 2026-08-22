@@ -2,8 +2,12 @@ package com.jesjobom.ararai.voice
 
 import android.os.Looper
 import com.jesjobom.ararai.chat.AudioPrompt
+import com.jesjobom.ararai.chat.AudioTranscriber
+import com.jesjobom.ararai.chat.AudioTranscriptionResult
 import com.jesjobom.ararai.chat.ChatMediaRepository
 import com.jesjobom.ararai.chat.ChatRole
+import com.jesjobom.ararai.chat.ChatSessionStore
+import com.jesjobom.ararai.chat.DeferredNewChatSessionStore
 import com.jesjobom.ararai.chat.FileChatMediaRepository
 import com.jesjobom.ararai.chat.ImageAttachment
 import com.jesjobom.ararai.chat.InMemoryChatSessionStore
@@ -61,6 +65,20 @@ class VoiceChatViewModelTest {
     }
 
     @Test
+    fun `leaving voice chat invalidates readiness of the shared runtime profile`() {
+        val harness = harness(RecordingEngine(flowOf(GenerationEvent.Completed)))
+
+        harness.viewModel.onModelStartupState(ModelStartupState.Available(model, inference))
+        harness.viewModel.onEnteringVoiceChat()
+        waitUntil { harness.viewModel.state.value.canStart }
+
+        harness.viewModel.onLeavingVoiceChat()
+
+        assertFalse(harness.viewModel.state.value.isModelLoaded)
+        assertFalse(harness.viewModel.state.value.canStart)
+    }
+
+    @Test
     fun `completed direct audio turn persists owned media and answer then resumes listening`() {
         val engine =
             RecordingEngine(
@@ -89,6 +107,53 @@ class VoiceChatViewModelTest {
         assertEquals(1, harness.viewModel.state.value.diagnostics.size)
         assertEquals("completed", harness.viewModel.state.value.diagnostics.single().outcome)
         harness.viewModel.stop()
+    }
+
+    @Test
+    fun `direct audio without whisper promotes session with fallback title before creating another`() {
+        val harness =
+            harness(
+                RecordingEngine(flowOf(GenerationEvent.Token("A local answer."), GenerationEvent.Completed)),
+                deferredSessions = true,
+            )
+        prepareAndStart(harness)
+        harness.captureFactory.latest!!.emitNewTurn()
+
+        waitUntil { harness.store.allMessages().any { it.role == ChatRole.Assistant } }
+        val firstSession = harness.store.listSessions().single()
+        assertEquals("Voice chat · test", firstSession.title)
+        assertEquals(
+            "Voice chat · test",
+            harness.viewModel.state.value.sessions
+                .single { it.id == harness.viewModel.state.value.selectedSessionId }
+                .title,
+        )
+
+        harness.viewModel.stop()
+        harness.viewModel.createSession()
+
+        waitUntil { harness.viewModel.state.value.selectedSessionId != firstSession.id }
+        assertEquals(2, harness.store.listSessions().size)
+        assertTrue(harness.store.getMessages(harness.viewModel.state.value.selectedSessionId!!).isEmpty())
+        assertEquals(2, harness.store.getMessages(firstSession.id).size)
+    }
+
+    @Test
+    fun `fallback title uses transcription state captured with the voice message`() {
+        val changingAvailability = ChangingAvailabilityAudioTranscriber(availableFromCheck = 4)
+        val harness =
+            harness(
+                RecordingEngine(flowOf(GenerationEvent.Token("A local answer."), GenerationEvent.Completed)),
+                deferredSessions = true,
+                audioTranscriber = changingAvailability,
+            )
+        prepareAndStart(harness)
+        harness.captureFactory.latest!!.emitNewTurn()
+
+        waitUntil { harness.store.allMessages().any { it.role == ChatRole.Assistant } }
+
+        assertEquals("Voice chat · test", harness.store.listSessions().single().title)
+        assertEquals(0, changingAvailability.transcribeCalls)
     }
 
     @Test
@@ -288,11 +353,15 @@ class VoiceChatViewModelTest {
     private fun harness(
         engine: LocalLlmEngine,
         mediaRepository: ChatMediaRepository? = null,
+        deferredSessions: Boolean = false,
+        audioTranscriber: AudioTranscriber = com.jesjobom.ararai.chat.UnavailableAudioTranscriber,
     ): Harness {
         val root = createTempDirectory("voice-view-model-test").toFile()
         val mediaDirectory = File(root, "media")
         val captureDirectory = File(root, "capture").apply { mkdirs() }
-        val store = InMemoryChatSessionStore()
+        val persistedStore = InMemoryChatSessionStore()
+        val store: ChatSessionStore =
+            if (deferredSessions) DeferredNewChatSessionStore(persistedStore) else persistedStore
         val captureFactory = RecordingCaptureFactory(captureDirectory)
         val speechFactory = CompletingSpeechQueueFactory()
         val viewModel =
@@ -304,6 +373,8 @@ class VoiceChatViewModelTest {
                 speechQueueFactory = speechFactory::create,
                 sessionStore = store,
                 mediaRepository = mediaRepository ?: FileChatMediaRepository(mediaDirectory),
+                audioTranscriber = audioTranscriber,
+                voiceSessionTitleProvider = { "Voice chat · test" },
             )
         return Harness(viewModel, store, captureFactory, speechFactory, mediaDirectory)
     }
@@ -322,11 +393,27 @@ class VoiceChatViewModelTest {
 
     private data class Harness(
         val viewModel: VoiceChatViewModel,
-        val store: InMemoryChatSessionStore,
+        val store: ChatSessionStore,
         val captureFactory: RecordingCaptureFactory,
         val speechFactory: CompletingSpeechQueueFactory,
         val mediaDirectory: File,
     )
+}
+
+private class ChangingAvailabilityAudioTranscriber(
+    private val availableFromCheck: Int,
+) : AudioTranscriber {
+    private var availabilityChecks = 0
+    var transcribeCalls = 0
+        private set
+
+    override val isAvailable: Boolean
+        get() = ++availabilityChecks >= availableFromCheck
+
+    override suspend fun transcribe(audio: AudioPrompt): AudioTranscriptionResult {
+        transcribeCalls++
+        return AudioTranscriptionResult("unexpected", "test")
+    }
 }
 
 private class RecordingEngine(
@@ -455,4 +542,4 @@ private object FailingChatMediaRepository : ChatMediaRepository {
     override fun reconcile(persistedUris: Set<String>, maxFiles: Int) = Unit
 }
 
-private fun InMemoryChatSessionStore.allMessages() = listSessions().flatMap { getMessages(it.id) }
+private fun ChatSessionStore.allMessages() = listSessions().flatMap { getMessages(it.id) }

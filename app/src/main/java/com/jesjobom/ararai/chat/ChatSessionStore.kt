@@ -427,21 +427,7 @@ class SqliteChatSessionStore(
                 arrayOf(sessionId),
             ).use { cursor ->
                 val result = mutableListOf<StoredChatMessage>()
-                while (cursor.moveToNext()) {
-                    result +=
-                        StoredChatMessage(
-                            id = cursor.getString(0),
-                            sessionId = cursor.getString(1),
-                            role = ChatRole.valueOf(cursor.getString(2)),
-                            content =
-                            MessageContentCodec.decode(
-                                kind = cursor.getString(4),
-                                payload = if (cursor.isNull(5)) null else cursor.getString(5),
-                                legacyText = cursor.getString(3),
-                            ),
-                            createdAtMillis = cursor.getLong(6),
-                        )
-                }
+                while (cursor.moveToNext()) result += cursor.toStoredChatMessage()
                 return result
             }
     }
@@ -701,18 +687,30 @@ class SqliteChatSessionStore(
         }
     }
 
-    private fun android.database.Cursor.toStoredChatMessage(): StoredChatMessage = StoredChatMessage(
-        id = getString(0),
-        sessionId = getString(1),
-        role = ChatRole.valueOf(getString(2)),
-        content =
-        MessageContentCodec.decode(
+    private fun android.database.Cursor.toStoredChatMessage(): StoredChatMessage {
+        val role = ChatRole.valueOf(getString(2))
+        val decodedContent = MessageContentCodec.decode(
             kind = getString(4),
             payload = if (isNull(5)) null else getString(5),
             legacyText = getString(3),
-        ),
-        createdAtMillis = getLong(6),
-    )
+        )
+        val content = decodedContent.normalizedCompletionStatus(role)
+        return StoredChatMessage(
+            id = getString(0),
+            sessionId = getString(1),
+            role = role,
+            content = content,
+            createdAtMillis = getLong(6),
+        )
+    }
+
+    private fun MessageContent.normalizedCompletionStatus(role: ChatRole): MessageContent = when {
+        role != ChatRole.Assistant -> this
+        this !is MessageContent.TextPrompt -> this
+        text.isNotBlank() -> this
+        completionStatus != AssistantCompletionStatus.Complete -> this
+        else -> copy(completionStatus = AssistantCompletionStatus.Incomplete)
+    }
 
     private fun nextMessageTimestamp(
         db: SQLiteDatabase,

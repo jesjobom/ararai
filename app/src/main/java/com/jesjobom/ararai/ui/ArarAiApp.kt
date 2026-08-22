@@ -4,7 +4,9 @@ import android.app.ActivityManager
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -14,10 +16,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
@@ -43,6 +48,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -121,7 +127,10 @@ import com.jesjobom.ararai.reporting.ReportDeliveryReceiptStore
 import com.jesjobom.ararai.reporting.ReportDeliveryScheduler
 import com.jesjobom.ararai.reporting.ReportTechnicalMetadata
 import com.jesjobom.ararai.settings.ApplicationLanguage
+import com.jesjobom.ararai.settings.InMemoryTranscriptionLanguagePreferences
 import com.jesjobom.ararai.settings.ThemeMode
+import com.jesjobom.ararai.settings.TranscriptionLanguage
+import com.jesjobom.ararai.settings.TranscriptionLanguagePreferences
 import com.jesjobom.ararai.voice.AndroidVoiceTurnCapture
 import com.jesjobom.ararai.voice.SequentialVoiceSpeechQueue
 import com.jesjobom.ararai.voice.VoiceChatPreferences
@@ -162,6 +171,8 @@ internal fun ArarAiApp(
     reportDeliveryScheduler: ReportDeliveryScheduler = ReportDeliveryScheduler { },
     instructionPreferences: InstructionPreferences = InMemoryInstructionPreferences(),
     generationPreferences: GenerationPreferences = InMemoryGenerationPreferences(),
+    transcriptionLanguagePreferences: TranscriptionLanguagePreferences =
+        InMemoryTranscriptionLanguagePreferences(),
     webSearchPreferences: WebSearchPreferences = InMemoryWebSearchPreferences(),
     audioTranscriber: AudioTranscriber,
     chatTextToSpeechServiceFactory: () -> ChatTextToSpeechService,
@@ -206,6 +217,7 @@ internal fun ArarAiApp(
     val modelCatalogState by modelController.state.collectAsState()
     val instructionSettings by instructionPreferences.settings.collectAsState()
     val generationSettings by generationPreferences.state.collectAsState()
+    val transcriptionLanguage by transcriptionLanguagePreferences.language.collectAsState()
     val webSearchSettings by webSearchPreferences.settings.collectAsState()
     val startupState = modelCatalogState.selectedStartupState
     val modelConfig = modelCatalogState.selectedConfig
@@ -525,6 +537,8 @@ internal fun ArarAiApp(
             onContextTokensChange = { generationPreferences.setContextTokens(modelConfig.id, it) },
             onTemperatureChange = { generationPreferences.setTemperature(modelConfig.id, it) },
             onRestoreGenerationDefaults = { generationPreferences.restoreDefaults(modelConfig.id) },
+            transcriptionLanguage = transcriptionLanguage,
+            onTranscriptionLanguageChange = transcriptionLanguagePreferences::setLanguage,
             webSearchSettings = webSearchSettings,
             webSmokeRunning = webSmokeRunning,
             webSmokeResults = webSmokeResults,
@@ -620,115 +634,6 @@ internal fun ArarAiScaffold(
                 .padding(padding)
                 .padding(horizontal = 20.dp),
         )
-    }
-}
-
-@Composable
-@Suppress("LongParameterList", "LongMethod", "MaxLineLength")
-internal fun HomeScreen(
-    modelStatus: ModelStatusUiState,
-    appVersionLabel: String,
-    onOpenChat: () -> Unit,
-    onOpenVoiceChat: () -> Unit,
-    onOpenModelStatus: () -> Unit,
-    onOpenInstructionsTools: () -> Unit = {},
-    onOpenSettings: () -> Unit,
-) {
-    ArarAiScaffold(
-        title = stringResource(R.string.app_name),
-        subtitle = appVersionLabel,
-        showTopBar = false,
-    ) { modifier ->
-        Column(
-            modifier = modifier
-                .verticalScroll(rememberScrollState())
-                .padding(vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            HomeBrandHeader(appVersionLabel = appVersionLabel)
-            Text(
-                text = stringResource(R.string.home_headline),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = stringResource(R.string.home_description),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            HomeConversationCard(
-                title = stringResource(R.string.home_chat_title),
-                detail = stringResource(R.string.home_chat_description),
-                icon = Icons.AutoMirrored.Filled.Chat,
-                onClick = onOpenChat,
-            )
-
-            HomeConversationCard(
-                title = stringResource(R.string.home_voice_chat_title),
-                detail = stringResource(R.string.home_voice_chat_description),
-                icon = Icons.Filled.Mic,
-                onClick = onOpenVoiceChat,
-            )
-
-            StatusCard(
-                title = stringResource(R.string.home_model_manager_title),
-                value = modelStatus.modelName,
-                detail = modelStatus.localizedTitle(),
-                tags = modelStatus.localizedCapabilities(),
-                icon = when {
-                    modelStatus.progressPercent != null -> Icons.Filled.CloudDownload
-                    modelStatus.canRetry -> Icons.Filled.Error
-                    modelStatus.isReady -> Icons.Filled.CheckCircle
-                    else -> Icons.Filled.Storage
-                },
-                onAction = onOpenModelStatus,
-            )
-
-            StatusCard(
-                title = stringResource(R.string.home_assistant_configuration_title),
-                value = stringResource(R.string.home_assistant_configuration_value),
-                detail = stringResource(R.string.home_assistant_configuration_description),
-                icon = Icons.Filled.Bolt,
-                onAction = onOpenInstructionsTools,
-            )
-
-            StatusCard(
-                title = stringResource(R.string.settings_title),
-                value = stringResource(R.string.home_settings_value),
-                detail = stringResource(R.string.home_settings_description),
-                icon = Icons.Filled.Settings,
-                onAction = onOpenSettings,
-            )
-        }
-    }
-}
-
-@Composable
-private fun HomeBrandHeader(appVersionLabel: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = Color(0xFF010923),
-        shape = MaterialTheme.shapes.large,
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Image(
-                painter = painterResource(R.drawable.ararai_wordmark),
-                contentDescription = stringResource(R.string.app_name),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(3f),
-                contentScale = ContentScale.Fit,
-            )
-            Text(
-                text = appVersionLabel,
-                style = MaterialTheme.typography.labelMedium,
-                color = Color.White.copy(alpha = 0.78f),
-            )
-        }
     }
 }
 
@@ -842,7 +747,7 @@ internal fun SettingsScreen(
 }
 
 @Composable
-@Suppress("LongParameterList")
+@Suppress("LongParameterList", "LongMethod")
 internal fun InstructionsAndToolsScreen(
     settings: com.jesjobom.ararai.chat.InstructionSettings,
     generationModel: GenerationModelUiState? = null,
@@ -856,6 +761,8 @@ internal fun InstructionsAndToolsScreen(
     onContextTokensChange: (Int) -> Unit = {},
     onTemperatureChange: (Float) -> Unit = {},
     onRestoreGenerationDefaults: () -> Unit = {},
+    transcriptionLanguage: TranscriptionLanguage = TranscriptionLanguage.Automatic,
+    onTranscriptionLanguageChange: (TranscriptionLanguage) -> Unit = {},
     webSearchSettings: WebSearchSettings = WebSearchSettings(),
     webSmokeRunning: WebSearchProvider? = null,
     webSmokeResults: Map<WebSearchProvider, ToolSmokeTestResult> = emptyMap(),
@@ -866,22 +773,58 @@ internal fun InstructionsAndToolsScreen(
     onBack: () -> Unit,
 ) {
     var selectedTab by remember { mutableStateOf(0) }
+    val tabScrollState = rememberScrollState()
+    val tabScrollScope = rememberCoroutineScope()
     ArarAiScaffold(title = stringResource(R.string.assistant_configuration_title), onBack = onBack) { modifier ->
         Column(
             modifier = modifier.padding(vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            PrimaryTabRow(selectedTabIndex = selectedTab) {
-                listOf(
-                    "prompts" to stringResource(R.string.assistant_tab_prompts),
-                    "tools" to stringResource(R.string.assistant_tab_tools),
-                    "generation" to stringResource(R.string.assistant_tab_generation),
-                ).forEachIndexed { index, (tag, label) ->
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        text = { Text(label) },
-                        modifier = Modifier.testTag("instructions-tools-tab-$tag"),
+            Box(modifier = Modifier.fillMaxWidth()) {
+                PrimaryScrollableTabRow(
+                    selectedTabIndex = selectedTab,
+                    scrollState = tabScrollState,
+                    edgePadding = 0.dp,
+                ) {
+                    listOf(
+                        "prompts" to stringResource(R.string.assistant_tab_prompts),
+                        "tools" to stringResource(R.string.assistant_tab_tools),
+                        "generation" to stringResource(R.string.assistant_tab_generation),
+                        "audio" to stringResource(R.string.assistant_tab_audio),
+                    ).forEachIndexed { index, (tag, label) ->
+                        Tab(
+                            selected = selectedTab == index,
+                            onClick = { selectedTab = index },
+                            text = { Text(text = label, maxLines = 1) },
+                            modifier = Modifier.testTag("instructions-tools-tab-$tag"),
+                        )
+                    }
+                }
+                if (tabScrollState.canScrollBackward) {
+                    TabScrollButton(
+                        forward = false,
+                        onClick = {
+                            tabScrollScope.launch {
+                                tabScrollState.animateScrollTo(
+                                    (tabScrollState.value - tabScrollState.viewportSize * 3 / 4).coerceAtLeast(0),
+                                )
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.CenterStart),
+                    )
+                }
+                if (tabScrollState.canScrollForward) {
+                    TabScrollButton(
+                        forward = true,
+                        onClick = {
+                            tabScrollScope.launch {
+                                tabScrollState.animateScrollTo(
+                                    (tabScrollState.value + tabScrollState.viewportSize * 3 / 4)
+                                        .coerceAtMost(tabScrollState.maxValue),
+                                )
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.CenterEnd),
                     )
                 }
             }
@@ -910,16 +853,74 @@ internal fun InstructionsAndToolsScreen(
                         onWebProviderEnabledChange = onWebProviderEnabledChange,
                         onRemoveWebProvider = onRemoveWebProvider,
                     )
-                    else -> GenerationTab(
+                    2 -> GenerationTab(
                         model = generationModel,
                         onContextTokensChange = onContextTokensChange,
                         onTemperatureChange = onTemperatureChange,
                         onRestoreDefaults = onRestoreGenerationDefaults,
                     )
+                    else -> AudioTab(
+                        transcriptionLanguage = transcriptionLanguage,
+                        onTranscriptionLanguageChange = onTranscriptionLanguageChange,
+                    )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun TabScrollButton(
+    forward: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val direction = if (forward) "forward" else "back"
+    IconButton(
+        onClick = onClick,
+        modifier = modifier
+            .padding(horizontal = 4.dp)
+            .size(36.dp)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape)
+            .testTag("assistant-tabs-scroll-$direction"),
+    ) {
+        Icon(
+            imageVector = if (forward) Icons.AutoMirrored.Filled.ArrowForward else Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = stringResource(
+                if (forward) R.string.assistant_tabs_more_forward else R.string.assistant_tabs_more_back,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun AudioTab(
+    transcriptionLanguage: TranscriptionLanguage,
+    onTranscriptionLanguageChange: (TranscriptionLanguage) -> Unit,
+) {
+    Text(
+        text = stringResource(R.string.audio_transcription_title),
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.SemiBold,
+    )
+    Text(
+        text = stringResource(R.string.audio_transcription_description),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    TranscriptionLanguage.entries.forEach { language ->
+        SettingsOptionCard(
+            selected = transcriptionLanguage == language,
+            tag = "transcription-language-${language.name.lowercase(Locale.ROOT)}",
+            title = language.localizedDisplayName(),
+            description = language.localizedDescription(),
+            onClick = { onTranscriptionLanguageChange(language) },
+        )
+    }
+    Text(
+        text = stringResource(R.string.audio_transcription_future_only),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 internal data class GenerationModelUiState(
@@ -1187,6 +1188,7 @@ private fun ToolsTab(
         WebSearchProviderCard(
             provider = provider,
             configured = webSearchSettings.isConfigured(provider),
+            unreadable = webSearchSettings.isUnreadable(provider),
             enabled = webSearchSettings.isEnabled(provider),
             preferred = webSearchSettings.isPreferred(provider),
             compatible = webSearchCompatible,
@@ -1206,6 +1208,7 @@ private fun ToolsTab(
 private fun WebSearchProviderCard(
     provider: WebSearchProvider,
     configured: Boolean,
+    unreadable: Boolean,
     enabled: Boolean,
     preferred: Boolean,
     compatible: Boolean,
@@ -1217,8 +1220,8 @@ private fun WebSearchProviderCard(
     onEnabledChange: (Boolean) -> Unit,
     onRemove: () -> Unit,
 ) {
-    var token by remember(provider, configured) { mutableStateOf("") }
-    var disclosureAccepted by remember(provider, configured) { mutableStateOf(false) }
+    var token by remember(provider, configured, unreadable) { mutableStateOf("") }
+    var disclosureAccepted by remember(provider, configured, unreadable) { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(
@@ -1230,13 +1233,18 @@ private fun WebSearchProviderCard(
                 Text(stringResource(R.string.tools_create_token))
             }
             Text(
-                if (configured) {
-                    stringResource(R.string.tools_credential_configured)
-                } else {
-                    stringResource(R.string.tools_enter_token)
+                when {
+                    configured -> stringResource(R.string.tools_credential_configured)
+                    unreadable -> stringResource(R.string.tools_credential_unreadable)
+                    else -> stringResource(R.string.tools_enter_token)
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color =
+                if (unreadable) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
             )
             if (!configured) {
                 OutlinedTextField(
@@ -1447,85 +1455,21 @@ private fun ApplicationLanguage.description(): String = when (this) {
 }
 
 @Composable
-private fun HomeConversationCard(
-    title: String,
-    detail: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-) {
-    ElevatedCard(
-        onClick = onClick,
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(imageVector = icon, contentDescription = null)
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-    }
+private fun TranscriptionLanguage.localizedDisplayName(): String = when (this) {
+    TranscriptionLanguage.Automatic -> stringResource(R.string.transcription_language_automatic)
+    TranscriptionLanguage.System -> stringResource(R.string.transcription_language_system)
+    TranscriptionLanguage.Interface -> stringResource(R.string.transcription_language_interface)
+    TranscriptionLanguage.English -> stringResource(R.string.transcription_language_english)
+    TranscriptionLanguage.Portuguese -> stringResource(R.string.transcription_language_portuguese)
 }
 
 @Composable
-@Suppress("LongParameterList")
-private fun StatusCard(
-    title: String,
-    value: String,
-    detail: String,
-    tags: List<String> = emptyList(),
-    icon: ImageVector,
-    onAction: () -> Unit,
-) {
-    Card(
-        onClick = onAction,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(imageVector = icon, contentDescription = null)
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = value,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            CapabilityTags(tags)
-        }
-    }
+private fun TranscriptionLanguage.localizedDescription(): String = when (this) {
+    TranscriptionLanguage.Automatic -> stringResource(R.string.transcription_language_automatic_description)
+    TranscriptionLanguage.System -> stringResource(R.string.transcription_language_system_description)
+    TranscriptionLanguage.Interface -> stringResource(R.string.transcription_language_interface_description)
+    TranscriptionLanguage.English -> stringResource(R.string.transcription_language_english_description)
+    TranscriptionLanguage.Portuguese -> stringResource(R.string.transcription_language_portuguese_description)
 }
 
 @Composable
@@ -1933,7 +1877,7 @@ private fun ModelCard(
 }
 
 @Composable
-private fun CapabilityTags(tags: List<String>) {
+internal fun CapabilityTags(tags: List<String>) {
     if (tags.isEmpty()) return
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),

@@ -32,6 +32,8 @@ import com.jesjobom.ararai.voice.VoiceChatViewModel
 import kotlinx.coroutines.Dispatchers
 import java.io.Closeable
 import java.io.File
+import java.text.DateFormat
+import java.util.Date
 
 internal data class ArarAiAppControllers(
     val runtime: AppLocalLlmRuntime,
@@ -109,6 +111,14 @@ internal fun rememberArarAiAppControllers(
                 mediaRepository = chatMediaRepository,
                 preferences = chatPreferences,
                 audioTranscriber = audioTranscriber,
+                audioSessionTitleProvider = {
+                    appContext.getString(
+                        com.jesjobom.ararai.R.string.audio_message_session_fallback_title,
+                        DateFormat
+                            .getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM)
+                            .format(Date()),
+                    )
+                },
                 conversationSelection = conversationSelection,
                 conversationCoordinator = conversationCoordinator,
                 persistenceDispatcher = Dispatchers.IO,
@@ -163,6 +173,14 @@ internal fun rememberArarAiAppControllers(
                 sessionStore = chatSessionStore,
                 mediaRepository = chatMediaRepository,
                 audioTranscriber = audioTranscriber,
+                voiceSessionTitleProvider = {
+                    appContext.getString(
+                        com.jesjobom.ararai.R.string.voice_session_fallback_title,
+                        DateFormat
+                            .getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM)
+                            .format(Date()),
+                    )
+                },
                 conversationSelection = conversationSelection,
                 conversationCoordinator = conversationCoordinator,
                 persistenceDispatcher = Dispatchers.IO,

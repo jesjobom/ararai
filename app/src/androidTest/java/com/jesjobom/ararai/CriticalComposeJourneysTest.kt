@@ -1,6 +1,8 @@
 package com.jesjobom.ararai
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,6 +29,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.chat.AssistantCompletionStatus
 import com.jesjobom.ararai.chat.ChatViewModel
 import com.jesjobom.ararai.chat.ImageAttachment
@@ -51,6 +54,7 @@ import com.jesjobom.ararai.model.ModelRuntime
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.model.ModelTask
 import com.jesjobom.ararai.settings.ThemeMode
+import com.jesjobom.ararai.settings.TranscriptionLanguage
 import com.jesjobom.ararai.ui.ChatAudioPlayerFactory
 import com.jesjobom.ararai.ui.ChatAudioRecorderFactory
 import com.jesjobom.ararai.ui.ChatCameraFileFactory
@@ -82,11 +86,39 @@ class CriticalComposeJourneysTest {
     val composeRule = createComposeRule()
 
     @Test
+    fun assistantConfigurationTabsScrollAtCompactWidth() {
+        composeRule.setContent {
+            MaterialTheme {
+                Box(modifier = androidx.compose.ui.Modifier.width(240.dp)) {
+                    InstructionsAndToolsScreen(
+                        settings = InstructionSettings(),
+                        wikipediaCompatible = false,
+                        onInstructionChange = { _, _ -> },
+                        onRestoreDefault = {},
+                        onWikipediaEnabledChange = {},
+                        onBack = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("instructions-tools-tab-prompts").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("assistant-tabs-scroll-back").assertCountEquals(0)
+        composeRule.onNodeWithTag("assistant-tabs-scroll-forward").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("assistant-tabs-scroll-back").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("assistant-tabs-scroll-forward").assertCountEquals(0)
+        composeRule.onNodeWithTag("instructions-tools-tab-audio").performScrollTo().assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("transcription-language-automatic").assertIsSelected()
+    }
+
+    @Test
     fun instructionsAndToolsSupportsEditingRestoreDisclosureAndCompatibility() {
         var settings by mutableStateOf(InstructionSettings())
         var compatible by mutableStateOf(true)
         var contextTokens by mutableStateOf(2_048)
         var temperature by mutableStateOf(0.7f)
+        var transcriptionLanguage by mutableStateOf(TranscriptionLanguage.Automatic)
         var webSearchSettings by mutableStateOf(WebSearchSettings())
         composeRule.setContent {
             MaterialTheme {
@@ -155,6 +187,8 @@ class CriticalComposeJourneysTest {
                         contextTokens = 2_048
                         temperature = 0.7f
                     },
+                    transcriptionLanguage = transcriptionLanguage,
+                    onTranscriptionLanguageChange = { transcriptionLanguage = it },
                     onBack = {},
                 )
             }
@@ -171,7 +205,7 @@ class CriticalComposeJourneysTest {
             "Uses Wikipedia/MediaWiki for eligible factual searches. Inference and conversation storage remain local.",
         ).assertIsDisplayed()
         composeRule.onNodeWithTag("wikipedia-enabled").assertIsOff().performClick().assertIsOn()
-        composeRule.onNodeWithText("Available for the selected model.").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Available for the selected model.").assertCountEquals(2)
         composeRule.onAllNodesWithText("Smoke test").assertCountEquals(0)
         composeRule
             .onNodeWithTag("web-provider-token-tavily")
@@ -200,6 +234,16 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithTag("web-provider-token-exa").assertIsDisplayed()
         composeRule.onNodeWithTag("web-provider-remove-tavily").performClick()
         composeRule.onNodeWithTag("web-provider-token-tavily").assertIsDisplayed()
+        composeRule.runOnIdle {
+            webSearchSettings =
+                webSearchSettings.copy(
+                    unreadableProviders = setOf(WebSearchProvider.Tavily),
+                )
+        }
+        composeRule.onNodeWithText(
+            "The stored credential can no longer be read. This provider was disabled. " +
+                "Save a replacement token to recover it.",
+        ).performScrollTo().assertIsDisplayed()
 
         compatible = false
         composeRule.waitForIdle()
@@ -218,6 +262,13 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithTag("generation-temperature-balanced").assertIsSelected()
         composeRule.onNodeWithTag("generation-temperature-precise").performClick().assertIsSelected()
         assertEquals(0.2f, temperature)
+        composeRule.onNodeWithText("Audio").performClick()
+        composeRule.onNodeWithTag("transcription-language-automatic").assertIsSelected()
+        composeRule.onNodeWithTag("transcription-language-system").performClick().assertIsSelected()
+        assertEquals(TranscriptionLanguage.System, transcriptionLanguage)
+        composeRule.onNodeWithText(
+            "Changes apply to new transcriptions. Existing transcripts are not modified.",
+        ).performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -284,6 +335,28 @@ class CriticalComposeJourneysTest {
     }
 
     @Test
+    fun incompleteAssistantResponseIsHiddenWhileGenerationIsStillActive() {
+        composeRule.setContent {
+            MaterialTheme {
+                MessageContentView(
+                    content =
+                    MessageContent.TextPrompt(
+                        text = "",
+                        completionStatus = AssistantCompletionStatus.Incomplete,
+                    ),
+                    showReasoning = false,
+                    showAudioTranscriptions = false,
+                    mediaServices = fakeMediaServices(),
+                    isStreaming = true,
+                )
+            }
+        }
+
+        composeRule.onAllNodesWithText("Incomplete response").assertCountEquals(0)
+        composeRule.onAllNodesWithText("The model ended before producing a final answer.").assertCountEquals(0)
+    }
+
+    @Test
     fun historicalChatImageOpensAndClosesExpandedView() {
         val mediaServices =
             fakeMediaServices().copy(
@@ -317,6 +390,44 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithTag("expanded-chat-image").assertIsDisplayed()
         composeRule.onNodeWithText("Close").performClick()
         composeRule.onAllNodesWithTag("expanded-chat-image").assertCountEquals(0)
+    }
+
+    @Test
+    fun homeDestinationPreservesEveryNavigationCallback() {
+        val opened = mutableListOf<String>()
+
+        composeRule.setContent {
+            MaterialTheme {
+                HomeScreen(
+                    modelStatus =
+                    ModelStatusUiState(
+                        modelName = "Test model",
+                        title = "Model ready",
+                        detail = "Ready",
+                        capabilities = listOf("Text"),
+                        progressPercent = null,
+                        canRetry = false,
+                    ),
+                    appVersionLabel = "test",
+                    onOpenChat = { opened += "chat" },
+                    onOpenVoiceChat = { opened += "voice" },
+                    onOpenModelStatus = { opened += "models" },
+                    onOpenInstructionsTools = { opened += "assistant" },
+                    onOpenSettings = { opened += "settings" },
+                )
+            }
+        }
+
+        listOf(
+            "Chat" to "chat",
+            "Voice Chat" to "voice",
+            "Model Manager" to "models",
+            "Assistant configuration" to "assistant",
+            "Settings" to "settings",
+        ).forEach { (label, expected) ->
+            composeRule.onNodeWithText(label).performScrollTo().performClick()
+            composeRule.runOnIdle { assertEquals(expected, opened.last()) }
+        }
     }
 
     @Test
@@ -369,6 +480,9 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithText("Chat").performClick()
         composeRule.onNodeWithText("Message").performTextInput("Hello")
         composeRule.onNodeWithContentDescription("Send").performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText("Cancel generation").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("Cancel generation").assertIsDisplayed()
         composeRule.waitUntil(5_000) {
             composeRule.onAllNodesWithText("local response").fetchSemanticsNodes().isNotEmpty()

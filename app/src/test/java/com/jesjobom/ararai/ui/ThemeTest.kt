@@ -1,6 +1,8 @@
 package com.jesjobom.ararai.ui
 
+import androidx.compose.ui.graphics.Color
 import com.jesjobom.ararai.settings.ThemeMode
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -16,5 +18,11 @@ class ThemeTest {
     fun `explicit modes ignore system appearance`() {
         assertFalse(ThemeMode.Light.resolveDarkTheme(systemDarkTheme = true))
         assertTrue(ThemeMode.Dark.resolveDarkTheme(systemDarkTheme = false))
+    }
+
+    @Test
+    fun `home branding blends into dark theme and stays black in light theme`() {
+        assertEquals(Color.Transparent, homeBrandBackground(darkTheme = true))
+        assertEquals(Color.Black, homeBrandBackground(darkTheme = false))
     }
 }

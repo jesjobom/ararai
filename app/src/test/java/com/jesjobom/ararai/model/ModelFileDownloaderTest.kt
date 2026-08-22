@@ -7,6 +7,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -14,9 +15,106 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.nio.file.Files
 
 class ModelFileDownloaderTest {
+    @Test
+    fun `url response closes stream and disconnects exactly once after success`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val input = CloseRecordingInputStream("hello".toByteArray())
+        val connection = FakeHttpConnection(input = input)
+        val downloader =
+            ModelFileDownloader(
+                root,
+                UrlModelByteSource(QueueConnectionFactory(connection)),
+            )
+
+        downloader.download(helloConfig())
+
+        assertEquals(1, input.closeCount)
+        assertEquals(1, connection.disconnectCount)
+    }
+
+    @Test
+    fun `url response cleanup is idempotent`() {
+        val input = CloseRecordingInputStream("hello".toByteArray())
+        val connection = FakeHttpConnection(input = input)
+        val response =
+            UrlModelByteSource(QueueConnectionFactory(connection))
+                .open(helloConfig(), requestedOffset = 0L)
+
+        response.close()
+        response.close()
+
+        assertEquals(1, input.closeCount)
+        assertEquals(1, connection.disconnectCount)
+    }
+
+    @Test
+    fun `url source disconnects exactly once when http response is rejected`() {
+        val connection = FakeHttpConnection(statusCode = HttpURLConnection.HTTP_NOT_FOUND)
+        val source = UrlModelByteSource(QueueConnectionFactory(connection))
+
+        assertThrows(ModelDownloadException::class.java) {
+            source.open(helloConfig(), requestedOffset = 0L)
+        }
+
+        assertEquals(1, connection.disconnectCount)
+    }
+
+    @Test
+    fun `url source disconnects exactly once when opening response stream fails`() {
+        val connection = FakeHttpConnection(inputError = IOException("stream unavailable"))
+        val source = UrlModelByteSource(QueueConnectionFactory(connection))
+
+        assertThrows(IOException::class.java) {
+            source.open(helloConfig(), requestedOffset = 0L)
+        }
+
+        assertEquals(1, connection.disconnectCount)
+    }
+
+    @Test
+    fun `url response closes stream and disconnects exactly once on cancellation`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val input = CancelingCloseRecordingInputStream()
+        val connection = FakeHttpConnection(input = input)
+        val downloader =
+            ModelFileDownloader(
+                root,
+                UrlModelByteSource(QueueConnectionFactory(connection)),
+            )
+
+        assertThrows(CancellationException::class.java) {
+            runBlocking { downloader.download(helloConfig()) }
+        }
+
+        assertEquals(1, input.closeCount)
+        assertEquals(1, connection.disconnectCount)
+    }
+
+    @Test
+    fun `failed url is disconnected before fallback succeeds`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val primary = FakeHttpConnection(statusCode = HttpURLConnection.HTTP_UNAVAILABLE)
+        val fallbackInput = CloseRecordingInputStream("hello".toByteArray())
+        val fallback = FakeHttpConnection(input = fallbackInput)
+        val source = UrlModelByteSource(QueueConnectionFactory(primary, fallback))
+        val config =
+            helloConfig().copy(
+                url = "https://example.com/primary.gguf",
+                fallbackUrls = listOf("https://example.com/fallback.gguf"),
+            )
+
+        ModelFileDownloader(root, source).download(config)
+
+        assertEquals(1, primary.disconnectCount)
+        assertEquals(1, fallback.disconnectCount)
+        assertEquals(1, fallbackInput.closeCount)
+    }
+
     @Test
     fun `downloads to temp file validates and promotes to final path`() = runTest {
         val root = Files.createTempDirectory("ararai-download").toFile()
@@ -249,6 +347,21 @@ class ModelFileDownloaderTest {
         }
     }
 
+    @Test
+    fun `rejects escaped download path before opening source or creating files`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val outside = File(root.parentFile, "escaped-download.gguf")
+        val source = RecordingModelByteSource()
+        val config = helloConfig().copy(relativePath = "models/../../${outside.name}")
+
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { ModelFileDownloader(root, source).download(config) }
+        }
+
+        assertEquals(0, source.openCount)
+        assertFalse(outside.exists())
+    }
+
     private fun helloConfig(): ModelConfig = ModelConfig(
         id = "hello",
         name = "Hello Model",
@@ -259,6 +372,71 @@ class ModelFileDownloaderTest {
         expectedBytes = 5,
         inference = InferenceConfig(contextTokens = 128, temperature = 0.7f, topP = 0.9f),
     )
+}
+
+private class QueueConnectionFactory(
+    vararg connections: FakeHttpConnection,
+) : ModelHttpConnectionFactory {
+    private val connections = ArrayDeque(connections.toList())
+
+    override fun open(url: URL): HttpURLConnection = connections.removeFirst()
+}
+
+private class FakeHttpConnection(
+    private val statusCode: Int = HttpURLConnection.HTTP_OK,
+    private val input: InputStream = ByteArrayInputStream(ByteArray(0)),
+    private val inputError: IOException? = null,
+) : HttpURLConnection(URL("https://example.com/model.gguf")) {
+    var disconnectCount = 0
+
+    override fun connect() = Unit
+
+    override fun disconnect() {
+        disconnectCount += 1
+    }
+
+    override fun usingProxy(): Boolean = false
+
+    override fun getResponseCode(): Int = statusCode
+
+    override fun getInputStream(): InputStream = inputError?.let { throw it } ?: input
+}
+
+private open class CloseRecordingInputStream(
+    bytes: ByteArray,
+) : ByteArrayInputStream(bytes) {
+    var closeCount = 0
+
+    override fun close() {
+        closeCount += 1
+        super.close()
+    }
+}
+
+private class CancelingCloseRecordingInputStream : InputStream() {
+    var closeCount = 0
+    private var emitted = false
+
+    override fun read(): Int {
+        if (!emitted) {
+            emitted = true
+            return 'h'.code
+        }
+        throw CancellationException("cancelled")
+    }
+
+    override fun close() {
+        closeCount += 1
+    }
+}
+
+private class RecordingModelByteSource : ModelByteSource {
+    var openCount = 0
+
+    override fun open(config: ModelConfig): InputStream {
+        openCount += 1
+        return ByteArrayInputStream("hello".toByteArray())
+    }
 }
 
 private class StaticModelByteSource(

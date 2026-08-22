@@ -192,6 +192,48 @@ class ModelConfigParserTest {
     }
 
     @Test
+    fun `accepts normalized nested model path`() {
+        val config =
+            ModelConfigParser.parse(
+                validRawConfig().replace(
+                    "model.relativePath=models/smollm2-135m-q4.gguf",
+                    "model.relativePath=models/family/variant/model.task",
+                ),
+            )
+
+        assertEquals("models/family/variant/model.task", config.relativePath)
+    }
+
+    @Test
+    fun `rejects paths outside or not normalized under models`() {
+        val invalidPaths =
+            listOf(
+                "/models/model.task",
+                "model.task",
+                "models",
+                "models/",
+                "models//model.task",
+                "models/./model.task",
+                "models/family/../model.task",
+                "models\\\\model.task",
+            )
+
+        invalidPaths.forEach { relativePath ->
+            try {
+                ModelConfigParser.parse(
+                    validRawConfig().replace(
+                        "models/smollm2-135m-q4.gguf",
+                        relativePath,
+                    ),
+                )
+                fail("Expected path to be rejected: $relativePath")
+            } catch (_: IllegalArgumentException) {
+                // Expected: every configured path must be normalized below models/.
+            }
+        }
+    }
+
+    @Test
     fun `parses catalog with multiple configured models`() {
         val catalog =
             ModelConfigParser.parseCatalog(

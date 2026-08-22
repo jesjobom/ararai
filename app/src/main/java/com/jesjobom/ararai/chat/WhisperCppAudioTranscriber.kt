@@ -13,6 +13,7 @@ import java.util.Locale
 
 class WhisperCppAudioTranscriber(
     private val models: () -> List<ManagedModelItem>,
+    private val languageTag: () -> String = { AUTO_DETECT_LANGUAGE },
     private val transcribeWithRuntime: (String, String, String, Int) -> WhisperRuntimeResult =
         WhisperRuntime::transcribe,
 ) : AudioTranscriber {
@@ -35,12 +36,13 @@ class WhisperCppAudioTranscriber(
             )
         }
 
+        val transcriptionLanguage = normalizedLanguageTag()
         val result = try {
             withContext(Dispatchers.Default) {
                 transcribeWithRuntime(
                     available.model.filePath,
                     audioFile.absolutePath,
-                    AUTO_DETECT_LANGUAGE,
+                    transcriptionLanguage,
                     DEFAULT_TRANSCRIPTION_THREADS,
                 )
             }
@@ -62,8 +64,14 @@ class WhisperCppAudioTranscriber(
         }
         return AudioTranscriptionResult(
             transcript = transcript,
-            diagnosticReport = diagnostic(item.config.id, result),
+            diagnosticReport = diagnostic(item.config.id, transcriptionLanguage, result),
         )
+    }
+
+    private fun normalizedLanguageTag(): String {
+        val requested = languageTag().trim()
+        if (requested.isEmpty() || requested == AUTO_DETECT_LANGUAGE) return AUTO_DETECT_LANGUAGE
+        return Locale.forLanguageTag(requested).language.ifBlank { AUTO_DETECT_LANGUAGE }
     }
 
     private fun selectedModel(): ManagedModelItem? = models().firstOrNull {
@@ -89,10 +97,14 @@ class WhisperCppAudioTranscriber(
         cause = cause,
     )
 
-    private fun diagnostic(modelId: String, result: WhisperRuntimeResult): String = buildString {
+    private fun diagnostic(
+        modelId: String,
+        language: String,
+        result: WhisperRuntimeResult,
+    ): String = buildString {
         appendLine("transcriber=WhisperCpp")
         appendLine("model_id=$modelId")
-        appendLine("language=$AUTO_DETECT_LANGUAGE")
+        appendLine("language=$language")
         appendLine("threads=${result.threads}")
         appendLine("audio_duration_ms=${result.audioMillis}")
         appendLine("load_duration_ms=${result.loadMillis}")

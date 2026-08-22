@@ -29,7 +29,8 @@ inference remains device-, driver-, model-, and workload-dependent.
   capability-gated reasoning, plus language-aware native speech playback for
   completed assistant responses.
 - Assistant configuration groups mode-specific instructions, optional tools,
-  and per-model conversational generation controls. LiteRT-LM total context is
+  per-model conversational generation controls, and a global local-transcription
+  language preference. LiteRT-LM total context is
   applied to its KV-cache capacity; unsupported independent response limits are
   disclosed rather than simulated. Runtime-backed last-turn metrics are
   ephemeral and benchmark runs retain fixed isolated parameters.
@@ -68,7 +69,8 @@ local model is sufficient for the core Chat inference flow.
 - Namespace/application ID: `com.jesjobom.ararai`
 - Android min SDK 28; compile and target SDK 36; arm64-v8a
 - Kotlin 2.3.21; Jetpack Compose BOM 2026.06.00
-- JDK 17; Android Gradle Plugin 9.2.x; Gradle 9.4.1
+- Canonical Android Gradle runtime: JDK 17; Firebase Emulator runtime: JDK 21;
+  Android Gradle Plugin 9.2.x; Gradle 9.4.1
 - Build Tools 36.0.0; Whisper uses NDK 28.2.13676358 and CMake 3.22.1
 - LiteRT-LM 0.14.0 for configured Gemma 4 LiteRT-LM bundles
 - whisper.cpp through JNI/NDK for transcription artifacts
@@ -82,6 +84,10 @@ local model is sufficient for the core Chat inference flow.
 - Debug builds use debug signing. Release builds require an external, explicitly
   configured upload keystore and password files; signing material is never
   stored in the repository.
+- Production release and reproducible release-candidate builds use optimized
+  R8/resource shrinking. Release mappings and related diagnostics are verified
+  automatically; critical shrunk-runtime behavior still requires the physical
+  smoke matrix in `docs/release-shrinking.md`.
 
 Exact dependency versions and Android settings come from the checked-in Gradle
 configuration. Exact Gemma 4 and Whisper model support comes from
@@ -138,7 +144,10 @@ behavior, implement the smallest complete change, then refactor without changing
 the contract. Domain logic, ViewModels, persistence, catalog/download behavior,
 media boundaries, and runtime ownership belong in automated tests.
 
-`scripts/quality-gate.sh` is the common local/CI gate. It runs pinned Kotlin
+`scripts/quality-gate.sh` is the common local/CI gate. Run it with JDK 17 active
+and `FIREBASE_JAVA_HOME` pointing to a full JDK 21 installation. The Firebase
+wrapper temporarily selects JDK 21 only for emulator tests; Gradle remains on
+the canonical JDK 17 baseline. The gate runs pinned Kotlin
 formatting and static analysis, unit/Robolectric tests, lint, debug app and
 instrumentation builds, and `openspec validate --all --strict`. Android
 instrumentation execution requires a connected arm64 device:

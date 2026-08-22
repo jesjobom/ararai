@@ -1,11 +1,13 @@
 package com.jesjobom.ararai.model
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.nio.file.Files
 
 class LegacyModelArtifactMigrationTest {
     @get:Rule
@@ -42,6 +44,20 @@ class LegacyModelArtifactMigrationTest {
         val root = temporaryFolder.root
         LegacyModelArtifactMigration.run(root)
         LegacyModelArtifactMigration.run(root)
+    }
+
+    @Test
+    fun `does not delete legacy names through an escaped models symlink`() {
+        val root = temporaryFolder.newFolder("app-files")
+        val outside = temporaryFolder.newFolder("outside-models")
+        val outsideLegacy = File(outside, "SmolLM2-135M-Instruct-Q4_K_M.gguf").create()
+        Files.createSymbolicLink(root.toPath().resolve("models"), outside.toPath())
+
+        assertThrows(IllegalArgumentException::class.java) {
+            LegacyModelArtifactMigration.run(root)
+        }
+
+        assertTrue(outsideLegacy.exists())
     }
 
     private fun File.create(): File = apply {

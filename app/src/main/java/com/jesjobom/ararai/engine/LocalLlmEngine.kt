@@ -18,6 +18,15 @@ interface LocalLlmEngine {
         config: InferenceConfig,
     )
 
+    suspend fun loadForWorkload(
+        model: LocalModel,
+        config: InferenceConfig,
+        workload: LocalLlmWorkload,
+    ) {
+        load(model, config)
+        prepare(workload)
+    }
+
     suspend fun prepare(workload: LocalLlmWorkload) = Unit
 
     fun generate(request: PromptRequest): Flow<GenerationEvent>
