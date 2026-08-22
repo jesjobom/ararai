@@ -71,9 +71,8 @@ class ModelCatalogController(
         )
     override val state: StateFlow<ModelCatalogState> = _state.asStateFlow()
 
-    init {
-        ensureBootstrapModelDownload()
-    }
+    val defaultModelConfig: ModelConfig
+        get() = catalog.models.first { it.id == catalog.defaultModelId }
 
     fun select(modelId: String) {
         val config = catalog.models.firstOrNull { it.id == modelId }
@@ -114,19 +113,6 @@ class ModelCatalogController(
         if (item.state is ModelStartupState.Downloading) return
         deleteModelFiles(item.config)
         updateModelState(modelId, ModelStartupState.Missing)
-    }
-
-    private fun ensureBootstrapModelDownload() {
-        val current = state.value
-        val hasAvailableChatModel = current.models.any {
-            it.config.supportsPurpose(ModelPurpose.Chat) && it.state is ModelStartupState.Available
-        }
-        if (hasAvailableChatModel) return
-
-        val defaultModel = current.models.first { it.config.id == catalog.defaultModelId }
-        if (defaultModel.state is ModelStartupState.Missing || defaultModel.state is ModelStartupState.Invalid) {
-            download(defaultModel.config.id)
-        }
     }
 
     private fun restoredSelectedModelId(models: List<ManagedModelItem>): String {

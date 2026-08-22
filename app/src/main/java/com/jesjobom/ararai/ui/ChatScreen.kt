@@ -1,5 +1,6 @@
 package com.jesjobom.ararai.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -68,6 +70,8 @@ internal fun ChatScreen(
     onDeletePendingReport: (String) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val unavailableMessage = stringResource(R.string.model_required_message)
     var sessionListOpen by remember { mutableStateOf(false) }
     var clearSessionsConfirmationOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
@@ -198,6 +202,10 @@ internal fun ChatScreen(
                 onSendAudioPrompt = viewModel::submitAudioPrompt,
                 onClearAudioPrompt = viewModel::clearAudioPrompt,
                 canSubmit = state.canSubmit,
+                modelAvailable = state.modelStatus == com.jesjobom.ararai.chat.ChatUiState.MODEL_AVAILABLE,
+                onUnavailableInteraction = {
+                    Toast.makeText(context, unavailableMessage, Toast.LENGTH_SHORT).show()
+                },
                 isGenerating = state.isGenerating,
                 error = localizedError,
                 onSubmit = viewModel::submitPrompt,

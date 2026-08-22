@@ -47,6 +47,12 @@
     <string name="home_chat_description">Start a local conversation with the selected model.</string>
     <string name="home_voice_chat_title">Voice Chat</string>
     <string name="home_voice_chat_description">Start a local voice conversation with the selected model.</string>
+    <string name="initial_model_dialog_title">Download a model to get started</string>
+    <string name="initial_model_dialog_description">Chat features require a local model. The default model is %1$s (approximately %2$s). The download starts immediately on your current network.</string>
+    <string name="initial_model_download_default">Download default model</string>
+    <string name="initial_model_view_models">View models</string>
+    <string name="model_download_size_unknown">size unavailable</string>
+    <string name="model_required_message">Download a model to use chat features.</string>
     <string name="home_model_manager_title">Model Manager</string>
     <string name="home_assistant_configuration_title">Assistant configuration</string>
     <string name="home_assistant_configuration_value">Customize assistant behavior</string>

@@ -19,6 +19,11 @@ inference remains device-, driver-, model-, and workload-dependent.
 - Users can browse configured models in Chat and Transcription tabs,
   grouped by family and ordered from lighter to heavier artifacts. They can
   download, retry, cancel, update, delete, and select configured models.
+  Startup never downloads a missing model without consent: a one-time prompt
+  identifies the default model and approximate transfer size, while explicit
+  download actions continue immediately on the current network. Without a local
+  Chat model, normal Chat history remains accessible with submission blocked and
+  Voice Chat remains visibly unavailable.
   Downloaded model cards open workload-specific benchmarks, and models whose
   declared RAM requirement fits currently available device memory are marked as
   recommended. Downloads are resumable foreground data transfers with

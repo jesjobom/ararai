@@ -33,6 +33,7 @@ import com.jesjobom.ararai.engine.prepareLiteRtLmCacheDir
 import com.jesjobom.ararai.knowledge.EncryptedWebSearchPreferences
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.model.SharedPreferencesGenerationPreferences
+import com.jesjobom.ararai.model.SharedPreferencesModelDownloadPromptPreferenceStore
 import com.jesjobom.ararai.settings.SharedPreferencesApplicationExitPreferenceStore
 import com.jesjobom.ararai.settings.SharedPreferencesApplicationLanguagePreferenceStore
 import com.jesjobom.ararai.settings.SharedPreferencesThemePreferenceStore
@@ -76,6 +77,7 @@ class MainActivity : ComponentActivity() {
         val reportDeliveryReceiptStore = app.reportDeliveryReceiptStore
         val instructionPreferences = SharedPreferencesInstructionPreferences(this)
         val generationPreferences = SharedPreferencesGenerationPreferences(this)
+        val modelDownloadPromptPreferenceStore = SharedPreferencesModelDownloadPromptPreferenceStore(this)
         val transcriptionLanguagePreferences = SharedPreferencesTranscriptionLanguagePreferences(this)
         val webSearchPreferences = EncryptedWebSearchPreferences(this)
         val audioTranscriber = WhisperCppAudioTranscriber(
@@ -136,6 +138,7 @@ class MainActivity : ComponentActivity() {
                         reportDeliveryScheduler = app.reportDeliveryScheduler,
                         instructionPreferences = instructionPreferences,
                         generationPreferences = generationPreferences,
+                        modelDownloadPromptPreferenceStore = modelDownloadPromptPreferenceStore,
                         transcriptionLanguagePreferences = transcriptionLanguagePreferences,
                         webSearchPreferences = webSearchPreferences,
                         audioTranscriber = audioTranscriber,

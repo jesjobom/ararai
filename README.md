@@ -13,6 +13,11 @@ backend, or external database.
   with family-preserving light-to-heavy ordering, available-memory
   recommendations, download, integrity validation, selection, update, deletion,
   and persisted active-model choice.
+- No model download starts automatically on first launch. When no Chat model is
+  local, a one-time prompt shows the default model and approximate size before
+  offering download, Model Management, or dismissal. Normal Chat history stays
+  accessible with submission disabled; Voice Chat stays unavailable until a
+  Chat model is local.
 - Gemma 4 E2B and E4B Chat inference through LiteRT-LM behind a shared
   `LocalLlmEngine` boundary. E2B is the default lower-resource option; both
   configured models support text, image, audio, and reasoning input.

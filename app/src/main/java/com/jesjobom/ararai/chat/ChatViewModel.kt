@@ -391,8 +391,8 @@ class ChatViewModel(
                 unloadEngine()
                 _uiState.update {
                     it.copy(
-                        modelStatus = "Model missing; starting download",
-                        modelStatusKey = null,
+                        modelStatus = "Model unavailable",
+                        modelStatusKey = UserMessageKey.ModelUnavailable,
                         isLoadingModel = false,
                         isGenerating = false,
                         canRetryModelDownload = false,
@@ -413,8 +413,8 @@ class ChatViewModel(
                 unloadEngine()
                 _uiState.update {
                     it.copy(
-                        modelStatus = "Model invalid; redownloading",
-                        modelStatusKey = null,
+                        modelStatus = "Model unavailable",
+                        modelStatusKey = UserMessageKey.ModelUnavailable,
                         isLoadingModel = false,
                         isGenerating = false,
                         canRetryModelDownload = false,

@@ -4,16 +4,20 @@
 Define the local, stateless, half-duplex Voice Chat experience, including audio
 capture, pause detection, incremental TTS playback, reading progress, settings,
 lifecycle cleanup, and physical-device validation boundaries.
+
 ## Requirements
+
 ### Requirement: Voice Chat destination
 
 The app SHALL expose Voice Chat as a dedicated conversation destination that
 uses the app's current persisted conversation while retaining its focused
-hands-free presentation.
+hands-free presentation, and SHALL prevent entry while no local chat model is
+available.
 
 #### Scenario: Open Voice Chat
 
 - **GIVEN** the user is on the home screen
+- **AND** a configured chat model is available locally
 - **WHEN** the user activates any part of the Voice Chat card
 - **THEN** Voice Chat resolves the current persisted conversation or creates one
   when none exists
@@ -23,6 +27,14 @@ hands-free presentation.
   available
 - **AND** prior eligible conversation history is available to the shared
   coordinator without being required in the focused Voice Chat layout.
+
+#### Scenario: Block Voice Chat without a chat model
+
+- **GIVEN** no configured chat model is available locally
+- **WHEN** the home screen is displayed
+- **THEN** the Voice Chat card uses a disabled gray visual treatment
+- **AND** activating the card does not open Voice Chat
+- **AND** the app briefly tells the user to download a model.
 
 #### Scenario: Manage conversations from Voice Chat
 
@@ -36,9 +48,9 @@ hands-free presentation.
 #### Scenario: Distinguish conversation and utility destinations
 
 - **WHEN** the home screen is displayed
-- **THEN** Chat and Voice Chat use the same color scheme
+- **THEN** Chat and Voice Chat use the same color scheme when both are available
 - **AND** Models, Diagnostics, and Settings use the Model Management color scheme
-- **AND** every destination card is clickable without an internal action button.
+- **AND** every available destination card is clickable without an internal action button.
 
 #### Scenario: Selected model cannot accept audio
 

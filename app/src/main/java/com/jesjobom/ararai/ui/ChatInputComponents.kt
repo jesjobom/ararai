@@ -5,7 +5,9 @@ import android.content.pm.PackageManager
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -64,6 +67,8 @@ internal fun ChatInputBar(
     onSendAudioPrompt: (AudioPrompt) -> Unit,
     onClearAudioPrompt: () -> Unit,
     canSubmit: Boolean,
+    modelAvailable: Boolean,
+    onUnavailableInteraction: () -> Unit,
     isGenerating: Boolean,
     error: String?,
     onSubmit: () -> Unit,
@@ -280,27 +285,41 @@ internal fun ChatInputBar(
                     }
                 }
 
-                OutlinedTextField(
-                    value = prompt,
-                    onValueChange = onPromptChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 1,
-                    maxLines = 5,
-                    label = { Text(stringResource(R.string.chat_message_label)) },
-                    enabled = audioPrompt == null,
-                    trailingIcon = {
-                        FilledIconButton(
-                            onClick = onSubmit,
-                            enabled = canSubmit,
-                            modifier = Modifier.size(40.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                contentDescription = stringResource(R.string.action_send),
-                            )
-                        }
-                    },
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("chat-composer-field"),
+                ) {
+                    OutlinedTextField(
+                        value = prompt,
+                        onValueChange = onPromptChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 1,
+                        maxLines = 5,
+                        label = { Text(stringResource(R.string.chat_message_label)) },
+                        enabled = modelAvailable && audioPrompt == null,
+                        trailingIcon = {
+                            FilledIconButton(
+                                onClick = onSubmit,
+                                enabled = canSubmit,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = stringResource(R.string.action_send),
+                                )
+                            }
+                        },
+                    )
+                    if (!modelAvailable) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .testTag("unavailable-chat-composer")
+                                .clickable(onClick = onUnavailableInteraction),
+                        )
+                    }
+                }
             }
         }
 

@@ -2,6 +2,8 @@ package com.jesjobom.ararai.ui
 
 import android.app.ActivityManager
 import android.content.Context
+import android.text.format.Formatter
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -111,8 +113,10 @@ import com.jesjobom.ararai.knowledge.WebSearchToolFactory
 import com.jesjobom.ararai.knowledge.redactedProviderError
 import com.jesjobom.ararai.model.GenerationPreferences
 import com.jesjobom.ararai.model.InMemoryGenerationPreferences
+import com.jesjobom.ararai.model.InMemoryModelDownloadPromptPreferenceStore
 import com.jesjobom.ararai.model.ManagedModelItem
 import com.jesjobom.ararai.model.ModelCatalogController
+import com.jesjobom.ararai.model.ModelDownloadPromptPreferenceStore
 import com.jesjobom.ararai.model.ModelPurpose
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.model.ModelTask
@@ -171,6 +175,8 @@ internal fun ArarAiApp(
     reportDeliveryScheduler: ReportDeliveryScheduler = ReportDeliveryScheduler { },
     instructionPreferences: InstructionPreferences = InMemoryInstructionPreferences(),
     generationPreferences: GenerationPreferences = InMemoryGenerationPreferences(),
+    modelDownloadPromptPreferenceStore: ModelDownloadPromptPreferenceStore =
+        InMemoryModelDownloadPromptPreferenceStore(),
     transcriptionLanguagePreferences: TranscriptionLanguagePreferences =
         InMemoryTranscriptionLanguagePreferences(),
     webSearchPreferences: WebSearchPreferences = InMemoryWebSearchPreferences(),
@@ -221,6 +227,8 @@ internal fun ArarAiApp(
     val webSearchSettings by webSearchPreferences.settings.collectAsState()
     val startupState = modelCatalogState.selectedStartupState
     val modelConfig = modelCatalogState.selectedConfig
+    val defaultModelConfig = modelController.defaultModelConfig
+    val hasAvailableChatModel = modelCatalogState.models.hasAvailableChatModel()
     val reportController = remember(chatSessionStore, pendingReportQueue) {
         GeneratedContentReportingController(
             chatSessionStore,
@@ -239,12 +247,25 @@ internal fun ArarAiApp(
     )
     var destination by remember { mutableStateOf(AppDestination.Home) }
     var showExitConfirmation by remember { mutableStateOf(false) }
+    var showInitialModelDialog by remember {
+        mutableStateOf(
+            shouldShowInitialModelDownloadPrompt(
+                wasHandled = modelDownloadPromptPreferenceStore.wasHandled,
+                hasAvailableChatModel = hasAvailableChatModel,
+            ),
+        )
+    }
     var disableExitConfirmation by remember { mutableStateOf(false) }
     var whisperBenchmarkModelId by remember { mutableStateOf<String?>(null) }
     var webSmokeRunning by remember { mutableStateOf<WebSearchProvider?>(null) }
     var webSmokeResults by remember { mutableStateOf<Map<WebSearchProvider, ToolSmokeTestResult>>(emptyMap()) }
     var webSmokeErrors by remember { mutableStateOf<Map<WebSearchProvider, String>>(emptyMap()) }
     val coroutineScope = rememberCoroutineScope()
+
+    fun handleInitialModelPrompt() {
+        modelDownloadPromptPreferenceStore.markHandled()
+        showInitialModelDialog = false
+    }
     val controllers =
         rememberArarAiAppControllers(
             appContext = appContext,
@@ -299,6 +320,32 @@ internal fun ArarAiApp(
         } else {
             onExitApplication()
         }
+    }
+
+    LaunchedEffect(hasAvailableChatModel) {
+        if (hasAvailableChatModel && !modelDownloadPromptPreferenceStore.wasHandled) {
+            modelDownloadPromptPreferenceStore.markHandled()
+            showInitialModelDialog = false
+        }
+    }
+
+    if (showInitialModelDialog) {
+        val approximateSize = defaultModelConfig.expectedBytes?.let {
+            Formatter.formatShortFileSize(appContext, it)
+        } ?: stringResource(R.string.model_download_size_unknown)
+        InitialModelDownloadDialog(
+            modelName = defaultModelConfig.name,
+            approximateSize = approximateSize,
+            onDownload = {
+                handleInitialModelPrompt()
+                modelController.download(defaultModelConfig.id)
+            },
+            onViewModels = {
+                handleInitialModelPrompt()
+                destination = AppDestination.ModelStatus
+            },
+            onClose = ::handleInitialModelPrompt,
+        )
     }
 
     if (showExitConfirmation) {
@@ -372,6 +419,14 @@ internal fun ArarAiApp(
                 destination = AppDestination.Chat
             },
             onOpenVoiceChat = { destination = AppDestination.VoiceChat },
+            voiceChatAvailable = hasAvailableChatModel,
+            onUnavailableVoiceChat = {
+                Toast.makeText(
+                    appContext,
+                    appContext.getString(R.string.model_required_message),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            },
             onOpenModelStatus = { destination = AppDestination.ModelStatus },
             onOpenInstructionsTools = { destination = AppDestination.InstructionsTools },
             onOpenSettings = { destination = AppDestination.Settings },
@@ -581,6 +636,53 @@ internal fun ArarAiApp(
             onBack = { returnHome() },
         )
     }
+}
+
+internal fun shouldShowInitialModelDownloadPrompt(
+    wasHandled: Boolean,
+    hasAvailableChatModel: Boolean,
+): Boolean = !wasHandled && !hasAvailableChatModel
+
+internal fun List<ManagedModelItem>.hasAvailableChatModel(): Boolean = any { item ->
+    item.config.supportsPurpose(ModelPurpose.Chat) && item.state is ModelStartupState.Available
+}
+
+@Composable
+internal fun InitialModelDownloadDialog(
+    modelName: String,
+    approximateSize: String,
+    onDownload: () -> Unit,
+    onViewModels: () -> Unit,
+    onClose: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(stringResource(R.string.initial_model_dialog_title)) },
+        text = {
+            Text(
+                stringResource(
+                    R.string.initial_model_dialog_description,
+                    modelName,
+                    approximateSize,
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDownload) {
+                Text(stringResource(R.string.initial_model_download_default))
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onViewModels) {
+                    Text(stringResource(R.string.initial_model_view_models))
+                }
+                TextButton(onClick = onClose) {
+                    Text(stringResource(R.string.action_close))
+                }
+            }
+        },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

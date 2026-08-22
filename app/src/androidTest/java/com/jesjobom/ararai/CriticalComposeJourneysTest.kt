@@ -68,6 +68,7 @@ import com.jesjobom.ararai.ui.ChatTextToSpeechListener
 import com.jesjobom.ararai.ui.ChatTextToSpeechService
 import com.jesjobom.ararai.ui.GenerationModelUiState
 import com.jesjobom.ararai.ui.HomeScreen
+import com.jesjobom.ararai.ui.InitialModelDownloadDialog
 import com.jesjobom.ararai.ui.InstructionsAndToolsScreen
 import com.jesjobom.ararai.ui.MessageContentView
 import com.jesjobom.ararai.ui.ModelStatusScreen
@@ -428,6 +429,100 @@ class CriticalComposeJourneysTest {
             composeRule.onNodeWithText(label).performScrollTo().performClick()
             composeRule.runOnIdle { assertEquals(expected, opened.last()) }
         }
+    }
+
+    @Test
+    fun homeBlocksVoiceChatWhenNoChatModelIsAvailable() {
+        var voiceOpened = false
+        var unavailableFeedback = false
+
+        composeRule.setContent {
+            MaterialTheme {
+                HomeScreen(
+                    modelStatus =
+                    ModelStatusUiState(
+                        modelName = "Test model",
+                        title = "Not downloaded",
+                        detail = "Missing",
+                        capabilities = listOf("Text"),
+                        progressPercent = null,
+                        canRetry = false,
+                    ),
+                    appVersionLabel = "test",
+                    onOpenChat = {},
+                    onOpenVoiceChat = { voiceOpened = true },
+                    voiceChatAvailable = false,
+                    onUnavailableVoiceChat = { unavailableFeedback = true },
+                    onOpenModelStatus = {},
+                    onOpenSettings = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Voice Chat").performClick()
+
+        composeRule.runOnIdle {
+            assertTrue(unavailableFeedback)
+            assertEquals(false, voiceOpened)
+        }
+    }
+
+    @Test
+    fun initialModelDialogShowsSizeAndPreservesEveryAction() {
+        val actions = mutableListOf<String>()
+
+        composeRule.setContent {
+            MaterialTheme {
+                InitialModelDownloadDialog(
+                    modelName = "Default Model",
+                    approximateSize = "2 GB",
+                    onDownload = { actions += "download" },
+                    onViewModels = { actions += "models" },
+                    onClose = { actions += "close" },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Default Model", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("2 GB", substring = true).assertIsDisplayed()
+        listOf(
+            "Download default model" to "download",
+            "View models" to "models",
+            "Close" to "close",
+        ).forEach { (label, expected) ->
+            composeRule.onNodeWithText(label).performClick()
+            composeRule.runOnIdle { assertEquals(expected, actions.last()) }
+        }
+    }
+
+    @Test
+    fun chatComposerIsUnavailableWithoutALocalModel() {
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(),
+                initialModel = null,
+                inferenceConfig = inference,
+                systemPrompt = "Be concise",
+                sessionStore = InMemoryChatSessionStore(),
+            )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ChatScreen(
+                    viewModel = viewModel,
+                    mediaServices = fakeMediaServices(),
+                    textToSpeechServiceFactory = ::NoOpTextToSpeechService,
+                    languageIdentifierFactory = ::ImmediateLanguageIdentifier,
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Sessions").assertIsDisplayed().assertHasClickAction()
+        val composerBounds = composeRule.onNodeWithTag("chat-composer-field").fetchSemanticsNode().boundsInRoot
+        val overlayBounds = composeRule.onNodeWithTag("unavailable-chat-composer").assertHasClickAction()
+            .fetchSemanticsNode().boundsInRoot
+        assertEquals(composerBounds, overlayBounds)
     }
 
     @Test

@@ -44,6 +44,8 @@ internal fun HomeScreen(
     appVersionLabel: String,
     onOpenChat: () -> Unit,
     onOpenVoiceChat: () -> Unit,
+    voiceChatAvailable: Boolean = modelStatus.isReady,
+    onUnavailableVoiceChat: () -> Unit = {},
     onOpenModelStatus: () -> Unit,
     onOpenInstructionsTools: () -> Unit = {},
     onOpenSettings: () -> Unit,
@@ -80,7 +82,8 @@ internal fun HomeScreen(
                 title = stringResource(R.string.home_voice_chat_title),
                 detail = stringResource(R.string.home_voice_chat_description),
                 icon = Icons.Filled.Mic,
-                onClick = onOpenVoiceChat,
+                available = voiceChatAvailable,
+                onClick = if (voiceChatAvailable) onOpenVoiceChat else onUnavailableVoiceChat,
             )
             StatusCard(
                 title = stringResource(R.string.home_model_manager_title),
@@ -148,13 +151,16 @@ private fun HomeConversationCard(
     title: String,
     detail: String,
     icon: ImageVector,
+    available: Boolean = true,
     onClick: () -> Unit,
 ) {
     ElevatedCard(
         onClick = onClick,
         colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            containerColor =
+            if (available) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor =
+            if (available) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
         ),
     ) {
         Column(

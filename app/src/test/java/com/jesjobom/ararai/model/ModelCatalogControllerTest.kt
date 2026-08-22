@@ -31,6 +31,10 @@ class ModelCatalogControllerTest {
                 scope = this,
             )
 
+        assertTrue(gateway.started.isEmpty())
+
+        controller.download("default")
+
         assertEquals(listOf("default" to false), gateway.started)
 
         controller.cancelDownload("default")
@@ -39,7 +43,7 @@ class ModelCatalogControllerTest {
     }
 
     @Test
-    fun `auto downloads the default missing model and leaves other models untouched`() = runTest {
+    fun `does not download missing models during startup`() = runTest {
         val root = Files.createTempDirectory("ararai-catalog").toFile()
         val controller =
             ModelCatalogController(
@@ -53,19 +57,10 @@ class ModelCatalogControllerTest {
                 scope = this,
             )
 
-        controller.state.test {
-            val initial = awaitItem()
-            assertEquals("default", initial.selectedModelId)
-            assertTrue(initial.models[0].state is ModelStartupState.Missing)
-            assertTrue(initial.models[1].state is ModelStartupState.Missing)
-
-            assertTrue(awaitItem().models[0].state is ModelStartupState.Downloading)
-            assertTrue(awaitItem().models[0].state is ModelStartupState.Downloading)
-            val available = awaitItem()
-            assertTrue(available.models[0].state is ModelStartupState.Available)
-            assertTrue(available.models[1].state is ModelStartupState.Missing)
-            cancelAndIgnoreRemainingEvents()
-        }
+        val initial = controller.state.value
+        assertEquals("default", initial.selectedModelId)
+        assertTrue(initial.models[0].state is ModelStartupState.Missing)
+        assertTrue(initial.models[1].state is ModelStartupState.Missing)
     }
 
     @Test
@@ -152,7 +147,10 @@ class ModelCatalogControllerTest {
             )
 
         controller.state.test {
-            skipItems(3)
+            assertTrue(awaitItem().selectedStartupState is ModelStartupState.Missing)
+            controller.download("default")
+            assertTrue(awaitItem().selectedStartupState is ModelStartupState.Downloading)
+            assertTrue(awaitItem().selectedStartupState is ModelStartupState.Downloading)
             assertTrue(awaitItem().selectedStartupState is ModelStartupState.Available)
 
             controller.delete("default")
@@ -177,7 +175,10 @@ class ModelCatalogControllerTest {
             )
 
         controller.state.test {
-            skipItems(3)
+            assertTrue(awaitItem().selectedStartupState is ModelStartupState.Missing)
+            controller.download("default")
+            assertTrue(awaitItem().selectedStartupState is ModelStartupState.Downloading)
+            assertTrue(awaitItem().selectedStartupState is ModelStartupState.Downloading)
             assertTrue(awaitItem().selectedStartupState is ModelStartupState.Available)
 
             controller.redownload("default")
@@ -202,6 +203,7 @@ class ModelCatalogControllerTest {
                 scope = this,
             )
 
+        controller.download("default")
         runCurrent()
         assertTrue(controller.state.value.selectedStartupState is ModelStartupState.Downloading)
 
