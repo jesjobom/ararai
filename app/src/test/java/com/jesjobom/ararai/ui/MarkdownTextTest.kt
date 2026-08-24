@@ -126,4 +126,48 @@ class MarkdownTextTest {
             parseInlineMath("${'$'}20${'$'}"),
         )
     }
+
+    @Test
+    fun `does not reuse the closing delimiter of rejected dollar math`() {
+        val source =
+            "Aproximadamente ${'$'}299.792.458 \\text{metros por segundo}(\\text{m/s}${'$'}). " +
+                "Para a água, use ${'$'}1,33${'$'} e obtenha " +
+                "${'$'}225.407.863 \\text{ m/s}${'$'}."
+
+        assertEquals(
+            listOf(
+                MathInlineSegment.Text(
+                    "Aproximadamente ${'$'}299.792.458 \\text{metros por segundo}(\\text{m/s}${'$'}). " +
+                        "Para a água, use ${'$'}1,33${'$'} e obtenha ",
+                ),
+                MathInlineSegment.Math(
+                    "225.407.863 \\text{ m/s}",
+                    "${'$'}225.407.863 \\text{ m/s}${'$'}",
+                ),
+                MathInlineSegment.Text("."),
+            ),
+            parseInlineMath(source),
+        )
+    }
+
+    @Test
+    fun `renders numeric latex with text units and multiplication`() {
+        val source =
+            "Distance ${'$'}385,000 \\text{ km}${'$'} and speed " +
+                "${'$'}2.25 \\times 10^8 \\text{ m/s}${'$'}."
+
+        assertEquals(
+            listOf(
+                MathInlineSegment.Text("Distance "),
+                MathInlineSegment.Math("385,000 \\text{ km}", "${'$'}385,000 \\text{ km}${'$'}"),
+                MathInlineSegment.Text(" and speed "),
+                MathInlineSegment.Math(
+                    "2.25 \\times 10^8 \\text{ m/s}",
+                    "${'$'}2.25 \\times 10^8 \\text{ m/s}${'$'}",
+                ),
+                MathInlineSegment.Text("."),
+            ),
+            parseInlineMath(source),
+        )
+    }
 }

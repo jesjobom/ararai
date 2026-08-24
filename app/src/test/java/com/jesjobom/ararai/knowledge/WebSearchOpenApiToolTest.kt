@@ -8,20 +8,21 @@ import org.junit.Test
 
 class WebSearchOpenApiToolTest {
     @Test
-    fun `accepts exact semantic arguments and captures sources`() {
+    fun `derives provider metadata from one query argument and captures sources`() {
         val source = KnowledgeSource("Exa", "Title", "https://example.com", "en", 1L)
         val tool =
             WebSearchToolTurn(
                 KnowledgeTool {
-                    assertEquals(ToolRequest("q", "en", "specific focus"), it)
+                    assertEquals(ToolRequest("specific focus", "pt", "specific focus"), it)
                     ToolResult.Success("evidence", listOf(source))
                 },
+                languageProvider = { "PT" },
             )
         val events = mutableListOf<ApplicationToolExecutionEvent>()
         tool.beginTurn(events::add)
 
         val response = JsonParser.parseString(
-            tool.execute("""{"query":"q","language":"en","focus":"specific focus"}"""),
+            tool.execute("""{"query":"specific focus"}"""),
         ).asJsonObject
 
         assertTrue(response.get("ok").asBoolean)
@@ -45,7 +46,7 @@ class WebSearchOpenApiToolTest {
             },
         )
 
-        val response = tool.execute("""{"query":"q","language":"en","focus":"f","url":"https://bad"}""")
+        val response = tool.execute("""{"query":"q","language":"en"}""")
 
         assertFalse(JsonParser.parseString(response).asJsonObject.get("ok").asBoolean)
         assertEquals(0, calls)
@@ -60,7 +61,7 @@ class WebSearchOpenApiToolTest {
                 ToolResult.Failure(ToolFailureReason.NoResults)
             },
         )
-        val params = """{"query":"q","language":"en","focus":"f"}"""
+        val params = """{"query":"q"}"""
 
         repeat(2) { tool.execute(params) }
         val limited = JsonParser.parseString(tool.execute(params)).asJsonObject
@@ -70,5 +71,28 @@ class WebSearchOpenApiToolTest {
         tool.beginTurn()
         tool.execute(params)
         assertEquals(3, calls)
+    }
+
+    @Test
+    fun `advertises only one required query argument`() {
+        val description = JsonParser.parseString(WebSearchToolTurn.TOOL_DESCRIPTION).asJsonObject
+        val parameters = description.getAsJsonObject("parameters")
+
+        assertEquals(setOf("query"), parameters.getAsJsonObject("properties").keySet())
+        assertEquals(listOf("query"), parameters.getAsJsonArray("required").map { it.asString })
+        assertFalse(parameters.get("additionalProperties").asBoolean)
+    }
+
+    @Test
+    fun `falls back to English when local language is invalid`() {
+        val tool = WebSearchToolTurn(
+            KnowledgeTool {
+                assertEquals(ToolRequest("query", "en", "query"), it)
+                ToolResult.Failure(ToolFailureReason.NoResults)
+            },
+            languageProvider = { "" },
+        )
+
+        tool.execute("""{"query":"query"}""")
     }
 }

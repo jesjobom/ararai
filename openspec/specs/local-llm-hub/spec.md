@@ -3102,9 +3102,26 @@ to replace it without revealing credential contents.
 ### Requirement: Provider-Neutral Focused Web Search
 
 The application SHALL expose one stable structured `web_search` contract backed
-by enabled providers in deterministic Exa-then-Tavily order. The contract SHALL accept only
-a bounded query, language, and research focus and SHALL return a
-provider-neutral untrusted evidence envelope plus validated source metadata.
+by enabled providers in deterministic Exa-then-Tavily order. The model-facing
+contract SHALL accept exactly one required bounded `query`. The application
+SHALL derive provider-only language and research-focus metadata and SHALL return
+a provider-neutral untrusted evidence envelope plus validated source metadata.
+
+#### Scenario: Model requests current web evidence
+
+- **WHEN** a compatible model emits `web_search` with one valid `query` string
+- **THEN** the application derives bounded provider metadata and executes the
+  configured web-search provider through the existing validated boundary
+
+#### Scenario: Model emits additional arguments
+
+- **WHEN** a `web_search` invocation contains an argument other than `query`
+- **THEN** the application rejects the invocation before provider execution
+
+#### Scenario: Local language metadata is unavailable
+
+- **WHEN** the application cannot resolve a valid local ISO language code
+- **THEN** it uses the deterministic English fallback for evidence metadata
 
 #### Scenario: Register the enabled provider chain
 
@@ -4255,3 +4272,133 @@ until a model becomes available.
 - **WHEN** a configured chat model becomes locally available and valid
 - **THEN** composer availability follows the normal prompt and generation-state rules
 - **AND** no application restart is required.
+
+### Requirement: Consent-Based Recoverable Error Reporting
+
+The application SHALL let a user optionally submit a bounded diagnostic report
+after an unexpected recoverable application error.
+
+#### Scenario: Offer a report after recoverable failure
+
+- **GIVEN** an application-owned operation fails unexpectedly and the app restores
+  a usable state
+- **WHEN** the failure reaches the diagnostic error boundary
+- **THEN** the app shows a brief localized description
+- **AND** offers `Send report` and `Not now`
+- **AND** starts no transmission before explicit consent.
+
+#### Scenario: Runtime reports a terminal generation event
+
+- **GIVEN** the inference engine emits an unexpected terminal failure event
+- **WHEN** Chat receives the event
+- **THEN** Chat shows only a short localized generic failure message
+- **AND** does not expose the technical runtime message
+- **AND** forwards the typed failure and available cause to the diagnostic error
+  boundary.
+
+#### Scenario: Exclude expected and fatal conditions
+
+- **GIVEN** an operation is cancelled, validation fails normally, connectivity is
+  unavailable, permission is denied, or the process has a fatal uncaught error
+- **WHEN** that condition occurs
+- **THEN** the diagnostic report dialog is not required
+- **AND** ordinary product recovery or Android process handling remains in effect.
+
+### Requirement: Privacy-Bounded Diagnostic Envelope
+
+Diagnostic error reports SHALL contain only allowlisted bounded technical data.
+
+#### Scenario: Build an error report
+
+- **WHEN** an eligible error is prepared for user review
+- **THEN** it may include bounded error category, operation stage, sanitized
+  exception summary, app/runtime/model configuration, Android API level, locale,
+  context size, reasoning state, enabled tool names, and timestamp
+- **AND** excludes prompts, responses, history, reasoning text, raw tool protocol,
+  tool results, media, transcripts, paths, credentials, account information, and
+  stable device identifiers.
+
+### Requirement: One-Shot Diagnostic Delivery
+
+The application SHALL make at most one non-persistent delivery attempt for each
+user-approved diagnostic error report.
+
+#### Scenario: Send an approved report
+
+- **GIVEN** the user selects `Send report`
+- **WHEN** the app performs the authenticated and App-Check-protected Firestore
+  REST commit
+- **THEN** it makes one bounded request with a finite timeout
+- **AND** does not enqueue, persist, schedule, or resubmit the envelope
+- **AND** shows whether the attempt succeeded or failed.
+
+#### Scenario: Device is offline
+
+- **GIVEN** no network is available
+- **WHEN** the user approves submission
+- **THEN** the attempt fails visibly
+- **AND** the envelope is cleared from memory
+- **AND** reconnecting later does not transmit it.
+
+### Requirement: Private Firestore Diagnostic Storage
+
+Accepted diagnostic reports SHALL be validated and stored through owner-bound,
+create-only Firestore access.
+
+#### Scenario: Accept an authentic bounded report
+
+- **GIVEN** Firebase Authentication and App Check are valid
+- **AND** the payload matches the exact bounded schema
+- **WHEN** Firestore Security Rules accept it
+- **THEN** Firestore creates one immutable private document
+- **AND** uses a server-owned creation timestamp
+- **AND** validates the 90-day expiry timestamp.
+
+#### Scenario: Restrict mobile access
+
+- **WHEN** a mobile client attempts to create a diagnostic error report
+- **THEN** Security Rules allow only an authenticated owner-bound payload that
+  matches the exact bounded schema
+- **AND** deny reads, lists, updates, deletes, and overwrites.
+
+### Requirement: Text Chat shows local message creation time
+
+The text Chat SHALL show the persisted creation date and time beside the sender
+name for each message, formatted with the device's current locale and local time
+zone. The date and time SHALL use the unambiguous `yyyy-MM-dd HH:mm` format,
+independent of locale. The presentation SHALL be independent of whether the
+message originated in text Chat or Voice Chat.
+
+#### Scenario: Text-originated conversation is displayed
+
+- **WHEN** the user views a persisted text-chat message
+- **THEN** its header shows `You` or `ArarAI` together with its local creation
+  date and time in `yyyy-MM-dd HH:mm` format
+
+#### Scenario: Voice-originated conversation is displayed in text Chat
+
+- **WHEN** the user opens in text Chat a conversation containing messages
+  created through Voice Chat
+- **THEN** those messages show their persisted creation date and time using the
+  same header presentation
+
+### Requirement: Voice fallback session titles follow the configured app language
+
+When local transcription cannot provide the first-turn title, the application
+SHALL create the dated audio-message or Voice Chat fallback title using the
+configured application language and the device's local time zone. The selected
+language SHALL apply to both the descriptive text and the appended date and time.
+
+#### Scenario: Audio message without local transcription starts text Chat
+
+- **WHEN** an audio message without an available local transcription starts a
+  new text-Chat session
+- **THEN** the fallback session title is formatted in the configured application
+  language
+
+#### Scenario: Direct-audio turn starts Voice Chat
+
+- **WHEN** a direct-audio turn starts a new Voice Chat session without a local
+  transcript
+- **THEN** the fallback session title is formatted in the configured application
+  language

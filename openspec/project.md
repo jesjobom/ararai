@@ -3,8 +3,9 @@
 ## Purpose
 
 ArarAI is an Android hub for configured open LLMs. It manages local model
-artifacts and runs Chat inference on-device without requiring an application
-backend, remote database, or hosted inference API. The project favors small,
+artifacts and runs Chat inference on-device without requiring hosted inference.
+Optional user-initiated content and diagnostic reporting use a narrowly bounded
+Firebase backend but are not required for local Chat. The project favors small,
 validated increments and explicit runtime boundaries because mobile native
 inference remains device-, driver-, model-, and workload-dependent.
 
@@ -63,6 +64,10 @@ inference remains device-, driver-, model-, and workload-dependent.
   measurements.
 - Conversations, preferences, models, runtime caches, and Chat media are local.
   Android backup and device transfer are disabled for the application.
+- Unexpected recoverable Chat generation failures can offer a consent-based,
+  allowlisted diagnostic report. The app makes one authenticated and
+  App-Check-protected Firestore REST commit with no persistence or retry;
+  Firestore Rules validate and store accepted reports privately.
 - Settings exposes generated license and attribution metadata for the resolved
   Gradle graph plus reviewed disclosures for native and downloadable artifacts.
 

@@ -21,6 +21,7 @@ import {
 
 const PROJECT_ID = "ararai-report-test";
 const COLLECTION = "generated_content_reports";
+const DIAGNOSTIC_COLLECTION = "diagnostic_error_reports";
 const OWNER_UID = "owner-user";
 const OTHER_UID = "other-user";
 const REPORT_ID = "123e4567-e89b-12d3-a456-426614174000";
@@ -72,6 +73,42 @@ function validReport(overrides = {}) {
       localeTag: "pt-BR",
       modelId: "test-model",
       runtime: "test",
+    },
+    reportedAt: Timestamp.fromMillis(reportedAtMillis),
+    createdAt: serverTimestamp(),
+    expiresAt: Timestamp.fromMillis(reportedAtMillis + 90 * DAY_MILLIS),
+    ...overrides,
+  };
+}
+
+function diagnosticReportDocument(uid = OWNER_UID, reportId = REPORT_ID) {
+  return doc(
+    testEnvironment.authenticatedContext(uid).firestore(),
+    DIAGNOSTIC_COLLECTION,
+    `${uid}_${reportId}`,
+  );
+}
+
+function validDiagnosticReport(overrides = {}) {
+  const reportedAtMillis = Date.now() - 60_000;
+  return {
+    schemaVersion: 1,
+    reportId: REPORT_ID,
+    ownerUid: OWNER_UID,
+    category: "tool_call_parsing",
+    stage: "chat_generation",
+    exceptionType: "IllegalArgumentException",
+    exceptionSummary: "The local runtime could not parse a model tool call.",
+    stackSummary: ["com.jesjobom.ararai.chat.ChatViewModel.generate:123"],
+    metadata: {
+      appVersion: "1.0-test",
+      androidApiLevel: 36,
+      localeTag: "pt-BR",
+      modelId: "test-model",
+      runtime: "litert_lm",
+      contextTokens: 6144,
+      reasoningEnabled: true,
+      enabledToolNames: ["web_search"],
     },
     reportedAt: Timestamp.fromMillis(reportedAtMillis),
     createdAt: serverTimestamp(),
@@ -207,5 +244,61 @@ describe("generated content report access", () => {
     await assertFails(setDoc(reportDocument(), validReport({ comment: "replacement" })));
     const stored = await assertSucceeds(getDoc(reportDocument()));
     assert.equal(stored.data().comment, "Optional reviewed comment");
+  });
+});
+
+describe("diagnostic error report creation", () => {
+  test("accepts one authenticated, owner-bound, bounded report", async () => {
+    await assertSucceeds(setDoc(diagnosticReportDocument(), validDiagnosticReport()));
+  });
+
+  test("rejects unauthenticated, owner-mismatched, and malformed reports", async () => {
+    const unauthenticated = testEnvironment.unauthenticatedContext().firestore();
+    await assertFails(
+      setDoc(doc(unauthenticated, DIAGNOSTIC_COLLECTION, `${OWNER_UID}_${REPORT_ID}`), validDiagnosticReport()),
+    );
+    await assertFails(
+      setDoc(diagnosticReportDocument(), validDiagnosticReport({ ownerUid: OTHER_UID })),
+    );
+    await assertFails(
+      setDoc(diagnosticReportDocument(), validDiagnosticReport({ unexpected: true })),
+    );
+    await assertFails(
+      setDoc(diagnosticReportDocument(), validDiagnosticReport({ category: "unknown" })),
+    );
+  });
+
+  test("rejects oversized diagnostics and invalid timestamps", async () => {
+    await assertFails(
+      setDoc(diagnosticReportDocument(), validDiagnosticReport({ stackSummary: ["x".repeat(181)] })),
+    );
+    await assertFails(
+      setDoc(
+        diagnosticReportDocument(),
+        validDiagnosticReport({
+          metadata: { ...validDiagnosticReport().metadata, enabledToolNames: Array(9).fill("tool") },
+        }),
+      ),
+    );
+    await assertFails(
+      setDoc(diagnosticReportDocument(), validDiagnosticReport({ createdAt: Timestamp.now() })),
+    );
+    await assertFails(
+      setDoc(diagnosticReportDocument(), validDiagnosticReport({ expiresAt: Timestamp.now() })),
+    );
+  });
+});
+
+describe("diagnostic error report access", () => {
+  test("denies reads, lists, updates, deletes, and overwrites", async () => {
+    const target = diagnosticReportDocument();
+    await assertSucceeds(setDoc(target, validDiagnosticReport()));
+    await assertFails(getDoc(target));
+    await assertFails(
+      getDocs(collection(testEnvironment.authenticatedContext(OWNER_UID).firestore(), DIAGNOSTIC_COLLECTION)),
+    );
+    await assertFails(updateDoc(target, { stage: "changed" }));
+    await assertFails(deleteDoc(target));
+    await assertFails(setDoc(target, validDiagnosticReport({ stage: "replacement" })));
   });
 });

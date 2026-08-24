@@ -129,6 +129,8 @@ sealed interface GenerationEvent {
 
     data class Failed(
         val message: String,
+        val kind: GenerationFailureKind = GenerationFailureKind.Unexpected,
+        val cause: Throwable? = null,
     ) : GenerationEvent
 
     data class ToolStarted(
@@ -143,6 +145,12 @@ sealed interface GenerationEvent {
     ) : GenerationEvent
 
     data object Completed : GenerationEvent
+}
+
+enum class GenerationFailureKind {
+    Expected,
+    Unexpected,
+    ToolCallParsing,
 }
 
 data class GenerationMetrics(

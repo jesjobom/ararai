@@ -195,7 +195,8 @@ internal fun MessageRow(
         MaterialTheme.colorScheme.onSurface
     }
     val alignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
-    val label = if (isUser) stringResource(R.string.chat_you) else stringResource(R.string.app_name)
+    val sender = if (isUser) stringResource(R.string.chat_you) else stringResource(R.string.app_name)
+    val label = formatMessageHeader(sender, message.createdAtMillis)
     val selectionColors = if (isUser) {
         TextSelectionColors(
             handleColor = MaterialTheme.colorScheme.onPrimary,

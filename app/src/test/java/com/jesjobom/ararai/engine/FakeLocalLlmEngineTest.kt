@@ -13,7 +13,13 @@ class FakeLocalLlmEngineTest {
         val engine = FakeLocalLlmEngine(chunks = listOf("ignored"))
 
         engine.generate(PromptRequest("hello")).test {
-            assertEquals(GenerationEvent.Failed("Model is not loaded"), awaitItem())
+            assertEquals(
+                GenerationEvent.Failed(
+                    message = "Model is not loaded",
+                    kind = GenerationFailureKind.Expected,
+                ),
+                awaitItem(),
+            )
             awaitComplete()
         }
     }
@@ -45,7 +51,13 @@ class FakeLocalLlmEngineTest {
         engine.unload()
 
         engine.generate(PromptRequest("hello")).test {
-            assertEquals(GenerationEvent.Failed("Model is not loaded"), awaitItem())
+            assertEquals(
+                GenerationEvent.Failed(
+                    message = "Model is not loaded",
+                    kind = GenerationFailureKind.Expected,
+                ),
+                awaitItem(),
+            )
             awaitComplete()
         }
     }

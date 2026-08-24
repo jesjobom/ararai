@@ -79,10 +79,89 @@ service cloud.firestore {
         && data.expiresAt == data.reportedAt + duration.value(90, 'd');
     }
 
+    function validBoundedStringList(values, maxItems, maxLength) {
+      return values is list
+        && values.size() <= maxItems
+        && (values.size() < 1 || (values[0] is string && values[0].size() <= maxLength))
+        && (values.size() < 2 || (values[1] is string && values[1].size() <= maxLength))
+        && (values.size() < 3 || (values[2] is string && values[2].size() <= maxLength))
+        && (values.size() < 4 || (values[3] is string && values[3].size() <= maxLength))
+        && (values.size() < 5 || (values[4] is string && values[4].size() <= maxLength))
+        && (values.size() < 6 || (values[5] is string && values[5].size() <= maxLength))
+        && (values.size() < 7 || (values[6] is string && values[6].size() <= maxLength))
+        && (values.size() < 8 || (values[7] is string && values[7].size() <= maxLength))
+        && (values.size() < 9 || (values[8] is string && values[8].size() <= maxLength))
+        && (values.size() < 10 || (values[9] is string && values[9].size() <= maxLength))
+        && (values.size() < 11 || (values[10] is string && values[10].size() <= maxLength))
+        && (values.size() < 12 || (values[11] is string && values[11].size() <= maxLength));
+    }
+
+    function validDiagnosticMetadata(metadata) {
+      return metadata is map
+        && metadata.keys().hasOnly([
+          'appVersion', 'androidApiLevel', 'localeTag', 'modelId', 'runtime',
+          'contextTokens', 'reasoningEnabled', 'enabledToolNames'
+        ])
+        && metadata.appVersion is string
+        && metadata.appVersion.size() <= 120
+        && metadata.androidApiLevel is int
+        && metadata.androidApiLevel > 0
+        && metadata.localeTag is string
+        && metadata.localeTag.size() <= 120
+        && (metadata.modelId == null || (metadata.modelId is string && metadata.modelId.size() <= 120))
+        && (metadata.runtime == null || (metadata.runtime is string && metadata.runtime.size() <= 120))
+        && (metadata.contextTokens == null || (
+          metadata.contextTokens is int
+          && metadata.contextTokens > 0
+          && metadata.contextTokens <= 1000000
+        ))
+        && metadata.reasoningEnabled is bool
+        && validBoundedStringList(metadata.enabledToolNames, 8, 48);
+    }
+
+    function validDiagnosticReport(reportId) {
+      let data = request.resource.data;
+      return authenticated()
+        && data.keys().hasOnly([
+          'schemaVersion', 'reportId', 'ownerUid', 'category', 'stage',
+          'exceptionType', 'exceptionSummary', 'stackSummary', 'metadata',
+          'reportedAt', 'createdAt', 'expiresAt'
+        ])
+        && data.schemaVersion == 1
+        && data.reportId is string
+        && data.reportId.matches(
+          '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        )
+        && reportId == request.auth.uid + '_' + data.reportId
+        && data.ownerUid == request.auth.uid
+        && data.category in ['tool_call_parsing', 'unexpected_generation']
+        && data.stage is string
+        && data.stage.size() > 0
+        && data.stage.size() <= 48
+        && data.exceptionType is string
+        && data.exceptionType.size() > 0
+        && data.exceptionType.size() <= 80
+        && data.exceptionSummary is string
+        && data.exceptionSummary.size() > 0
+        && data.exceptionSummary.size() <= 120
+        && validBoundedStringList(data.stackSummary, 12, 180)
+        && validDiagnosticMetadata(data.metadata)
+        && data.reportedAt is timestamp
+        && data.reportedAt <= request.time
+        && data.reportedAt >= request.time - duration.value(7, 'd')
+        && data.createdAt == request.time
+        && data.expiresAt == data.reportedAt + duration.value(90, 'd');
+    }
+
     match /generated_content_reports/{reportId} {
       allow create: if validReport(reportId);
       allow get: if authenticated() && resource.data.ownerUid == request.auth.uid;
       allow list, update, delete: if false;
+    }
+
+    match /diagnostic_error_reports/{reportId} {
+      allow create: if validDiagnosticReport(reportId);
+      allow read, update, delete: if false;
     }
 
     match /{document=**} {

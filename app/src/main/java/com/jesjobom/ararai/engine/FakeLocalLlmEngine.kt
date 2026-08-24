@@ -25,7 +25,12 @@ class FakeLocalLlmEngine(
 
     override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
         if (loadedModel == null) {
-            emit(GenerationEvent.Failed("Model is not loaded"))
+            emit(
+                GenerationEvent.Failed(
+                    message = "Model is not loaded",
+                    kind = GenerationFailureKind.Expected,
+                ),
+            )
             return@flow
         }
 

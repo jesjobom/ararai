@@ -136,6 +136,7 @@ class MainActivity : ComponentActivity() {
                         pendingReportQueue = pendingReportQueue,
                         reportDeliveryReceiptStore = reportDeliveryReceiptStore,
                         reportDeliveryScheduler = app.reportDeliveryScheduler,
+                        diagnosticErrorReportCoordinator = app.diagnosticErrorReportCoordinator,
                         instructionPreferences = instructionPreferences,
                         generationPreferences = generationPreferences,
                         modelDownloadPromptPreferenceStore = modelDownloadPromptPreferenceStore,

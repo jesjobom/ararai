@@ -332,7 +332,11 @@ internal fun parseInlineMath(text: String): List<MathInlineSegment> {
         }
         val latex = text.substring(cursor + openingLength, close)
         if (latex.isBlank() || (dollar && !isDollarMath(latex))) {
-            cursor += openingLength
+            // Once a dollar-delimited candidate has a closing delimiter, keep
+            // that delimiter paired with its opening even when the contents are
+            // not valid math. Otherwise the rejected closing `$` can be reused
+            // as a new opening and consume unrelated text later in the answer.
+            cursor = if (dollar) close + closing.length else cursor + openingLength
             continue
         }
         if (cursor > textStart) result += MathInlineSegment.Text(text.substring(textStart, cursor))
@@ -368,10 +372,26 @@ private fun isEscaped(text: String, index: Int): Boolean {
 
 private fun isDollarMath(latex: String): Boolean {
     val trimmed = latex.trim()
+    if (!hasBalancedMathGroups(trimmed)) return false
     if (trimmed.firstOrNull()?.isDigit() != true) return true
+    if (Regex("\\\\[A-Za-z]+").containsMatchIn(trimmed)) return true
     val withoutCommands = trimmed.replace(Regex("\\\\[A-Za-z]+"), "")
     if (withoutCommands.any(Char::isLetter) || ';' in withoutCommands) return false
     return trimmed.any { it in "\\^_=+*/{}()-" }
+}
+
+private fun hasBalancedMathGroups(latex: String): Boolean {
+    val expectedClosings = ArrayDeque<Char>()
+    latex.forEachIndexed { index, character ->
+        if (isEscaped(latex, index)) return@forEachIndexed
+        when (character) {
+            '{' -> expectedClosings.addLast('}')
+            '(' -> expectedClosings.addLast(')')
+            '[' -> expectedClosings.addLast(']')
+            '}', ')', ']' -> if (expectedClosings.removeLastOrNull() != character) return false
+        }
+    }
+    return expectedClosings.isEmpty()
 }
 
 @Composable

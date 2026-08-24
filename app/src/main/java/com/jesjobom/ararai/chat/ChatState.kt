@@ -67,11 +67,18 @@ data class ChatMessage(
     val role: ChatRole,
     val content: MessageContent,
     val id: String = "",
+    val createdAtMillis: Long = 0L,
 ) {
-    constructor(role: ChatRole, text: String, id: String = "") : this(
+    constructor(
+        role: ChatRole,
+        text: String,
+        id: String = "",
+        createdAtMillis: Long = 0L,
+    ) : this(
         role = role,
         content = MessageContent.TextPrompt(text = text),
         id = id,
+        createdAtMillis = createdAtMillis,
     )
 
     val text: String

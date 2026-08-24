@@ -177,10 +177,7 @@ class LiteRtLmLocalLlmEngineTest {
                     advertisedToolNames = setOf("calendar_lookup"),
                 ),
             ).test {
-                assertEquals(
-                    GenerationEvent.Failed("Selected model does not support the requested tools"),
-                    awaitItem(),
-                )
+                assertExpectedFailure("Selected model does not support the requested tools", awaitItem())
                 awaitComplete()
             }
         assertEquals(null, bridge.session.lastRequest)
@@ -390,7 +387,10 @@ class LiteRtLmLocalLlmEngineTest {
         engine.load(model, config)
 
         engine.generate(PromptRequest("oi")).test {
-            assertEquals(GenerationEvent.Failed("boom"), awaitItem())
+            val failure = awaitItem() as GenerationEvent.Failed
+            assertEquals("boom", failure.message)
+            assertEquals(GenerationFailureKind.Unexpected, failure.kind)
+            assertEquals("boom", failure.cause?.message)
             awaitComplete()
         }
     }
@@ -609,7 +609,7 @@ class LiteRtLmLocalLlmEngineTest {
                     ),
                 ),
             ).test {
-                assertEquals(GenerationEvent.Failed("Selected model does not support audio input"), awaitItem())
+                assertExpectedFailure("Selected model does not support audio input", awaitItem())
                 awaitComplete()
             }
 
@@ -716,6 +716,10 @@ class LiteRtLmLocalLlmEngineTest {
     private class RecordingResource {
         var cancelCalls: Int = 0
         var closeCalls: Int = 0
+    }
+
+    private fun assertExpectedFailure(message: String, event: GenerationEvent) {
+        assertEquals(GenerationEvent.Failed(message, GenerationFailureKind.Expected), event)
     }
 
     private class RecordingBridge(

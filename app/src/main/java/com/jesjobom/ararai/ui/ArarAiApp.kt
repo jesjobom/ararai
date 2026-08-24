@@ -125,6 +125,8 @@ import com.jesjobom.ararai.model.requireInference
 import com.jesjobom.ararai.model.resolve
 import com.jesjobom.ararai.model.supportsPurpose
 import com.jesjobom.ararai.model.supportsTask
+import com.jesjobom.ararai.reporting.DiagnosticErrorReportCoordinator
+import com.jesjobom.ararai.reporting.DiagnosticErrorReportState
 import com.jesjobom.ararai.reporting.GeneratedContentReportingController
 import com.jesjobom.ararai.reporting.PendingReportQueue
 import com.jesjobom.ararai.reporting.ReportDeliveryReceiptStore
@@ -173,6 +175,7 @@ internal fun ArarAiApp(
     pendingReportQueue: PendingReportQueue,
     reportDeliveryReceiptStore: ReportDeliveryReceiptStore,
     reportDeliveryScheduler: ReportDeliveryScheduler = ReportDeliveryScheduler { },
+    diagnosticErrorReportCoordinator: DiagnosticErrorReportCoordinator? = null,
     instructionPreferences: InstructionPreferences = InMemoryInstructionPreferences(),
     generationPreferences: GenerationPreferences = InMemoryGenerationPreferences(),
     modelDownloadPromptPreferenceStore: ModelDownloadPromptPreferenceStore =
@@ -219,7 +222,8 @@ internal fun ArarAiApp(
         )
     },
 ) {
-    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val resourceContext = androidx.compose.ui.platform.LocalContext.current
+    val appContext = resourceContext.applicationContext
     val modelCatalogState by modelController.state.collectAsState()
     val instructionSettings by instructionPreferences.settings.collectAsState()
     val generationSettings by generationPreferences.state.collectAsState()
@@ -269,6 +273,7 @@ internal fun ArarAiApp(
     val controllers =
         rememberArarAiAppControllers(
             appContext = appContext,
+            resourceContext = resourceContext,
             modelController = modelController,
             startupState = startupState,
             chatSessionStore = chatSessionStore,
@@ -284,10 +289,25 @@ internal fun ArarAiApp(
             localLlmEngineFactory = localLlmEngineFactory,
             chatTextToSpeechServiceFactory = chatTextToSpeechServiceFactory,
             chatLanguageIdentifierFactory = chatLanguageIdentifierFactory,
+            diagnosticErrorReportCoordinator = diagnosticErrorReportCoordinator,
         )
     val chatViewModel = controllers.chat
     val benchmarkViewModel = controllers.benchmark
     val voiceChatViewModel = controllers.voiceChat
+    val diagnosticErrorState by diagnosticErrorReportCoordinator
+        ?.state
+        ?.collectAsState()
+        ?: remember { mutableStateOf(null) }
+
+    diagnosticErrorState?.let { reportState ->
+        DiagnosticErrorReportDialog(
+            state = reportState,
+            onDismiss = { diagnosticErrorReportCoordinator?.dismiss() },
+            onSend = {
+                coroutineScope.launch { diagnosticErrorReportCoordinator?.submit() }
+            },
+        )
+    }
     fun returnHome() {
         when (destination) {
             AppDestination.Chat -> chatViewModel.onLeavingChat()

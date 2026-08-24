@@ -3,6 +3,7 @@ package com.jesjobom.ararai.chat
 import app.cash.turbine.test
 import com.jesjobom.ararai.engine.FakeLocalLlmEngine
 import com.jesjobom.ararai.engine.GenerationEvent
+import com.jesjobom.ararai.engine.GenerationFailureKind
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptChatMessage
 import com.jesjobom.ararai.engine.PromptChatRole
@@ -190,7 +191,8 @@ class ChatViewModelTest {
 
         val failed = viewModel.uiState.value
         assertFalse(failed.isGenerating)
-        assertEquals("generation failed", failed.error)
+        assertEquals(null, failed.error)
+        assertEquals(UserMessageKey.GenerationFailed, failed.errorKey)
         assertEquals(2, failed.messages.size)
         assertEquals("oi", failed.messages.first().text)
         assertEquals("oi", failed.prompt)
@@ -227,6 +229,63 @@ class ChatViewModelTest {
             assertEquals("oi", failed.messages.first().text)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `offers unexpected generation throwable with bounded runtime context`() = runTest {
+        val engine = LoadFailingEngine("Failed to parse tool calls from code block: private output")
+        var captured: Pair<Throwable, com.jesjobom.ararai.reporting.DiagnosticOperationContext>? = null
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model,
+                inferenceConfig = inferenceConfig.copy(contextTokens = 6144),
+                conversationTurnSettingsProvider = {
+                    ConversationTurnSettings("system", setOf(WEB_SEARCH_TOOL_NAME))
+                },
+                unexpectedErrorConsumer = { error, context -> captured = error to context },
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("private question")
+        viewModel.submitPrompt()
+        engine.loadStarted.await()
+        engine.failLoad()
+        runCurrent()
+
+        assertEquals("Failed to parse tool calls from code block: private output", captured?.first?.message)
+        assertEquals("chat_generation", captured?.second?.stage)
+        assertEquals("test-model", captured?.second?.modelId)
+        assertEquals(6144, captured?.second?.contextTokens)
+        assertEquals(setOf(WEB_SEARCH_TOOL_NAME), captured?.second?.enabledToolNames)
+    }
+
+    @Test
+    fun `offers failed generation event and hides its technical message from chat`() = runTest {
+        val technicalMessage = "Failed to parse tool calls from code block: private output"
+        var captured: Pair<GenerationEvent.Failed, com.jesjobom.ararai.reporting.DiagnosticOperationContext>? = null
+        val viewModel =
+            ChatViewModel(
+                engine = FailingEngine(technicalMessage, GenerationFailureKind.ToolCallParsing),
+                initialModel = model,
+                inferenceConfig = inferenceConfig.copy(contextTokens = 6144),
+                conversationTurnSettingsProvider = {
+                    ConversationTurnSettings("system", setOf(WEB_SEARCH_TOOL_NAME))
+                },
+                generationFailureConsumer = { failure, context -> captured = failure to context },
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("private question")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        assertEquals(technicalMessage, captured?.first?.message)
+        assertEquals("chat_generation", captured?.second?.stage)
+        assertEquals(6144, captured?.second?.contextTokens)
+        assertEquals(setOf(WEB_SEARCH_TOOL_NAME), captured?.second?.enabledToolNames)
+        assertEquals(null, viewModel.uiState.value.error)
+        assertEquals(UserMessageKey.GenerationFailed, viewModel.uiState.value.errorKey)
     }
 
     @Test
@@ -1250,7 +1309,8 @@ class ChatViewModelTest {
                 .text,
         )
         assertEquals(1, store.updateCalls)
-        assertEquals("failed", viewModel.uiState.value.error)
+        assertEquals(null, viewModel.uiState.value.error)
+        assertEquals(UserMessageKey.GenerationFailed, viewModel.uiState.value.errorKey)
         assertEquals(null, viewModel.uiState.value.completedAssistantMessageId)
     }
 
@@ -1394,13 +1454,16 @@ class ChatViewModelTest {
 
     private class FailingEngine(
         private val message: String,
+        private val kind: GenerationFailureKind = GenerationFailureKind.Unexpected,
     ) : LocalLlmEngine {
         override suspend fun load(
             model: LocalModel,
             config: InferenceConfig,
         ) = Unit
 
-        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(GenerationEvent.Failed(message))
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flowOf(
+            GenerationEvent.Failed(message = message, kind = kind),
+        )
 
         override suspend fun unload() = Unit
     }

@@ -9,8 +9,10 @@ import com.jesjobom.ararai.model.ModelCatalogController
 import com.jesjobom.ararai.model.ModelConfigLoader
 import com.jesjobom.ararai.model.ModelFileDownloader
 import com.jesjobom.ararai.model.SharedPreferencesModelSelectionStore
+import com.jesjobom.ararai.reporting.DiagnosticErrorReportCoordinator
 import com.jesjobom.ararai.reporting.FirebaseAppCheckInstaller
 import com.jesjobom.ararai.reporting.FirestoreGeneratedContentReportTransport
+import com.jesjobom.ararai.reporting.FirestoreRestDiagnosticErrorReportTransport
 import com.jesjobom.ararai.reporting.GeneratedContentReportDelivery
 import com.jesjobom.ararai.reporting.ReportDeliveryProvider
 import com.jesjobom.ararai.reporting.SharedPreferencesReportDeliveryReceiptStore
@@ -40,6 +42,10 @@ class ArarAiApplication :
             transport = FirestoreGeneratedContentReportTransport(),
             receiptStore = reportDeliveryReceiptStore,
         )
+    }
+
+    val diagnosticErrorReportCoordinator by lazy {
+        DiagnosticErrorReportCoordinator(FirestoreRestDiagnosticErrorReportTransport())
     }
 
     val modelCatalog by lazy { ModelConfigLoader(this, R.raw.fixed_model).loadCatalog() }

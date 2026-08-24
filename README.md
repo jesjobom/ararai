@@ -187,6 +187,15 @@ unselected history are excluded. Operational controls are documented in
 Google Play declaration is maintained in
 [`docs/google-play-data-safety.md`](docs/google-play-data-safety.md).
 
+After an unexpected recoverable model/runtime failure, ArarAI may also offer a
+separate optional diagnostic report. The report contains bounded technical
+classification and runtime configuration only; prompts, responses, history,
+reasoning text, raw tool protocol, media, transcripts, paths, credentials, and
+stable device identifiers are excluded. It is sent once to Firestore through an
+authenticated and App-Check-protected REST commit and is never queued or retried
+by the application. Configuration and validation are documented in
+[`docs/diagnostic-error-reporting.md`](docs/diagnostic-error-reporting.md).
+
 When GitHub Pages is enabled from the `main` branch `/docs` folder, the public
 policy is available at <https://jesjobom.github.io/ararai/privacy/>.
 

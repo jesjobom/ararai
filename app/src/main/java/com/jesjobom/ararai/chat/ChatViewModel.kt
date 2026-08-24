@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.chat
 
 import com.jesjobom.ararai.engine.GenerationEvent
+import com.jesjobom.ararai.engine.GenerationFailureKind
 import com.jesjobom.ararai.engine.GenerationMetrics
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptRequest
@@ -8,6 +9,7 @@ import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelCatalog
 import com.jesjobom.ararai.model.ModelStartupState
+import com.jesjobom.ararai.reporting.DiagnosticOperationContext
 import com.jesjobom.ararai.ui.UserMessageKey
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -35,6 +37,8 @@ class ChatViewModel(
     },
     private val generationConfigProvider: (LocalModel, InferenceConfig) -> InferenceConfig = { _, config -> config },
     private val generationMetricsConsumer: (LocalModel, GenerationMetrics) -> Unit = { _, _ -> },
+    private val unexpectedErrorConsumer: (Throwable, DiagnosticOperationContext) -> Unit = { _, _ -> },
+    private val generationFailureConsumer: (GenerationEvent.Failed, DiagnosticOperationContext) -> Unit = { _, _ -> },
     private val sessionStore: ChatSessionStore = InMemoryChatSessionStore(),
     private val mediaRepository: ChatMediaRepository = NoOpChatMediaRepository,
     promptContextBuilder: PromptContextBuilder = PromptContextBuilder(),
@@ -587,8 +591,10 @@ class ChatViewModel(
                     return@launch
                 }
 
+                var diagnosticToolNames = emptySet<String>()
                 try {
                     val turnSettings = conversationTurnSettingsProvider(modelForRequest)
+                    diagnosticToolNames = turnSettings.advertisedToolNames
                     val effectiveContent =
                         if (submittedContent is MessageContent.AudioPromptContent) {
                             if (modelForRequest.inputCapabilities.audio) {
@@ -659,17 +665,29 @@ class ChatViewModel(
                                     }
                                 }
                                 is GenerationEvent.Failed -> {
+                                    generationFailureConsumer(
+                                        event,
+                                        DiagnosticOperationContext(
+                                            stage = "chat_generation",
+                                            modelId = modelForRequest.id,
+                                            runtime = modelForRequest.runtime.configValue,
+                                            contextTokens = inferenceForRequest.contextTokens,
+                                            reasoningEnabled = current.reasoningEnabled,
+                                            enabledToolNames = diagnosticToolNames,
+                                        ),
+                                    )
                                     pendingResearchSources = emptyList()
                                     flushAssistantPresentation()
                                     flushAssistantMessage()
+                                    val expectedFailure = event.kind == GenerationFailureKind.Expected
                                     _uiState.update {
                                         it.copy(
                                             isLoadingModel = false,
                                             isGenerating = false,
                                             toolInProgress = false,
                                             activeToolName = null,
-                                            error = event.message,
-                                            errorKey = null,
+                                            error = event.message.takeIf { expectedFailure },
+                                            errorKey = UserMessageKey.GenerationFailed.takeUnless { expectedFailure },
                                         )
                                     }
                                 }
@@ -696,6 +714,17 @@ class ChatViewModel(
                         }
                 } catch (error: Throwable) {
                     if (error is kotlinx.coroutines.CancellationException) return@launch
+                    unexpectedErrorConsumer(
+                        error,
+                        DiagnosticOperationContext(
+                            stage = "chat_generation",
+                            modelId = modelForRequest.id,
+                            runtime = modelForRequest.runtime.configValue,
+                            contextTokens = inferenceForRequest.contextTokens,
+                            reasoningEnabled = current.reasoningEnabled,
+                            enabledToolNames = diagnosticToolNames,
+                        ),
+                    )
                     flushAssistantPresentation()
                     flushAssistantMessage()
                     _uiState.update {
@@ -1067,7 +1096,12 @@ class ChatViewModel(
         return checkNotNull(messageWindowSizes[sessionId])
     }
 
-    private fun StoredChatMessage.toChatMessage(): ChatMessage = ChatMessage(role = role, content = content, id = id)
+    private fun StoredChatMessage.toChatMessage(): ChatMessage = ChatMessage(
+        role = role,
+        content = content,
+        id = id,
+        createdAtMillis = createdAtMillis,
+    )
 
     private class AssistantMessageBuffer(
         val messageId: String,

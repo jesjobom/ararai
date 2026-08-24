@@ -62,10 +62,39 @@ meet application-store safety obligations; to investigate abuse; and to protect
 the service. Submission is user-initiated and optional. The local Chat remains
 usable when reporting is unavailable.
 
+## Optional diagnostic error reports
+
+When an unexpected recoverable model or runtime operation fails, ArarAI may show
+an in-app dialog offering to send a technical diagnostic report. Nothing is sent
+unless the user selects **Send report**. Choosing **Not now** discards the report.
+
+A diagnostic report contains a random report identifier, bounded error category
+and operation stage, sanitized exception type and application/runtime stack
+summary, application version, Android API level, locale, selected model and
+runtime identifiers, configured context size, reasoning enabled/disabled state,
+enabled tool names, and report time.
+
+Diagnostic reports do **not** contain prompts, generated responses, conversation
+history, reasoning text, raw tool calls or results, images, audio, transcripts,
+file names or paths, provider credentials, account email, advertising ID,
+Android ID, hardware serial, or other stable device identifiers. The service may
+transiently process Firebase anonymous authentication, App Check attestation, IP
+address, and connection metadata to authenticate, protect, and operate the
+request. A pseudonymous Firebase owner identifier derived from the authenticated
+session is attached by the diagnostic transport and is not part of the captured
+error envelope.
+
+The application makes one HTTPS submission attempt with a finite timeout. It
+does not store, queue, schedule, or retry an unsuccessful diagnostic report.
+Accepted diagnostic reports are stored privately in the United States for no
+more than 90 days and are used only to diagnose and improve application
+reliability.
+
 ## Service providers and international transfer
 
 The official distribution uses Google Firebase as a service provider for
-anonymous authentication, application attestation, and report storage. Accepted
+anonymous authentication, application attestation, HTTPS diagnostic ingestion,
+and report storage. Accepted
 reports are stored in the Firebase project `ararai-report`, in the default
 Cloud Firestore `nam5` United States multi-region. Submitted report content and
 associated allowlisted metadata are therefore transferred to and hosted in the

@@ -147,7 +147,7 @@ class LiteRtLmLocalLlmEngine(
             }
 
         if (initialState == null) {
-            trySend(GenerationEvent.Failed("Model is not loaded"))
+            trySend(expectedGenerationFailure("Model is not loaded"))
             close()
             return@callbackFlow
         }
@@ -156,11 +156,11 @@ class LiteRtLmLocalLlmEngine(
             launch(dispatcher) {
                 try {
                     request.validateAgainst(initialState.capabilities)?.let { failure ->
-                        trySend(GenerationEvent.Failed(failure))
+                        trySend(expectedGenerationFailure(failure))
                         return@launch
                     }
                     if (!initialState.toolNames.containsAll(request.normalizedAdvertisedToolNames())) {
-                        trySend(GenerationEvent.Failed("Selected model does not support the requested tools"))
+                        trySend(expectedGenerationFailure("Selected model does not support the requested tools"))
                         return@launch
                     }
                     val session = transitionMutex.withLock {
@@ -172,7 +172,7 @@ class LiteRtLmLocalLlmEngine(
                     generationFinished.set(true)
                     trySend(GenerationEvent.Completed)
                 } catch (error: Throwable) {
-                    trySend(GenerationEvent.Failed(error.message ?: "LiteRT-LM generation failed"))
+                    trySend(error.toGenerationFailure())
                 } finally {
                     generationFinished.set(true)
                     close()
@@ -306,6 +306,26 @@ class LiteRtLmLocalLlmEngine(
         }
     }
 }
+
+private fun expectedGenerationFailure(message: String) = GenerationEvent.Failed(
+    message = message,
+    kind = GenerationFailureKind.Expected,
+)
+
+internal fun Throwable.toGenerationFailure(): GenerationEvent.Failed {
+    val failureMessage = message ?: "LiteRT-LM generation failed"
+    return GenerationEvent.Failed(
+        message = failureMessage,
+        kind = if (failureMessage.contains(TOOL_CALL_PARSE_MARKER)) {
+            GenerationFailureKind.ToolCallParsing
+        } else {
+            GenerationFailureKind.Unexpected
+        },
+        cause = this,
+    )
+}
+
+private const val TOOL_CALL_PARSE_MARKER = "Failed to parse tool calls"
 
 @Suppress("LongParameterList")
 interface LiteRtLmBridge {

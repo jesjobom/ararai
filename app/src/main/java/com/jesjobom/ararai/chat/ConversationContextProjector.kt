@@ -19,7 +19,14 @@ class ConversationContextProjector(
                 .filter { message ->
                     val audio = message.content as? MessageContent.AudioPromptContent
                     audio == null || audio.transcriptionStatus == AudioTranscriptionStatus.Completed
-                }.map { ChatMessage(role = it.role, content = it.content, id = it.id) }
+                }.map {
+                    ChatMessage(
+                        role = it.role,
+                        content = it.content,
+                        id = it.id,
+                        createdAtMillis = it.createdAtMillis,
+                    )
+                }
         val userPrompt =
             when (current) {
                 is MessageContent.TextPrompt ->

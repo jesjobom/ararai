@@ -314,6 +314,14 @@
     <string name="model_acceleration_cpu_only">Somente CPU</string>
     <string name="error_model_unavailable">Modelo indisponível</string>
     <string name="error_generation_failed">Falha na geração</string>
+    <string name="diagnostic_error_title">Erro inesperado</string>
+    <string name="diagnostic_error_tool_call">O modelo local criou uma solicitação de ferramenta que não pôde ser processada.</string>
+    <string name="diagnostic_error_generation">A operação do modelo local terminou inesperadamente.</string>
+    <string name="diagnostic_error_privacy_description">Você pode enviar um relatório técnico para ajudar a diagnosticar este problema. Ele não inclui suas perguntas, respostas, histórico da conversa, mídias, credenciais nem identificadores do dispositivo.</string>
+    <string name="diagnostic_error_send">Enviar relatório</string>
+    <string name="diagnostic_error_not_now">Agora não</string>
+    <string name="diagnostic_error_sent">Relatório enviado. Obrigado.</string>
+    <string name="diagnostic_error_send_failed">Não foi possível enviar o relatório e não haverá nova tentativa.</string>
     <string name="error_model_loading_failed">Falha ao carregar o modelo</string>
     <string name="error_tts_unavailable">A conversão de texto em fala não está mais disponível</string>
     <string name="error_tts_initialization_failed">Não foi possível inicializar a conversão de texto em fala</string>

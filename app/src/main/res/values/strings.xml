@@ -314,6 +314,14 @@
     <string name="model_acceleration_cpu_only">CPU only</string>
     <string name="error_model_unavailable">Model unavailable</string>
     <string name="error_generation_failed">Generation failed</string>
+    <string name="diagnostic_error_title">Unexpected error</string>
+    <string name="diagnostic_error_tool_call">The local model created a tool request that could not be processed.</string>
+    <string name="diagnostic_error_generation">The local model operation ended unexpectedly.</string>
+    <string name="diagnostic_error_privacy_description">You can send a technical report to help diagnose this problem. It excludes your questions, responses, conversation history, media, credentials, and device identifiers.</string>
+    <string name="diagnostic_error_send">Send report</string>
+    <string name="diagnostic_error_not_now">Not now</string>
+    <string name="diagnostic_error_sent">Report sent. Thank you.</string>
+    <string name="diagnostic_error_send_failed">The report could not be sent and will not be retried.</string>
     <string name="error_model_loading_failed">Model loading failed</string>
     <string name="error_tts_unavailable">Text-to-speech is no longer available</string>
     <string name="error_tts_initialization_failed">Unable to initialize text-to-speech</string>

@@ -5,15 +5,17 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class WebSearchOpenApiTool(
     knowledgeTool: KnowledgeTool,
+    languageProvider: () -> String = { Locale.getDefault().language },
 ) : OpenApiTool {
     val displayName: String = knowledgeTool.displayName
 
-    private val turn = WebSearchToolTurn(knowledgeTool)
+    private val turn = WebSearchToolTurn(knowledgeTool, languageProvider)
 
     override fun getToolDescriptionJsonString(): String = WebSearchToolTurn.TOOL_DESCRIPTION
 
@@ -26,6 +28,7 @@ class WebSearchOpenApiTool(
 
 internal class WebSearchToolTurn(
     private val knowledgeTool: KnowledgeTool,
+    private val languageProvider: () -> String = { Locale.getDefault().language },
 ) {
     private val invocationCount = AtomicInteger(0)
     private val capturedSources = AtomicReference<List<KnowledgeSource>>(emptyList())
@@ -98,12 +101,19 @@ internal class WebSearchToolTurn(
                 ?.asJsonObject
                 ?: return null
         if (root.keySet() != EXPECTED_ARGUMENTS) return null
+        val query = root.strictString("query") ?: return null
         return ToolRequest(
-            query = root.strictString("query") ?: return null,
-            language = root.strictString("language") ?: return null,
-            focus = root.strictString("focus") ?: return null,
+            query = query,
+            language = resolvedLanguage(),
+            focus = query,
         ).takeIf(::validWebSearchRequest)
     }
+
+    private fun resolvedLanguage(): String = languageProvider()
+        .trim()
+        .lowercase(Locale.ROOT)
+        .takeIf(LANGUAGE_PATTERN::matches)
+        ?: DEFAULT_LANGUAGE
 
     private fun JsonObject.strictString(name: String): String? {
         val value = get(name) ?: return null
@@ -145,14 +155,15 @@ internal class WebSearchToolTurn(
 
     companion object {
         const val MAX_CALLS_PER_TURN = 2
-        val EXPECTED_ARGUMENTS = setOf("query", "language", "focus")
+        val EXPECTED_ARGUMENTS = setOf("query")
         const val TOOL_DESCRIPTION =
             """{"name":"web_search","description":"Search the current web for focused evidence """ +
                 """when encyclopedic knowledge is insufficient. Use at most two calls, then answer from """ +
                 """the best available evidence.","parameters":{"type":"object","additionalProperties":false,""" +
-                """"properties":{"query":{"type":"string","description":"Short web search query."},""" +
-                """"language":{"type":"string","pattern":"^[a-z]{2,3}$","description":"Lowercase ISO """ +
-                """language code."},"focus":{"type":"string","description":"Specific question or evidence """ +
-                """the search must resolve."}},"required":["query","language","focus"]}}"""
+                """"properties":{"query":{"type":"string","description":"The specific question or """ +
+                """evidence to search for."}},"required":["query"]}}"""
+
+        private const val DEFAULT_LANGUAGE = "en"
+        private val LANGUAGE_PATTERN = Regex("[a-z]{2,3}")
     }
 }
