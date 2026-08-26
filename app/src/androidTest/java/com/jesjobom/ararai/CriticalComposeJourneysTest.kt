@@ -815,10 +815,15 @@ class CriticalComposeJourneysTest {
         }
 
         composeRule.onNodeWithContentDescription("Voice Chat settings").performClick()
+        composeRule.onNodeWithTag("voice-reasoning-switch").assertIsDisplayed()
+        composeRule.onNodeWithTag("voice-speech-rate-slider").assertIsDisplayed()
+        composeRule.onNodeWithText("Pause before answer", substring = true).assertDoesNotExist()
         composeRule.onNodeWithTag("voice-reasoning-switch").performClick()
         composeRule.onNodeWithTag("voice-speech-rate-slider")
             .performSemanticsAction(SemanticsActions.SetProgress) { setProgress -> setProgress(2.0f) }
-        composeRule.onNodeWithText("Silero").performClick()
+        composeRule.onNodeWithTag("voice-advanced-toggle").performClick()
+        composeRule.onNodeWithText("Pause before answer", substring = true).assertExists()
+        composeRule.onNodeWithText("Silero").performScrollTo().performClick()
         composeRule.onNodeWithText("WebRTC").performClick()
 
         composeRule.runOnIdle {
@@ -831,9 +836,15 @@ class CriticalComposeJourneysTest {
         composeRule.runOnIdle {
             assertEquals(com.jesjobom.ararai.voice.VoiceChatSettings(), savedSettings)
         }
+        composeRule.onNodeWithText("Pause before answer", substring = true).assertExists()
+        composeRule.onNodeWithTag("voice-advanced-toggle").performScrollTo().performClick()
+        composeRule.onNodeWithText("Pause before answer", substring = true).assertDoesNotExist()
         composeRule.onNodeWithText("Voice Chat settings").assertIsDisplayed()
         composeRule.onNodeWithText("Close").performClick()
         composeRule.onNodeWithText("Voice Chat settings").assertDoesNotExist()
+
+        composeRule.onNodeWithContentDescription("Voice Chat settings").performClick()
+        composeRule.onNodeWithText("Pause before answer", substring = true).assertDoesNotExist()
     }
 
     @Test

@@ -129,6 +129,9 @@
     <string name="voice_response">Response</string>
     <string name="voice_enable_reasoning">Enable reasoning</string>
     <string name="voice_reading_speed">Reading speed: %1$s</string>
+    <string name="voice_advanced">Advanced</string>
+    <string name="voice_advanced_collapsed">Collapsed</string>
+    <string name="voice_advanced_expanded">Expanded</string>
     <string name="voice_pause_before_answer">Pause before answer: %1$d ms</string>
     <string name="voice_pause_description">How long trailing silence must last before your speech is sent to the model.</string>
     <string name="voice_minimum_response_words">Minimum response words: %1$d</string>

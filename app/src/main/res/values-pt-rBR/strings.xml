@@ -129,6 +129,9 @@
     <string name="voice_response">Resposta</string>
     <string name="voice_enable_reasoning">Ativar raciocínio</string>
     <string name="voice_reading_speed">Velocidade da leitura: %1$s</string>
+    <string name="voice_advanced">Avançado</string>
+    <string name="voice_advanced_collapsed">Recolhido</string>
+    <string name="voice_advanced_expanded">Expandido</string>
     <string name="voice_pause_before_answer">Pausa antes da resposta: %1$d ms</string>
     <string name="voice_pause_description">Duração do silêncio no final da fala antes que o áudio seja enviado ao modelo.</string>
     <string name="voice_minimum_response_words">Mínimo de palavras na resposta: %1$d</string>

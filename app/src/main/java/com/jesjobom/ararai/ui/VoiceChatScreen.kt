@@ -57,9 +57,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
@@ -510,6 +513,7 @@ private fun VoiceChatSettingsDialog(
     onSettingsChange: (VoiceChatSettings) -> Unit,
 ) {
     var value by remember(initial) { mutableStateOf(initial) }
+    var advancedExpanded by remember { mutableStateOf(false) }
     val updateValue: (VoiceChatSettings) -> Unit = {
         value = it
         onSettingsChange(it)
@@ -561,62 +565,83 @@ private fun VoiceChatSettingsDialog(
                             VoiceChatSettings.SPEECH_RATE_STEP
                         ).roundToInt() - 1,
                 )
-                Text(stringResource(R.string.voice_pause_before_answer, value.pauseMillis))
-                Text(
-                    stringResource(R.string.voice_pause_description),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Slider(value = value.pauseMillis.toFloat(), onValueChange = { raw ->
-                    val step = ((raw.toInt() - 500) / 250) * 250 + 500
-                    updateValue(value.copy(pauseMillis = step.coerceIn(500, 5_000)))
-                }, valueRange = 500f..5_000f, steps = 17)
-                Text(stringResource(R.string.voice_minimum_response_words, value.minimumWords))
-                Slider(value = value.minimumWords.toFloat(), onValueChange = { updateValue(value.copy(minimumWords = it.toInt().coerceIn(1, 100))) }, valueRange = 1f..100f, steps = 98)
-                SettingsDropdown(
-                    label = stringResource(R.string.voice_experimental_vad),
-                    selected = value.vadProvider,
-                    options = VadProvider.entries,
-                    optionLabel = { it.displayName() },
-                    onSelect = { updateValue(value.copy(vadProvider = it)) },
-                )
-                SettingsDropdown(
-                    label = stringResource(R.string.voice_vad_sensitivity),
-                    selected = value.vadMode,
-                    options = VadMode.entries,
-                    optionLabel = { it.displayName() },
-                    onSelect = { updateValue(value.copy(vadMode = it)) },
-                )
-                AudioTimingSlider(
-                    label = stringResource(R.string.voice_speech_confirmation),
-                    value = value.speechConfirmationMillis,
-                    range = VoiceChatSettings.MIN_SPEECH_CONFIRMATION_MILLIS..VoiceChatSettings.MAX_SPEECH_CONFIRMATION_MILLIS,
-                    onValue = { updateValue(value.copy(speechConfirmationMillis = it)) },
-                )
-                AudioTimingSlider(
-                    label = stringResource(R.string.voice_pre_roll),
-                    value = value.preRollMillis,
-                    range = VoiceChatSettings.MIN_PRE_ROLL_MILLIS..VoiceChatSettings.MAX_PRE_ROLL_MILLIS,
-                    onValue = { updateValue(value.copy(preRollMillis = it)) },
-                )
-                AudioTimingSlider(
-                    label = stringResource(R.string.voice_minimum_speech),
-                    value = value.minimumSpeechMillis,
-                    range = VoiceChatSettings.MIN_SPEECH_MILLIS..VoiceChatSettings.MAX_SPEECH_MILLIS,
-                    onValue = { updateValue(value.copy(minimumSpeechMillis = it)) },
-                )
-                SettingsDropdown(
-                    label = stringResource(R.string.voice_capture_source),
-                    selected = value.captureSource,
-                    options = VoiceCaptureSource.entries,
-                    optionLabel = { it.displayName() },
-                    onSelect = { updateValue(value.copy(captureSource = it)) },
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.voice_noise_suppression), modifier = Modifier.weight(1f))
-                    Switch(checked = value.noiseSuppressionRequested, onCheckedChange = { updateValue(value.copy(noiseSuppressionRequested = it)) })
+                val advancedStateDescription =
+                    stringResource(
+                        if (advancedExpanded) R.string.voice_advanced_expanded else R.string.voice_advanced_collapsed,
+                    )
+                TextButton(
+                    onClick = { advancedExpanded = !advancedExpanded },
+                    modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("voice-advanced-toggle")
+                        .semantics { stateDescription = advancedStateDescription },
+                ) {
+                    Text(stringResource(R.string.voice_advanced), modifier = Modifier.weight(1f))
+                    Icon(
+                        Icons.Filled.ArrowDropDown,
+                        contentDescription = null,
+                        modifier = Modifier.graphicsLayer { rotationZ = if (advancedExpanded) 180f else 0f },
+                    )
                 }
-                Text(stringResource(R.string.voice_experimental_restart_note), style = MaterialTheme.typography.bodySmall)
+                if (advancedExpanded) {
+                    Text(stringResource(R.string.voice_pause_before_answer, value.pauseMillis))
+                    Text(
+                        stringResource(R.string.voice_pause_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Slider(value = value.pauseMillis.toFloat(), onValueChange = { raw ->
+                        val step = ((raw.toInt() - 500) / 250) * 250 + 500
+                        updateValue(value.copy(pauseMillis = step.coerceIn(500, 5_000)))
+                    }, valueRange = 500f..5_000f, steps = 17)
+                    Text(stringResource(R.string.voice_minimum_response_words, value.minimumWords))
+                    Slider(value = value.minimumWords.toFloat(), onValueChange = { updateValue(value.copy(minimumWords = it.toInt().coerceIn(1, 100))) }, valueRange = 1f..100f, steps = 98)
+                    SettingsDropdown(
+                        label = stringResource(R.string.voice_experimental_vad),
+                        selected = value.vadProvider,
+                        options = VadProvider.entries,
+                        optionLabel = { it.displayName() },
+                        onSelect = { updateValue(value.copy(vadProvider = it)) },
+                    )
+                    SettingsDropdown(
+                        label = stringResource(R.string.voice_vad_sensitivity),
+                        selected = value.vadMode,
+                        options = VadMode.entries,
+                        optionLabel = { it.displayName() },
+                        onSelect = { updateValue(value.copy(vadMode = it)) },
+                    )
+                    AudioTimingSlider(
+                        label = stringResource(R.string.voice_speech_confirmation),
+                        value = value.speechConfirmationMillis,
+                        range = VoiceChatSettings.MIN_SPEECH_CONFIRMATION_MILLIS..VoiceChatSettings.MAX_SPEECH_CONFIRMATION_MILLIS,
+                        onValue = { updateValue(value.copy(speechConfirmationMillis = it)) },
+                    )
+                    AudioTimingSlider(
+                        label = stringResource(R.string.voice_pre_roll),
+                        value = value.preRollMillis,
+                        range = VoiceChatSettings.MIN_PRE_ROLL_MILLIS..VoiceChatSettings.MAX_PRE_ROLL_MILLIS,
+                        onValue = { updateValue(value.copy(preRollMillis = it)) },
+                    )
+                    AudioTimingSlider(
+                        label = stringResource(R.string.voice_minimum_speech),
+                        value = value.minimumSpeechMillis,
+                        range = VoiceChatSettings.MIN_SPEECH_MILLIS..VoiceChatSettings.MAX_SPEECH_MILLIS,
+                        onValue = { updateValue(value.copy(minimumSpeechMillis = it)) },
+                    )
+                    SettingsDropdown(
+                        label = stringResource(R.string.voice_capture_source),
+                        selected = value.captureSource,
+                        options = VoiceCaptureSource.entries,
+                        optionLabel = { it.displayName() },
+                        onSelect = { updateValue(value.copy(captureSource = it)) },
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.voice_noise_suppression), modifier = Modifier.weight(1f))
+                        Switch(checked = value.noiseSuppressionRequested, onCheckedChange = { updateValue(value.copy(noiseSuppressionRequested = it)) })
+                    }
+                    Text(stringResource(R.string.voice_experimental_restart_note), style = MaterialTheme.typography.bodySmall)
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } },
