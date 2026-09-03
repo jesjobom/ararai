@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-02
+goal: Allow independently eligible model and widget consumers to reuse
+  configured application tools through one validated execution boundary.

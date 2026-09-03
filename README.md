@@ -49,6 +49,10 @@ backend, or external database.
   progress and cancellation in a persistent notification.
 - Home, Chat, Voice Chat, Models, Assistant configuration, and Settings destinations implemented with
   Jetpack Compose; model benchmarks are opened from downloaded model cards.
+- Optional first-visit spotlight tours explain non-obvious controls in Chat,
+  Voice Chat, Models, and Assistant configuration without adding a Home tour.
+  Each screen can be completed or closed independently, and Settings can restore
+  all tours for later visits.
 - Persistent System, Light, and Dark appearance selection with Material dynamic
   colors on supported devices.
 - A localized Settings disclosure lists resolved direct and transitive Gradle
@@ -212,6 +216,15 @@ device therefore does not restore conversations, media, models, or settings.
 Model downloads still require network access to their configured artifact URLs.
 Once a valid model is present, core inference and Chat do not call a hosted
 inference service.
+
+Application-owned tools now use one versioned registry and validated execution
+boundary. A tool independently declares whether it is eligible for model tool
+calling, a future widget data runtime, or both; user enablement and required
+provider credentials remain additional gates. The current Wikipedia, web-search,
+and calculator tools remain model-only and keep their existing model-visible
+schemas and limits. A headless widget execution gateway exists for future
+structured widget tools, but this release does not create, render, persist,
+manage, or schedule widgets.
 
 The optional **Local calculator** under **Assistant configuration → Tools** is
 disabled by default and runs entirely on-device. It is advertised only to the

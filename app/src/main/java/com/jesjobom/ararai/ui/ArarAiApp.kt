@@ -96,7 +96,6 @@ import com.jesjobom.ararai.chat.InMemoryInstructionPreferences
 import com.jesjobom.ararai.chat.InstructionPreferences
 import com.jesjobom.ararai.chat.InteractionMode
 import com.jesjobom.ararai.chat.conversationTurnSettings
-import com.jesjobom.ararai.chat.eligibleToolNames
 import com.jesjobom.ararai.engine.AndroidLiteRtLmBridge
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.LiteRtLmLocalLlmEngine
@@ -110,7 +109,9 @@ import com.jesjobom.ararai.knowledge.WebSearchProvider
 import com.jesjobom.ararai.knowledge.WebSearchSettings
 import com.jesjobom.ararai.knowledge.WebSearchSmokeTest
 import com.jesjobom.ararai.knowledge.WebSearchToolFactory
+import com.jesjobom.ararai.knowledge.WikipediaKnowledgeTool
 import com.jesjobom.ararai.knowledge.redactedProviderError
+import com.jesjobom.ararai.math.EvalExLocalMathEngine
 import com.jesjobom.ararai.model.GenerationPreferences
 import com.jesjobom.ararai.model.InMemoryGenerationPreferences
 import com.jesjobom.ararai.model.InMemoryModelDownloadPromptPreferenceStore
@@ -137,6 +138,14 @@ import com.jesjobom.ararai.settings.InMemoryTranscriptionLanguagePreferences
 import com.jesjobom.ararai.settings.ThemeMode
 import com.jesjobom.ararai.settings.TranscriptionLanguage
 import com.jesjobom.ararai.settings.TranscriptionLanguagePreferences
+import com.jesjobom.ararai.tools.ApplicationToolDispatcher
+import com.jesjobom.ararai.tools.defaultApplicationToolRegistry
+import com.jesjobom.ararai.ui.tour.ScreenTour
+import com.jesjobom.ararai.ui.tour.TourOverlay
+import com.jesjobom.ararai.ui.tour.TourPreferenceStore
+import com.jesjobom.ararai.ui.tour.TourStep
+import com.jesjobom.ararai.ui.tour.rememberTourAnchorRegistry
+import com.jesjobom.ararai.ui.tour.tourAnchor
 import com.jesjobom.ararai.voice.AndroidVoiceTurnCapture
 import com.jesjobom.ararai.voice.SequentialVoiceSpeechQueue
 import com.jesjobom.ararai.voice.VoiceChatPreferences
@@ -198,32 +207,73 @@ internal fun ArarAiApp(
     onDisableExitConfirmation: () -> Unit = {},
     onExitApplication: () -> Unit = {},
     voiceChatPreferences: VoiceChatPreferences,
+    tourPreferenceStore: TourPreferenceStore? = null,
     voiceTemporaryDirectory: File,
     openModelManagementRequest: Int = 0,
     liteRtLmCacheDir: String? = null,
     webSearchToolFactory: WebSearchToolFactory = WebSearchToolFactory(),
-    localLlmEngineFactory: () -> LocalLlmEngine = {
-        LiteRtLmLocalLlmEngine(
-            bridge =
-            AndroidLiteRtLmBridge(
-                cacheDir = liteRtLmCacheDir,
-                webSearchKnowledgeToolResolver =
-                WebSearchKnowledgeToolResolver {
-                    webSearchPreferences.settings.value.orderedEnabledProviders
-                        .map { provider ->
-                            webSearchToolFactory.create(provider) {
-                                webSearchPreferences.token(provider)
-                            }
-                        }
-                        .takeIf(List<*>::isNotEmpty)
-                        ?.let(::FallbackKnowledgeTool)
-                },
-            ),
-        )
-    },
+    localLlmEngineFactory: (() -> LocalLlmEngine)? = null,
 ) {
     val resourceContext = androidx.compose.ui.platform.LocalContext.current
     val appContext = resourceContext.applicationContext
+    val wikipediaTool = remember { WikipediaKnowledgeTool() }
+    val calculatorEngine = remember { EvalExLocalMathEngine() }
+    val webSearchResolver = remember(webSearchPreferences, webSearchToolFactory) {
+        WebSearchKnowledgeToolResolver {
+            webSearchPreferences.settings.value.orderedEnabledProviders
+                .map { provider ->
+                    webSearchToolFactory.create(provider) {
+                        webSearchPreferences.token(provider)
+                    }
+                }
+                .takeIf(List<*>::isNotEmpty)
+                ?.let(::FallbackKnowledgeTool)
+        }
+    }
+    val applicationToolRegistry = remember(
+        instructionPreferences,
+        webSearchPreferences,
+        wikipediaTool,
+        calculatorEngine,
+        webSearchResolver,
+    ) {
+        defaultApplicationToolRegistry(
+            instructionPreferences = instructionPreferences,
+            webSearchPreferences = webSearchPreferences,
+            wikipediaTool = wikipediaTool,
+            webSearchTool = webSearchResolver::resolve,
+            calculatorEngine = calculatorEngine,
+            experimentalWebSearchEnabled = com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH,
+        )
+    }
+    val applicationToolDispatcher = remember(applicationToolRegistry) {
+        ApplicationToolDispatcher(applicationToolRegistry)
+    }
+    val effectiveLocalLlmEngineFactory = remember(
+        localLlmEngineFactory,
+        applicationToolDispatcher,
+        liteRtLmCacheDir,
+        wikipediaTool,
+        webSearchResolver,
+        calculatorEngine,
+    ) {
+        localLlmEngineFactory ?: {
+            LiteRtLmLocalLlmEngine(
+                bridge =
+                AndroidLiteRtLmBridge(
+                    cacheDir = liteRtLmCacheDir,
+                    wikipediaKnowledgeTool = wikipediaTool,
+                    webSearchKnowledgeToolResolver = webSearchResolver,
+                    calculatorEngine = calculatorEngine,
+                    applicationToolDispatcher = applicationToolDispatcher,
+                    webSearchDisplayNameProvider = {
+                        webSearchPreferences.settings.value.preferredProvider?.displayName
+                            ?: "Web search"
+                    },
+                ),
+            )
+        }
+    }
     val modelCatalogState by modelController.state.collectAsState()
     val instructionSettings by instructionPreferences.settings.collectAsState()
     val generationSettings by generationPreferences.state.collectAsState()
@@ -233,6 +283,10 @@ internal fun ArarAiApp(
     val modelConfig = modelCatalogState.selectedConfig
     val defaultModelConfig = modelController.defaultModelConfig
     val hasAvailableChatModel = modelCatalogState.models.hasAvailableChatModel()
+    val hasAvailableTranscriptionModel =
+        modelCatalogState.models.any {
+            it.config.supportsTask(ModelTask.Transcription) && it.state is ModelStartupState.Available
+        }
     val reportController = remember(chatSessionStore, pendingReportQueue) {
         GeneratedContentReportingController(
             chatSessionStore,
@@ -286,10 +340,11 @@ internal fun ArarAiApp(
             voiceChatPreferences = voiceChatPreferences,
             voiceTemporaryDirectory = voiceTemporaryDirectory,
             systemPrompt = systemPrompt,
-            localLlmEngineFactory = localLlmEngineFactory,
             chatTextToSpeechServiceFactory = chatTextToSpeechServiceFactory,
             chatLanguageIdentifierFactory = chatLanguageIdentifierFactory,
             diagnosticErrorReportCoordinator = diagnosticErrorReportCoordinator,
+            applicationToolRegistry = applicationToolRegistry,
+            localLlmEngineFactory = effectiveLocalLlmEngineFactory,
         )
     val chatViewModel = controllers.chat
     val benchmarkViewModel = controllers.benchmark
@@ -476,6 +531,8 @@ internal fun ArarAiApp(
             onDeletePendingReport = { reportId ->
                 reportController.deletePending(reportId)
             },
+            tourPreferenceStore = tourPreferenceStore,
+            transcriptionAvailable = hasAvailableTranscriptionModel,
         )
         AppDestination.VoiceChat -> {
             val voiceState by voiceChatViewModel.state.collectAsState()
@@ -515,6 +572,7 @@ internal fun ArarAiApp(
                 onDeletePendingReport = { reportId ->
                     reportController.deletePending(reportId)
                 },
+                tourPreferenceStore = tourPreferenceStore,
             )
         }
         AppDestination.Diagnostics -> BenchmarkScreen(
@@ -548,6 +606,7 @@ internal fun ArarAiApp(
                     destination = AppDestination.Diagnostics
                 }
             },
+            tourPreferenceStore = tourPreferenceStore,
         )
         AppDestination.WhisperBenchmark -> {
             val item = modelCatalogState.models.firstOrNull { it.config.id == whisperBenchmarkModelId }
@@ -569,6 +628,7 @@ internal fun ArarAiApp(
             onApplicationLanguageChange = onApplicationLanguageChange,
             onRestartApplication = onRestartApplication,
             onOpenSourceLicenses = { destination = AppDestination.OpenSourceLicenses },
+            onRestoreTours = tourPreferenceStore?.let { store -> store::restoreAll },
             onBack = { returnHome() },
         )
         AppDestination.OpenSourceLicenses -> OpenSourceLicensesScreen(
@@ -653,6 +713,7 @@ internal fun ArarAiApp(
                 webSmokeResults = webSmokeResults - provider
                 webSmokeErrors = webSmokeErrors - provider
             },
+            tourPreferenceStore = tourPreferenceStore,
             onBack = { returnHome() },
         )
     }
@@ -769,8 +830,10 @@ internal fun SettingsScreen(
     onApplicationLanguageChange: (ApplicationLanguage) -> Unit = {},
     onRestartApplication: () -> Unit = {},
     onOpenSourceLicenses: () -> Unit = {},
+    onRestoreTours: (() -> Unit)? = null,
     onBack: () -> Unit,
 ) {
+    var restoreToursConfirmationOpen by remember { mutableStateOf(false) }
     ArarAiScaffold(title = stringResource(R.string.settings_title), onBack = onBack) { modifier ->
         Column(
             modifier = modifier
@@ -839,6 +902,31 @@ internal fun SettingsScreen(
                     onClick = { onThemeModeChange(mode) },
                 )
             }
+            if (onRestoreTours != null) {
+                Text(
+                    text = stringResource(R.string.settings_tours),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                ElevatedCard(
+                    onClick = { restoreToursConfirmationOpen = true },
+                    modifier = Modifier.testTag("restore-tours"),
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_restore_tours_title),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_restore_tours_description),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             Text(
                 text = stringResource(R.string.settings_legal),
                 style = MaterialTheme.typography.titleMedium,
@@ -866,6 +954,28 @@ internal fun SettingsScreen(
             }
         }
     }
+    if (restoreToursConfirmationOpen) {
+        AlertDialog(
+            onDismissRequest = { restoreToursConfirmationOpen = false },
+            title = { Text(stringResource(R.string.settings_restore_tours_confirm_title)) },
+            text = { Text(stringResource(R.string.settings_restore_tours_confirm_description)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRestoreTours?.invoke()
+                        restoreToursConfirmationOpen = false
+                    },
+                ) {
+                    Text(stringResource(R.string.settings_restore_tours_confirm_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { restoreToursConfirmationOpen = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -892,101 +1002,150 @@ internal fun InstructionsAndToolsScreen(
     onVerifyWebProvider: (WebSearchProvider, String) -> Unit = { _, _ -> },
     onWebProviderEnabledChange: (WebSearchProvider, Boolean) -> Unit = { _, _ -> },
     onRemoveWebProvider: (WebSearchProvider) -> Unit = {},
+    tourPreferenceStore: TourPreferenceStore? = null,
     onBack: () -> Unit,
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     val tabScrollState = rememberScrollState()
     val tabScrollScope = rememberCoroutineScope()
-    ArarAiScaffold(title = stringResource(R.string.assistant_configuration_title), onBack = onBack) { modifier ->
-        Column(
-            modifier = modifier.padding(vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Box(modifier = Modifier.fillMaxWidth()) {
-                PrimaryScrollableTabRow(
-                    selectedTabIndex = selectedTab,
-                    scrollState = tabScrollState,
-                    edgePadding = 0.dp,
-                ) {
-                    listOf(
-                        "prompts" to stringResource(R.string.assistant_tab_prompts),
-                        "tools" to stringResource(R.string.assistant_tab_tools),
-                        "generation" to stringResource(R.string.assistant_tab_generation),
-                        "audio" to stringResource(R.string.assistant_tab_audio),
-                    ).forEachIndexed { index, (tag, label) ->
-                        Tab(
-                            selected = selectedTab == index,
-                            onClick = { selectedTab = index },
-                            text = { Text(text = label, maxLines = 1) },
-                            modifier = Modifier.testTag("instructions-tools-tab-$tag"),
+    val tourAnchors = rememberTourAnchorRegistry()
+    Box(Modifier.fillMaxSize()) {
+        ArarAiScaffold(title = stringResource(R.string.assistant_configuration_title), onBack = onBack) { modifier ->
+            Column(
+                modifier = modifier.padding(vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    PrimaryScrollableTabRow(
+                        selectedTabIndex = selectedTab,
+                        scrollState = tabScrollState,
+                        edgePadding = 0.dp,
+                    ) {
+                        listOf(
+                            "prompts" to stringResource(R.string.assistant_tab_prompts),
+                            "tools" to stringResource(R.string.assistant_tab_tools),
+                            "generation" to stringResource(R.string.assistant_tab_generation),
+                            "audio" to stringResource(R.string.assistant_tab_audio),
+                        ).forEachIndexed { index, (tag, label) ->
+                            Tab(
+                                selected = selectedTab == index,
+                                onClick = { selectedTab = index },
+                                text = { Text(text = label, maxLines = 1) },
+                                modifier =
+                                Modifier
+                                    .testTag("instructions-tools-tab-$tag")
+                                    .then(
+                                        when (tag) {
+                                            "tools" -> Modifier.tourAnchor(tourAnchors, "assistant-tools-tab")
+                                            "generation" -> Modifier.tourAnchor(tourAnchors, "assistant-generation-tab")
+                                            else -> Modifier
+                                        },
+                                    ),
+                            )
+                        }
+                    }
+                    if (tabScrollState.canScrollBackward) {
+                        TabScrollButton(
+                            forward = false,
+                            onClick = {
+                                tabScrollScope.launch {
+                                    tabScrollState.animateScrollTo(
+                                        (tabScrollState.value - tabScrollState.viewportSize * 3 / 4).coerceAtLeast(0),
+                                    )
+                                }
+                            },
+                            modifier = Modifier.align(Alignment.CenterStart),
+                        )
+                    }
+                    if (tabScrollState.canScrollForward) {
+                        TabScrollButton(
+                            forward = true,
+                            onClick = {
+                                tabScrollScope.launch {
+                                    tabScrollState.animateScrollTo(
+                                        (tabScrollState.value + tabScrollState.viewportSize * 3 / 4)
+                                            .coerceAtMost(tabScrollState.maxValue),
+                                    )
+                                }
+                            },
+                            modifier = Modifier.align(Alignment.CenterEnd),
                         )
                     }
                 }
-                if (tabScrollState.canScrollBackward) {
-                    TabScrollButton(
-                        forward = false,
-                        onClick = {
-                            tabScrollScope.launch {
-                                tabScrollState.animateScrollTo(
-                                    (tabScrollState.value - tabScrollState.viewportSize * 3 / 4).coerceAtLeast(0),
-                                )
-                            }
-                        },
-                        modifier = Modifier.align(Alignment.CenterStart),
-                    )
-                }
-                if (tabScrollState.canScrollForward) {
-                    TabScrollButton(
-                        forward = true,
-                        onClick = {
-                            tabScrollScope.launch {
-                                tabScrollState.animateScrollTo(
-                                    (tabScrollState.value + tabScrollState.viewportSize * 3 / 4)
-                                        .coerceAtMost(tabScrollState.maxValue),
-                                )
-                            }
-                        },
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                    )
-                }
-            }
-            Column(
-                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                when (selectedTab) {
-                    0 -> InstructionsTab(
-                        settings = settings,
-                        onInstructionChange = onInstructionChange,
-                        onRestoreDefault = onRestoreDefault,
-                    )
-                    1 -> ToolsTab(
-                        settings = settings,
-                        wikipediaCompatible = wikipediaCompatible,
-                        onWikipediaEnabledChange = onWikipediaEnabledChange,
-                        calculatorCompatible = calculatorCompatible,
-                        onCalculatorEnabledChange = onCalculatorEnabledChange,
-                        webSearchSettings = webSearchSettings,
-                        webSearchCompatible = webSearchCompatible,
-                        webSmokeRunning = webSmokeRunning,
-                        webSmokeResults = webSmokeResults,
-                        webSmokeErrors = webSmokeErrors,
-                        onVerifyWebProvider = onVerifyWebProvider,
-                        onWebProviderEnabledChange = onWebProviderEnabledChange,
-                        onRemoveWebProvider = onRemoveWebProvider,
-                    )
-                    2 -> GenerationTab(
-                        model = generationModel,
-                        onContextTokensChange = onContextTokensChange,
-                        onTemperatureChange = onTemperatureChange,
-                        onRestoreDefaults = onRestoreGenerationDefaults,
-                    )
-                    else -> AudioTab(
-                        transcriptionLanguage = transcriptionLanguage,
-                        onTranscriptionLanguageChange = onTranscriptionLanguageChange,
-                    )
+                Column(
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    when (selectedTab) {
+                        0 -> InstructionsTab(
+                            settings = settings,
+                            onInstructionChange = onInstructionChange,
+                            onRestoreDefault = onRestoreDefault,
+                        )
+                        1 -> ToolsTab(
+                            settings = settings,
+                            wikipediaCompatible = wikipediaCompatible,
+                            onWikipediaEnabledChange = onWikipediaEnabledChange,
+                            calculatorCompatible = calculatorCompatible,
+                            onCalculatorEnabledChange = onCalculatorEnabledChange,
+                            webSearchSettings = webSearchSettings,
+                            webSearchCompatible = webSearchCompatible,
+                            webSmokeRunning = webSmokeRunning,
+                            webSmokeResults = webSmokeResults,
+                            webSmokeErrors = webSmokeErrors,
+                            onVerifyWebProvider = onVerifyWebProvider,
+                            onWebProviderEnabledChange = onWebProviderEnabledChange,
+                            onRemoveWebProvider = onRemoveWebProvider,
+                        )
+                        2 -> GenerationTab(
+                            model = generationModel,
+                            onContextTokensChange = onContextTokensChange,
+                            onTemperatureChange = onTemperatureChange,
+                            onRestoreDefaults = onRestoreGenerationDefaults,
+                        )
+                        else -> AudioTab(
+                            transcriptionLanguage = transcriptionLanguage,
+                            onTranscriptionLanguageChange = onTranscriptionLanguageChange,
+                        )
+                    }
                 }
             }
+        }
+        tourPreferenceStore?.let { store ->
+            TourOverlay(
+                tour = ScreenTour.AssistantConfiguration,
+                store = store,
+                steps =
+                listOf(
+                    TourStep(
+                        id = "assistant-tools",
+                        anchorId = "assistant-tools-tab",
+                        title = stringResource(R.string.tour_assistant_tools_title),
+                        body = stringResource(R.string.tour_assistant_tools_body),
+                        targetDescription = stringResource(R.string.tour_assistant_tools_target),
+                    ),
+                    TourStep(
+                        id = "assistant-context",
+                        anchorId = "assistant-generation-tab",
+                        title = stringResource(R.string.tour_assistant_context_title),
+                        body = stringResource(R.string.tour_assistant_context_body),
+                        targetDescription = stringResource(R.string.tour_assistant_generation_target),
+                    ),
+                    TourStep(
+                        id = "assistant-temperature",
+                        anchorId = "assistant-generation-tab",
+                        title = stringResource(R.string.tour_assistant_temperature_title),
+                        body = stringResource(R.string.tour_assistant_temperature_body),
+                        targetDescription = stringResource(R.string.tour_assistant_generation_target),
+                    ),
+                ),
+                anchors = tourAnchors,
+                progressText = { current, total -> stringResource(R.string.tour_progress, current, total) },
+                previousLabel = stringResource(R.string.action_back),
+                nextLabel = stringResource(R.string.action_next),
+                completeLabel = stringResource(R.string.action_complete),
+                closeDescription = stringResource(R.string.tour_close_screen),
+            )
         }
     }
 }
@@ -1772,7 +1931,7 @@ private fun BenchmarkTokenValues(result: BenchmarkResult) {
 }
 
 @Composable
-@Suppress("LongParameterList")
+@Suppress("LongParameterList", "LongMethod")
 internal fun ModelStatusScreen(
     models: List<ManagedModelItem>,
     selectedModelId: String,
@@ -1785,50 +1944,89 @@ internal fun ModelStatusScreen(
     onRedownload: (String) -> Unit,
     onRetry: (String) -> Unit,
     onBenchmark: (String) -> Unit = {},
+    tourPreferenceStore: TourPreferenceStore? = null,
 ) {
     var selectedTab by remember { mutableStateOf(ModelCatalogTab.Chat) }
-    ArarAiScaffold(
-        title = stringResource(R.string.models_title),
-        subtitle = stringResource(R.string.models_subtitle),
-        onBack = onBack,
-    ) { modifier ->
-        Column(
-            modifier = modifier
-                .verticalScroll(rememberScrollState())
-                .padding(vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            PrimaryTabRow(selectedTabIndex = selectedTab.ordinal) {
-                ModelCatalogTab.entries.forEach { tab ->
-                    Tab(
-                        selected = selectedTab == tab,
-                        onClick = { selectedTab = tab },
-                        text = { Text(tab.label()) },
-                        modifier = Modifier.testTag("models-tab-${tab.name.lowercase(Locale.ROOT)}"),
+    val tourAnchors = rememberTourAnchorRegistry()
+    Box(Modifier.fillMaxSize()) {
+        ArarAiScaffold(
+            title = stringResource(R.string.models_title),
+            subtitle = stringResource(R.string.models_subtitle),
+            onBack = onBack,
+        ) { modifier ->
+            Column(
+                modifier =
+                modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                PrimaryTabRow(selectedTabIndex = selectedTab.ordinal) {
+                    ModelCatalogTab.entries.forEach { tab ->
+                        val anchorId =
+                            if (tab == ModelCatalogTab.Chat) "models-chat-tab" else "models-transcription-tab"
+                        Tab(
+                            selected = selectedTab == tab,
+                            onClick = { selectedTab = tab },
+                            text = { Text(tab.label()) },
+                            modifier =
+                            Modifier
+                                .testTag("models-tab-${tab.name.lowercase(Locale.ROOT)}")
+                                .tourAnchor(tourAnchors, anchorId),
+                        )
+                    }
+                }
+                availableMemoryBytes?.let {
+                    Text(
+                        text = stringResource(R.string.models_recommendation_description, it.toStorageSize()),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                models.forTab(selectedTab).forEach { item ->
+                    ModelCard(
+                        item = item,
+                        isSelected = item.config.id == selectedModelId,
+                        onSelect = { onSelect(item.config.id) },
+                        onDownload = { onDownload(item.config.id) },
+                        onCancelDownload = { onCancelDownload(item.config.id) },
+                        onDelete = { onDelete(item.config.id) },
+                        onRedownload = { onRedownload(item.config.id) },
+                        onRetry = { onRetry(item.config.id) },
+                        isRecommended = item.isRecommendedFor(availableMemoryBytes),
+                        onBenchmark = { onBenchmark(item.config.id) },
                     )
                 }
             }
-            availableMemoryBytes?.let {
-                Text(
-                    text = stringResource(R.string.models_recommendation_description, it.toStorageSize()),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            models.forTab(selectedTab).forEach { item ->
-                ModelCard(
-                    item = item,
-                    isSelected = item.config.id == selectedModelId,
-                    onSelect = { onSelect(item.config.id) },
-                    onDownload = { onDownload(item.config.id) },
-                    onCancelDownload = { onCancelDownload(item.config.id) },
-                    onDelete = { onDelete(item.config.id) },
-                    onRedownload = { onRedownload(item.config.id) },
-                    onRetry = { onRetry(item.config.id) },
-                    isRecommended = item.isRecommendedFor(availableMemoryBytes),
-                    onBenchmark = { onBenchmark(item.config.id) },
-                )
-            }
+        }
+        tourPreferenceStore?.let { store ->
+            TourOverlay(
+                tour = ScreenTour.ModelManagement,
+                store = store,
+                steps =
+                listOf(
+                    TourStep(
+                        id = "models-active",
+                        anchorId = "models-chat-tab",
+                        title = stringResource(R.string.tour_models_active_title),
+                        body = stringResource(R.string.tour_models_active_body),
+                        targetDescription = stringResource(R.string.tour_models_chat_target),
+                    ),
+                    TourStep(
+                        id = "models-transcription",
+                        anchorId = "models-transcription-tab",
+                        title = stringResource(R.string.tour_models_transcription_title),
+                        body = stringResource(R.string.tour_models_transcription_body),
+                        targetDescription = stringResource(R.string.tour_models_transcription_target),
+                    ),
+                ),
+                anchors = tourAnchors,
+                progressText = { current, total -> stringResource(R.string.tour_progress, current, total) },
+                previousLabel = stringResource(R.string.action_back),
+                nextLabel = stringResource(R.string.action_next),
+                completeLabel = stringResource(R.string.action_complete),
+                closeDescription = stringResource(R.string.tour_close_screen),
+            )
         }
     }
 }

@@ -44,6 +44,7 @@ import com.jesjobom.ararai.ui.ArarAiApp
 import com.jesjobom.ararai.ui.ArarAiTheme
 import com.jesjobom.ararai.ui.MlKitChatLanguageIdentifier
 import com.jesjobom.ararai.ui.androidChatMediaServices
+import com.jesjobom.ararai.ui.tour.SharedPreferencesTourPreferenceStore
 import com.jesjobom.ararai.voice.SharedPreferencesVoiceChatPreferences
 import com.jesjobom.ararai.voice.reconcileVoiceTemporaryFiles
 import kotlinx.coroutines.Dispatchers
@@ -96,6 +97,7 @@ class MainActivity : ComponentActivity() {
         val exitPreferenceStore = SharedPreferencesApplicationExitPreferenceStore(this)
         val appliedApplicationLanguage = languagePreferenceStore.language
         val voiceChatPreferences = SharedPreferencesVoiceChatPreferences(this)
+        val tourPreferenceStore = SharedPreferencesTourPreferenceStore(this)
         val voiceTemporaryDirectory = java.io.File(cacheDir, "voice_chat")
         reconcileVoiceTemporaryFiles(voiceTemporaryDirectory)
         lifecycleScope.launch(Dispatchers.IO) {
@@ -163,6 +165,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onExitApplication = ::finishAndRemoveTask,
                         voiceChatPreferences = voiceChatPreferences,
+                        tourPreferenceStore = tourPreferenceStore,
                         voiceTemporaryDirectory = voiceTemporaryDirectory,
                         openModelManagementRequest = openModelManagementRequest,
                         liteRtLmCacheDir =

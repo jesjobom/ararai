@@ -75,6 +75,12 @@ import com.jesjobom.ararai.reporting.GeneratedContentReportDraft
 import com.jesjobom.ararai.reporting.PendingReport
 import com.jesjobom.ararai.reporting.ReportDeliveryReceipt
 import com.jesjobom.ararai.reporting.ReportReason
+import com.jesjobom.ararai.ui.tour.ScreenTour
+import com.jesjobom.ararai.ui.tour.TourOverlay
+import com.jesjobom.ararai.ui.tour.TourPreferenceStore
+import com.jesjobom.ararai.ui.tour.TourStep
+import com.jesjobom.ararai.ui.tour.rememberTourAnchorRegistry
+import com.jesjobom.ararai.ui.tour.tourAnchor
 import com.jesjobom.ararai.voice.VadMode
 import com.jesjobom.ararai.voice.VadProvider
 import com.jesjobom.ararai.voice.VoiceCaptureSource
@@ -115,6 +121,7 @@ internal fun VoiceChatScreen(
     pendingReports: List<PendingReport> = emptyList(),
     latestReportReceipt: ReportDeliveryReceipt? = null,
     onDeletePendingReport: (String) -> Unit = {},
+    tourPreferenceStore: TourPreferenceStore? = null,
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -130,6 +137,7 @@ internal fun VoiceChatScreen(
     var reportDraft by remember { mutableStateOf<GeneratedContentReportDraft?>(null) }
     var reportCenterOpen by remember { mutableStateOf(false) }
     var reportCenterDraft by remember { mutableStateOf<GeneratedContentReportDraft?>(null) }
+    val tourAnchors = rememberTourAnchorRegistry()
     val currentSessionTitle =
         state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title
             ?: stringResource(R.string.voice_new_chat)
@@ -162,259 +170,303 @@ internal fun VoiceChatScreen(
     LaunchedEffect(state.cameraFlowActive) {
         if (!state.cameraFlowActive) cameraOpen = false
     }
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = stringResource(R.string.voice_title),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back))
-                    }
-                },
-                actions = {
-                    ReportCenterButton(
-                        pendingReports = pendingReports,
-                        latestReceipt = latestReportReceipt,
-                    ) {
-                        reportCenterDraft = onReportLatestResponse()
-                        reportCenterOpen = true
-                    }
-                    IconButton(
-                        onClick = { showSettings = true },
-                        enabled = !state.isActive,
-                    ) {
-                        Icon(Icons.Filled.Settings, stringResource(R.string.voice_settings))
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            SessionListButton(
-                title = currentSessionTitle,
-                isBusy = state.isActive || state.isLoadingModel,
-                onClick = { sessionListOpen = true },
-            )
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(phaseLabel(state.phase), style = MaterialTheme.typography.headlineSmall)
-                Box(modifier = Modifier.height(24.dp), contentAlignment = Alignment.Center) {
-                    if (state.toolInProgress) {
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
                         Text(
-                            state.activeToolName
-                                ?.takeIf(String::isNotBlank)
-                                ?.let { stringResource(R.string.chat_using_named_tool, it) }
-                                ?: stringResource(R.string.chat_using_tool),
-                            color = MaterialTheme.colorScheme.primary,
+                            text = stringResource(R.string.voice_title),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back))
+                        }
+                    },
+                    actions = {
+                        ReportCenterButton(
+                            pendingReports = pendingReports,
+                            latestReceipt = latestReportReceipt,
+                        ) {
+                            reportCenterDraft = onReportLatestResponse()
+                            reportCenterOpen = true
+                        }
+                        IconButton(
+                            onClick = { showSettings = true },
+                            enabled = !state.isActive,
+                            modifier = Modifier.tourAnchor(tourAnchors, "voice-settings"),
+                        ) {
+                            Icon(Icons.Filled.Settings, stringResource(R.string.voice_settings))
+                        }
+                    },
+                )
+            },
+        ) { padding ->
+            Column(
+                modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                SessionListButton(
+                    title = currentSessionTitle,
+                    isBusy = state.isActive || state.isLoadingModel,
+                    onClick = { sessionListOpen = true },
+                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(phaseLabel(state.phase), style = MaterialTheme.typography.headlineSmall)
+                    Box(modifier = Modifier.height(24.dp), contentAlignment = Alignment.Center) {
+                        if (state.toolInProgress) {
+                            Text(
+                                state.activeToolName
+                                    ?.takeIf(String::isNotBlank)
+                                    ?.let { stringResource(R.string.chat_using_named_tool, it) }
+                                    ?: stringResource(R.string.chat_using_tool),
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    if (state.isLoadingModel) Text(stringResource(R.string.voice_loading_model))
+                    if (!state.modelSupportsAudio && !state.transcriptionAvailable) {
+                        Text(stringResource(R.string.voice_model_requirement))
+                        OutlinedButton(onClick = onOpenModels) { Text(stringResource(R.string.voice_manage_models)) }
+                    }
+                    (state.noticeKey?.localizedText() ?: state.notice)?.let {
+                        Text(it, color = MaterialTheme.colorScheme.primary)
+                    }
+                    (state.errorKey?.localizedText() ?: state.error)?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
+                    cameraError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    state.pendingImageAttachment?.let { image ->
+                        AttachmentRow(
+                            label = image.displayName ?: stringResource(R.string.chat_attachment_image),
+                            imageUri = image.uri,
+                            onRemove = onRemoveCapturedImage,
+                            mediaServices = mediaServices,
+                        )
+                    }
+                    if (state.responsePreview.isNotBlank()) {
+                        ResponseReadingViewport(
+                            text = state.responsePreview,
+                            spokenRange = state.spokenRange,
+                            readingAnchor = state.readingAnchor,
+                            onExpand = { showFullResponse = true },
                         )
                     }
                 }
-                if (state.isLoadingModel) Text(stringResource(R.string.voice_loading_model))
-                if (!state.modelSupportsAudio && !state.transcriptionAvailable) {
-                    Text(stringResource(R.string.voice_model_requirement))
-                    OutlinedButton(onClick = onOpenModels) { Text(stringResource(R.string.voice_manage_models)) }
-                }
-                (state.noticeKey?.localizedText() ?: state.notice)?.let {
-                    Text(it, color = MaterialTheme.colorScheme.primary)
-                }
-                (state.errorKey?.localizedText() ?: state.error)?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error)
-                }
-                cameraError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                state.pendingImageAttachment?.let { image ->
-                    AttachmentRow(
-                        label = image.displayName ?: stringResource(R.string.chat_attachment_image),
-                        imageUri = image.uri,
-                        onRemove = onRemoveCapturedImage,
-                        mediaServices = mediaServices,
-                    )
-                }
-                if (state.responsePreview.isNotBlank()) {
-                    ResponseReadingViewport(
-                        text = state.responsePreview,
-                        spokenRange = state.spokenRange,
-                        readingAnchor = state.readingAnchor,
-                        onExpand = { showFullResponse = true },
-                    )
-                }
-            }
-            Box(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
-                Button(
-                    onClick = {
-                        if (state.isActive) {
-                            onStop()
-                        } else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                            onStart()
-                        } else {
-                            permission.launch(Manifest.permission.RECORD_AUDIO)
-                        }
-                    },
-                    enabled = state.isActive || state.canStart || state.phase == VoiceChatPhase.Error,
-                    modifier = Modifier.size(176.dp),
+                Box(
+                    modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .tourAnchor(tourAnchors, "voice-action"),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(if (state.isActive) Icons.Filled.Close else Icons.Filled.Mic, null, Modifier.size(48.dp))
-                    Text(
-                        stringResource(if (state.isActive) R.string.voice_stop else R.string.voice_start),
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
-                if (state.canCapturePhoto) {
-                    IconButton(
-                        onClick = ::openCamera,
-                        modifier = Modifier.align(Alignment.BottomEnd).size(64.dp),
+                    Button(
+                        onClick = {
+                            if (state.isActive) {
+                                onStop()
+                            } else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                onStart()
+                            } else {
+                                permission.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        },
+                        enabled = state.isActive || state.canStart || state.phase == VoiceChatPhase.Error,
+                        modifier = Modifier.size(176.dp),
                     ) {
-                        Icon(Icons.Filled.CameraAlt, stringResource(R.string.chat_take_photo), Modifier.size(36.dp))
+                        Icon(if (state.isActive) Icons.Filled.Close else Icons.Filled.Mic, null, Modifier.size(48.dp))
+                        Text(
+                            stringResource(if (state.isActive) R.string.voice_stop else R.string.voice_start),
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                    if (state.canCapturePhoto) {
+                        IconButton(
+                            onClick = ::openCamera,
+                            modifier = Modifier.align(Alignment.BottomEnd).size(64.dp),
+                        ) {
+                            Icon(Icons.Filled.CameraAlt, stringResource(R.string.chat_take_photo), Modifier.size(36.dp))
+                        }
                     }
                 }
             }
         }
-    }
-    if (state.phase == VoiceChatPhase.Error) {
-        AlertDialog(
-            onDismissRequest = onDismissError,
-            confirmButton = { TextButton(onClick = onDismissError) { Text(stringResource(R.string.action_close)) } },
-            title = { Text(stringResource(R.string.voice_stopped_title)) },
-            text = { Text(state.errorKey?.localizedText() ?: state.error.orEmpty()) },
-        )
-    }
-    if (showSettings) {
-        VoiceChatSettingsDialog(
-            initial = state.settings,
-            canEnableReasoning = state.canEnableReasoning,
-            onDismiss = { showSettings = false },
-            onSettingsChange = onSettings,
-        )
-    }
-    if (showFullResponse) {
-        ExpandedResponseDialog(
-            text = state.responsePreview,
-            spokenRange = state.spokenRange,
-            readingAnchor = state.readingAnchor,
-            onDismiss = { showFullResponse = false },
-        )
-    }
-    if (cameraOpen) {
-        ChatCameraCaptureDialog(
-            mediaServices = mediaServices,
-            onCaptured = { uri ->
-                cameraOpen = false
-                coroutineScope.launch {
-                    try {
-                        val imported = withContext(Dispatchers.IO) { mediaServices.imageImporter.import(uri) }
-                        onCapturedImage(
-                            ImageAttachment(
-                                uri = imported.file.absolutePath,
-                                mimeType = "image/jpeg",
-                                displayName = imported.displayName,
-                                byteSize = imported.file.length(),
-                            ),
-                        )
-                    } catch (error: Exception) {
-                        if (error is kotlinx.coroutines.CancellationException) throw error
-                        cameraError = error.message ?: cameraCaptureFailed
-                    } finally {
-                        if (uri.scheme == "file") File(uri.path.orEmpty()).delete()
+        if (state.phase == VoiceChatPhase.Error) {
+            AlertDialog(
+                onDismissRequest = onDismissError,
+                confirmButton = { TextButton(onClick = onDismissError) { Text(stringResource(R.string.action_close)) } },
+                title = { Text(stringResource(R.string.voice_stopped_title)) },
+                text = { Text(state.errorKey?.localizedText() ?: state.error.orEmpty()) },
+            )
+        }
+        if (showSettings) {
+            VoiceChatSettingsDialog(
+                initial = state.settings,
+                canEnableReasoning = state.canEnableReasoning,
+                onDismiss = { showSettings = false },
+                onSettingsChange = onSettings,
+            )
+        }
+        if (showFullResponse) {
+            ExpandedResponseDialog(
+                text = state.responsePreview,
+                spokenRange = state.spokenRange,
+                readingAnchor = state.readingAnchor,
+                onDismiss = { showFullResponse = false },
+            )
+        }
+        if (cameraOpen) {
+            ChatCameraCaptureDialog(
+                mediaServices = mediaServices,
+                onCaptured = { uri ->
+                    cameraOpen = false
+                    coroutineScope.launch {
+                        try {
+                            val imported = withContext(Dispatchers.IO) { mediaServices.imageImporter.import(uri) }
+                            onCapturedImage(
+                                ImageAttachment(
+                                    uri = imported.file.absolutePath,
+                                    mimeType = "image/jpeg",
+                                    displayName = imported.displayName,
+                                    byteSize = imported.file.length(),
+                                ),
+                            )
+                        } catch (error: Exception) {
+                            if (error is kotlinx.coroutines.CancellationException) throw error
+                            cameraError = error.message ?: cameraCaptureFailed
+                        } finally {
+                            if (uri.scheme == "file") File(uri.path.orEmpty()).delete()
+                        }
                     }
-                }
-            },
-            onDismiss = {
-                cameraOpen = false
-                onCameraClosed()
-            },
-            onError = {
-                cameraOpen = false
-                cameraError = it
-                onCameraClosed()
-            },
-            automaticCaptureRequestId = state.automaticPhotoCaptureRequestId,
-            onReady = onCameraPreviewReady,
-        )
-    }
-    if (sessionListOpen) {
-        SessionListDialog(
-            sessions = state.sessions,
-            selectedSessionId = state.selectedSessionId,
-            canDelete = state.canDeleteCurrentSession,
-            onDismiss = { sessionListOpen = false },
-            onCreate = {
-                onCreateSession()
-                sessionListOpen = false
-            },
-            onSelect = {
-                onSelectSession(it)
-                sessionListOpen = false
-            },
-            onRename = { session ->
-                renameSessionId = session.id
-                renameText = session.title
-                renameDialogOpen = true
-                sessionListOpen = false
-            },
-            onDelete = onDeleteSession,
-            onClearAll = {
-                sessionListOpen = false
-                clearSessionsConfirmationOpen = true
-            },
-        )
-    }
-    if (clearSessionsConfirmationOpen) {
-        ClearSessionsConfirmationDialog(
-            sessionCount = state.sessions.size,
-            onDismiss = { clearSessionsConfirmationOpen = false },
-            onConfirm = {
-                onClearAllSessions()
-                clearSessionsConfirmationOpen = false
-            },
-        )
-    }
-    if (renameDialogOpen) {
-        RenameSessionDialog(
-            title = renameText,
-            onTitleChange = { renameText = it },
-            onDismiss = {
-                renameSessionId = null
-                renameDialogOpen = false
-            },
-            onConfirm = {
-                renameSessionId?.let { onRenameSession(it, renameText) }
-                renameSessionId = null
-                renameDialogOpen = false
-            },
-        )
-    }
-    reportDraft?.let { draft ->
-        GeneratedContentReportDialog(
-            draft = draft,
-            onSubmit = { reason, comment, contextIds ->
-                onSubmitReport(draft, reason, comment, contextIds)
-                reportDraft = null
-            },
-            onDismiss = { reportDraft = null },
-        )
-    }
-    if (reportCenterOpen) {
-        ReportCenterDialog(
-            draft = reportCenterDraft,
-            pendingReports = pendingReports,
-            onSubmit = { reason, comment, contextIds ->
-                reportCenterDraft?.let { onSubmitReport(it, reason, comment, contextIds) }
-                reportCenterOpen = false
-            },
-            onDeletePendingReport = onDeletePendingReport,
-            onDismiss = { reportCenterOpen = false },
-        )
+                },
+                onDismiss = {
+                    cameraOpen = false
+                    onCameraClosed()
+                },
+                onError = {
+                    cameraOpen = false
+                    cameraError = it
+                    onCameraClosed()
+                },
+                automaticCaptureRequestId = state.automaticPhotoCaptureRequestId,
+                onReady = onCameraPreviewReady,
+            )
+        }
+        if (sessionListOpen) {
+            SessionListDialog(
+                sessions = state.sessions,
+                selectedSessionId = state.selectedSessionId,
+                canDelete = state.canDeleteCurrentSession,
+                onDismiss = { sessionListOpen = false },
+                onCreate = {
+                    onCreateSession()
+                    sessionListOpen = false
+                },
+                onSelect = {
+                    onSelectSession(it)
+                    sessionListOpen = false
+                },
+                onRename = { session ->
+                    renameSessionId = session.id
+                    renameText = session.title
+                    renameDialogOpen = true
+                    sessionListOpen = false
+                },
+                onDelete = onDeleteSession,
+                onClearAll = {
+                    sessionListOpen = false
+                    clearSessionsConfirmationOpen = true
+                },
+            )
+        }
+        if (clearSessionsConfirmationOpen) {
+            ClearSessionsConfirmationDialog(
+                sessionCount = state.sessions.size,
+                onDismiss = { clearSessionsConfirmationOpen = false },
+                onConfirm = {
+                    onClearAllSessions()
+                    clearSessionsConfirmationOpen = false
+                },
+            )
+        }
+        if (renameDialogOpen) {
+            RenameSessionDialog(
+                title = renameText,
+                onTitleChange = { renameText = it },
+                onDismiss = {
+                    renameSessionId = null
+                    renameDialogOpen = false
+                },
+                onConfirm = {
+                    renameSessionId?.let { onRenameSession(it, renameText) }
+                    renameSessionId = null
+                    renameDialogOpen = false
+                },
+            )
+        }
+        reportDraft?.let { draft ->
+            GeneratedContentReportDialog(
+                draft = draft,
+                onSubmit = { reason, comment, contextIds ->
+                    onSubmitReport(draft, reason, comment, contextIds)
+                    reportDraft = null
+                },
+                onDismiss = { reportDraft = null },
+            )
+        }
+        if (reportCenterOpen) {
+            ReportCenterDialog(
+                draft = reportCenterDraft,
+                pendingReports = pendingReports,
+                onSubmit = { reason, comment, contextIds ->
+                    reportCenterDraft?.let { onSubmitReport(it, reason, comment, contextIds) }
+                    reportCenterOpen = false
+                },
+                onDeletePendingReport = onDeletePendingReport,
+                onDismiss = { reportCenterOpen = false },
+            )
+        }
+        val tourSteps = buildList {
+            if (state.canEnableReasoning) {
+                add(
+                    TourStep(
+                        id = "voice-reasoning",
+                        anchorId = "voice-settings",
+                        title = stringResource(R.string.tour_voice_reasoning_title),
+                        body = stringResource(R.string.tour_voice_reasoning_body),
+                        targetDescription = stringResource(R.string.tour_voice_settings_target),
+                    ),
+                )
+            }
+            if (state.modelSupportsImage) {
+                add(
+                    TourStep(
+                        id = "voice-photos",
+                        anchorId = "voice-action",
+                        title = stringResource(R.string.tour_voice_photos_title),
+                        body = stringResource(R.string.tour_voice_photos_body),
+                        targetDescription = stringResource(R.string.tour_voice_action_target),
+                    ),
+                )
+            }
+        }
+        tourPreferenceStore?.let { store ->
+            TourOverlay(
+                tour = ScreenTour.VoiceChat,
+                store = store,
+                steps = tourSteps,
+                anchors = tourAnchors,
+                progressText = { current, total -> stringResource(R.string.tour_progress, current, total) },
+                previousLabel = stringResource(R.string.action_back),
+                nextLabel = stringResource(R.string.action_next),
+                completeLabel = stringResource(R.string.action_complete),
+                closeDescription = stringResource(R.string.tour_close_screen),
+            )
+        }
     }
 }
 

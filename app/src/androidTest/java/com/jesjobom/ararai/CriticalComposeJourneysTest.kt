@@ -2,6 +2,7 @@ package com.jesjobom.ararai
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
@@ -75,6 +76,12 @@ import com.jesjobom.ararai.ui.ModelStatusScreen
 import com.jesjobom.ararai.ui.ModelStatusUiState
 import com.jesjobom.ararai.ui.SettingsScreen
 import com.jesjobom.ararai.ui.VoiceChatScreen
+import com.jesjobom.ararai.ui.tour.InMemoryTourPreferenceStore
+import com.jesjobom.ararai.ui.tour.ScreenTour
+import com.jesjobom.ararai.ui.tour.TourOverlay
+import com.jesjobom.ararai.ui.tour.TourStep
+import com.jesjobom.ararai.ui.tour.rememberTourAnchorRegistry
+import com.jesjobom.ararai.ui.tour.tourAnchor
 import com.jesjobom.ararai.voice.VadProvider
 import com.jesjobom.ararai.voice.VoiceChatUiState
 import org.junit.Assert.assertEquals
@@ -497,6 +504,7 @@ class CriticalComposeJourneysTest {
 
     @Test
     fun chatComposerIsUnavailableWithoutALocalModel() {
+        val tourStore = InMemoryTourPreferenceStore()
         val viewModel =
             ChatViewModel(
                 engine = FakeLocalLlmEngine(),
@@ -514,15 +522,50 @@ class CriticalComposeJourneysTest {
                     textToSpeechServiceFactory = ::NoOpTextToSpeechService,
                     languageIdentifierFactory = ::ImmediateLanguageIdentifier,
                     onBack = {},
+                    tourPreferenceStore = tourStore,
                 )
             }
         }
 
+        composeRule.onNodeWithText("Conversation history").assertIsDisplayed()
+        composeRule
+            .onNodeWithText("Download and select a Chat model", substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Complete").assertIsDisplayed().performClick()
         composeRule.onNodeWithText("Sessions").assertIsDisplayed().assertHasClickAction()
         val composerBounds = composeRule.onNodeWithTag("chat-composer-field").fetchSemanticsNode().boundsInRoot
         val overlayBounds = composeRule.onNodeWithTag("unavailable-chat-composer").assertHasClickAction()
             .fetchSemanticsNode().boundsInRoot
         assertEquals(composerBounds, overlayBounds)
+    }
+
+    @Test
+    fun chatTourAcknowledgesWhenALocalModelIsReady() {
+        val viewModel =
+            ChatViewModel(
+                engine = FakeLocalLlmEngine(),
+                initialModel = availableModel(),
+                inferenceConfig = inference,
+                systemPrompt = "Be concise",
+                sessionStore = InMemoryChatSessionStore(),
+            )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ChatScreen(
+                    viewModel = viewModel,
+                    mediaServices = fakeMediaServices(),
+                    textToSpeechServiceFactory = ::NoOpTextToSpeechService,
+                    languageIdentifierFactory = ::ImmediateLanguageIdentifier,
+                    onBack = {},
+                    tourPreferenceStore = InMemoryTourPreferenceStore(),
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Conversation history").assertIsDisplayed()
+        composeRule.onNodeWithText("A Chat model is ready", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Download and select a Chat model", substring = true).assertDoesNotExist()
     }
 
     @Test
@@ -735,12 +778,14 @@ class CriticalComposeJourneysTest {
     fun themeSelectionUpdatesVisibleSelectedState() {
         var themeMode by mutableStateOf(ThemeMode.System)
         var licensesOpened = false
+        var toursRestored = false
         composeRule.setContent {
             MaterialTheme {
                 SettingsScreen(
                     themeMode = themeMode,
                     onThemeModeChange = { themeMode = it },
                     onOpenSourceLicenses = { licensesOpened = true },
+                    onRestoreTours = { toursRestored = true },
                     onBack = {},
                 )
             }
@@ -752,6 +797,62 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithTag("open-source-licenses").performScrollTo().performClick()
         composeRule.runOnIdle { assertEquals(ThemeMode.Dark, themeMode) }
         composeRule.runOnIdle { assertTrue(licensesOpened) }
+        composeRule.onNodeWithTag("restore-tours").performScrollTo().performClick()
+        composeRule.onNodeWithText("Restore all tours?").assertIsDisplayed()
+        composeRule.onNodeWithText("Restore").performClick()
+        composeRule.runOnIdle { assertTrue(toursRestored) }
+    }
+
+    @Test
+    fun screenTourAdvancesCompletesAndCanBeRestored() {
+        val store = InMemoryTourPreferenceStore()
+        composeRule.setContent {
+            MaterialTheme {
+                val anchors = rememberTourAnchorRegistry()
+                Box(modifier = androidx.compose.ui.Modifier.fillMaxSize()) {
+                    Box(
+                        modifier =
+                        androidx.compose.ui.Modifier
+                            .width(80.dp)
+                            .tourAnchor(anchors, "target"),
+                    )
+                    TourOverlay(
+                        tour = ScreenTour.Chat,
+                        store = store,
+                        steps =
+                        listOf(
+                            TourStep(
+                                "first",
+                                "target",
+                                "First",
+                                "Long body ".repeat(100),
+                                "Target",
+                            ),
+                            TourStep("second", "target", "Second", "Second body", "Target"),
+                        ),
+                        anchors = anchors,
+                        progressText = { current, total -> "$current of $total" },
+                        previousLabel = "Back",
+                        nextLabel = "Next",
+                        completeLabel = "Complete",
+                        closeDescription = "Close this screen tour",
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("1 of 2").assertIsDisplayed()
+        composeRule.onNodeWithTag("tour-scroll-content").assertIsDisplayed()
+        composeRule.onNodeWithText("Next").assertIsDisplayed()
+        composeRule.onNodeWithText("Next").performClick()
+        composeRule.onNodeWithText("2 of 2").assertIsDisplayed()
+        composeRule.onNodeWithText("Complete").performClick()
+        composeRule.onNodeWithTag("tour-overlay-chat").assertDoesNotExist()
+
+        composeRule.runOnIdle { store.restoreAll() }
+        composeRule.onNodeWithText("1 of 2").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Close this screen tour").performClick()
+        composeRule.onNodeWithTag("tour-overlay-chat").assertDoesNotExist()
     }
 
     @Test

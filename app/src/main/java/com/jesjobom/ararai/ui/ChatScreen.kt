@@ -52,6 +52,12 @@ import com.jesjobom.ararai.reporting.GeneratedContentReportDraft
 import com.jesjobom.ararai.reporting.PendingReport
 import com.jesjobom.ararai.reporting.ReportDeliveryReceipt
 import com.jesjobom.ararai.reporting.ReportReason
+import com.jesjobom.ararai.ui.tour.ScreenTour
+import com.jesjobom.ararai.ui.tour.TourOverlay
+import com.jesjobom.ararai.ui.tour.TourPreferenceStore
+import com.jesjobom.ararai.ui.tour.TourStep
+import com.jesjobom.ararai.ui.tour.rememberTourAnchorRegistry
+import com.jesjobom.ararai.ui.tour.tourAnchor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,6 +74,8 @@ internal fun ChatScreen(
     pendingReports: List<PendingReport> = emptyList(),
     latestReportReceipt: ReportDeliveryReceipt? = null,
     onDeletePendingReport: (String) -> Unit = {},
+    tourPreferenceStore: TourPreferenceStore? = null,
+    transcriptionAvailable: Boolean = false,
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -96,6 +104,7 @@ internal fun ChatScreen(
         state.sessions.firstOrNull { it.id == state.selectedSessionId }?.title
             ?: stringResource(R.string.chat_title)
     val localizedError = state.errorKey?.localizedText() ?: state.error
+    val tourAnchors = rememberTourAnchorRegistry()
     val modelStatusText = when {
         state.toolInProgress ->
             state.activeToolName
@@ -146,270 +155,340 @@ internal fun ChatScreen(
         onPrepare = textToSpeechController::prepare,
     )
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = stringResource(R.string.chat_title),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = modelStatusText,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.action_back),
-                        )
-                    }
-                },
-                actions = {
-                    ReportCenterButton(
-                        pendingReports = pendingReports,
-                        latestReceipt = latestReportReceipt,
-                    ) {
-                        reportCenterDraft = onReportLatestResponse()
-                        reportCenterOpen = true
-                    }
-                    IconButton(onClick = { settingsOpen = true }) {
-                        Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = stringResource(R.string.chat_settings),
-                        )
-                    }
-                },
-            )
-        },
-        bottomBar = {
-            ChatInputBar(
-                prompt = state.prompt,
-                imageAttachments = state.imageAttachments,
-                audioPrompt = state.audioPrompt,
-                canAttachImage = state.canAttachImage,
-                canUseAudioPrompt = state.canUseAudioPrompt,
-                onPromptChanged = viewModel::onPromptChanged,
-                onAttachImage = viewModel::attachImage,
-                onRemoveImage = viewModel::removeImage,
-                onSendAudioPrompt = viewModel::submitAudioPrompt,
-                onClearAudioPrompt = viewModel::clearAudioPrompt,
-                canSubmit = state.canSubmit,
-                modelAvailable = state.modelStatus == com.jesjobom.ararai.chat.ChatUiState.MODEL_AVAILABLE,
-                onUnavailableInteraction = {
-                    Toast.makeText(context, unavailableMessage, Toast.LENGTH_SHORT).show()
-                },
-                isGenerating = state.isGenerating,
-                error = localizedError,
-                onSubmit = viewModel::submitPrompt,
-                onCancelGeneration = viewModel::cancelGeneration,
-                mediaServices = mediaServices,
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp),
-        ) {
-            SessionListButton(
-                title = currentSessionTitle,
-                isBusy = state.isGenerating || state.isLoadingModel || state.isPersistenceBusy,
-                onClick = { sessionListOpen = true },
-            )
-
-            textToSpeechState.errorKey?.localizedText()?.let { error ->
-                Text(
-                    text = error,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(bottom = 8.dp),
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = stringResource(R.string.chat_title),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = modelStatusText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.action_back),
+                            )
+                        }
+                    },
+                    actions = {
+                        ReportCenterButton(
+                            pendingReports = pendingReports,
+                            latestReceipt = latestReportReceipt,
+                        ) {
+                            reportCenterDraft = onReportLatestResponse()
+                            reportCenterOpen = true
+                        }
+                        IconButton(
+                            onClick = { settingsOpen = true },
+                            modifier = Modifier.tourAnchor(tourAnchors, "chat-settings"),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Settings,
+                                contentDescription = stringResource(R.string.chat_settings),
+                            )
+                        }
+                    },
                 )
-            }
+            },
+            bottomBar = {
+                ChatInputBar(
+                    prompt = state.prompt,
+                    imageAttachments = state.imageAttachments,
+                    audioPrompt = state.audioPrompt,
+                    canAttachImage = state.canAttachImage,
+                    canUseAudioPrompt = state.canUseAudioPrompt,
+                    onPromptChanged = viewModel::onPromptChanged,
+                    onAttachImage = viewModel::attachImage,
+                    onRemoveImage = viewModel::removeImage,
+                    onSendAudioPrompt = viewModel::submitAudioPrompt,
+                    onClearAudioPrompt = viewModel::clearAudioPrompt,
+                    canSubmit = state.canSubmit,
+                    modelAvailable = state.modelStatus == com.jesjobom.ararai.chat.ChatUiState.MODEL_AVAILABLE,
+                    onUnavailableInteraction = {
+                        Toast.makeText(context, unavailableMessage, Toast.LENGTH_SHORT).show()
+                    },
+                    isGenerating = state.isGenerating,
+                    error = localizedError,
+                    onSubmit = viewModel::submitPrompt,
+                    onCancelGeneration = viewModel::cancelGeneration,
+                    mediaServices = mediaServices,
+                )
+            },
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp),
+            ) {
+                SessionListButton(
+                    title = currentSessionTitle,
+                    isBusy = state.isGenerating || state.isLoadingModel || state.isPersistenceBusy,
+                    onClick = { sessionListOpen = true },
+                    modifier = Modifier.tourAnchor(tourAnchors, "chat-history"),
+                )
 
-            if (state.canRetryModelDownload) {
-                Button(
-                    onClick = onRetryModelDownload,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                ) {
-                    Icon(imageVector = Icons.Filled.Refresh, contentDescription = null)
+                textToSpeechState.errorKey?.localizedText()?.let { error ->
                     Text(
-                        text = stringResource(R.string.chat_retry_model_download),
-                        modifier = Modifier.padding(start = 8.dp),
+                        text = error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(bottom = 8.dp),
                     )
                 }
-            }
 
-            if (state.messages.isEmpty()) {
-                EmptyChatState(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                )
-            } else {
-                LazyColumn(
-                    state = messageListState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentPadding = PaddingValues(vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    if (state.hasOlderMessages) {
-                        item(key = "load-older-messages") {
-                            TextButton(
-                                onClick = viewModel::loadOlderMessages,
-                                enabled = !state.isLoadingOlderMessages,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                val label =
-                                    if (state.isLoadingOlderMessages) {
-                                        stringResource(R.string.chat_loading_older_messages)
-                                    } else {
-                                        stringResource(R.string.chat_load_older_messages)
-                                    }
-                                Text(label)
+                if (state.canRetryModelDownload) {
+                    Button(
+                        onClick = onRetryModelDownload,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                    ) {
+                        Icon(imageVector = Icons.Filled.Refresh, contentDescription = null)
+                        Text(
+                            text = stringResource(R.string.chat_retry_model_download),
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+
+                if (state.messages.isEmpty()) {
+                    EmptyChatState(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                    )
+                } else {
+                    LazyColumn(
+                        state = messageListState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentPadding = PaddingValues(vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (state.hasOlderMessages) {
+                            item(key = "load-older-messages") {
+                                TextButton(
+                                    onClick = viewModel::loadOlderMessages,
+                                    enabled = !state.isLoadingOlderMessages,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    val label =
+                                        if (state.isLoadingOlderMessages) {
+                                            stringResource(R.string.chat_loading_older_messages)
+                                        } else {
+                                            stringResource(R.string.chat_load_older_messages)
+                                        }
+                                    Text(label)
+                                }
                             }
                         }
-                    }
-                    items(state.messages) { message ->
-                        val isStreaming = state.isGenerating && message.id == state.messages.lastOrNull()?.id
-                        MessageRow(
-                            message = message,
-                            showReasoning = state.showReasoning,
-                            showAudioTranscriptions = state.showAudioTranscriptions,
-                            mediaServices = mediaServices,
-                            isStreaming = isStreaming,
-                            isSpeaking = textToSpeechState.activeMessageId == message.id,
-                            isSpeechPrepared = textToSpeechController.isPrepared(message.id),
-                            onToggleSpeech = {
-                                textToSpeechController.clearError()
-                                textToSpeechController.toggle(message.id, message.text)
-                            },
-                            onReport = if (message.isReportable() && !isStreaming) {
-                                { reportDraft = onReportResponse(message.id) }
-                            } else {
-                                null
-                            },
-                        )
-                    }
-                    item(key = "message-list-bottom") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .bringIntoViewRequester(bottomRequester),
-                        )
+                        items(state.messages) { message ->
+                            val isStreaming = state.isGenerating && message.id == state.messages.lastOrNull()?.id
+                            MessageRow(
+                                message = message,
+                                showReasoning = state.showReasoning,
+                                showAudioTranscriptions = state.showAudioTranscriptions,
+                                mediaServices = mediaServices,
+                                isStreaming = isStreaming,
+                                isSpeaking = textToSpeechState.activeMessageId == message.id,
+                                isSpeechPrepared = textToSpeechController.isPrepared(message.id),
+                                onToggleSpeech = {
+                                    textToSpeechController.clearError()
+                                    textToSpeechController.toggle(message.id, message.text)
+                                },
+                                onReport = if (message.isReportable() && !isStreaming) {
+                                    { reportDraft = onReportResponse(message.id) }
+                                } else {
+                                    null
+                                },
+                            )
+                        }
+                        item(key = "message-list-bottom") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .bringIntoViewRequester(bottomRequester),
+                            )
+                        }
                     }
                 }
             }
         }
-    }
 
-    if (sessionListOpen) {
-        SessionListDialog(
-            sessions = state.sessions,
-            selectedSessionId = state.selectedSessionId,
-            canDelete = state.canDeleteCurrentSession,
-            onDismiss = { sessionListOpen = false },
-            onCreate = {
-                viewModel.createSession()
-                sessionListOpen = false
-            },
-            onSelect = {
-                viewModel.selectSession(it)
-                sessionListOpen = false
-            },
-            onRename = { session ->
-                renameSessionId = session.id
-                renameText = session.title
-                renameDialogOpen = true
-                sessionListOpen = false
-            },
-            onDelete = viewModel::deleteSession,
-            onClearAll = {
-                sessionListOpen = false
-                clearSessionsConfirmationOpen = true
-            },
-        )
-    }
+        if (sessionListOpen) {
+            SessionListDialog(
+                sessions = state.sessions,
+                selectedSessionId = state.selectedSessionId,
+                canDelete = state.canDeleteCurrentSession,
+                onDismiss = { sessionListOpen = false },
+                onCreate = {
+                    viewModel.createSession()
+                    sessionListOpen = false
+                },
+                onSelect = {
+                    viewModel.selectSession(it)
+                    sessionListOpen = false
+                },
+                onRename = { session ->
+                    renameSessionId = session.id
+                    renameText = session.title
+                    renameDialogOpen = true
+                    sessionListOpen = false
+                },
+                onDelete = viewModel::deleteSession,
+                onClearAll = {
+                    sessionListOpen = false
+                    clearSessionsConfirmationOpen = true
+                },
+            )
+        }
 
-    if (clearSessionsConfirmationOpen) {
-        ClearSessionsConfirmationDialog(
-            sessionCount = state.sessions.size,
-            onDismiss = { clearSessionsConfirmationOpen = false },
-            onConfirm = {
-                viewModel.clearAllSessions()
-                clearSessionsConfirmationOpen = false
-            },
-        )
-    }
+        if (clearSessionsConfirmationOpen) {
+            ClearSessionsConfirmationDialog(
+                sessionCount = state.sessions.size,
+                onDismiss = { clearSessionsConfirmationOpen = false },
+                onConfirm = {
+                    viewModel.clearAllSessions()
+                    clearSessionsConfirmationOpen = false
+                },
+            )
+        }
 
-    if (settingsOpen) {
-        ChatSettingsDialog(
-            reasoningEnabled = state.reasoningEnabled,
-            showReasoning = state.showReasoning,
-            canEnableReasoning = state.canEnableReasoning,
-            canShowReasoning = state.canShowReasoning,
-            showAudioTranscriptions = state.showAudioTranscriptions,
-            onReasoningEnabledChange = viewModel::setReasoningEnabled,
-            onShowReasoningChange = viewModel::setShowReasoning,
-            onShowAudioTranscriptionsChange = viewModel::setShowAudioTranscriptions,
-            onReset = {
-                viewModel.setReasoningEnabled(false)
-                viewModel.setShowReasoning(false)
-                viewModel.setShowAudioTranscriptions(true)
-            },
-            onDismiss = { settingsOpen = false },
-        )
-    }
+        if (settingsOpen) {
+            ChatSettingsDialog(
+                reasoningEnabled = state.reasoningEnabled,
+                showReasoning = state.showReasoning,
+                canEnableReasoning = state.canEnableReasoning,
+                canShowReasoning = state.canShowReasoning,
+                showAudioTranscriptions = state.showAudioTranscriptions,
+                onReasoningEnabledChange = viewModel::setReasoningEnabled,
+                onShowReasoningChange = viewModel::setShowReasoning,
+                onShowAudioTranscriptionsChange = viewModel::setShowAudioTranscriptions,
+                onReset = {
+                    viewModel.setReasoningEnabled(false)
+                    viewModel.setShowReasoning(false)
+                    viewModel.setShowAudioTranscriptions(true)
+                },
+                onDismiss = { settingsOpen = false },
+            )
+        }
 
-    if (renameDialogOpen) {
-        RenameSessionDialog(
-            title = renameText,
-            onTitleChange = { renameText = it },
-            onDismiss = {
-                renameSessionId = null
-                renameDialogOpen = false
-            },
-            onConfirm = {
-                renameSessionId?.let { viewModel.renameSession(it, renameText) }
-                renameSessionId = null
-                renameDialogOpen = false
-            },
-        )
-    }
-    reportDraft?.let { draft ->
-        GeneratedContentReportDialog(
-            draft = draft,
-            onSubmit = { reason, comment, contextIds ->
-                onSubmitReport(draft, reason, comment, contextIds)
-                reportDraft = null
-            },
-            onDismiss = { reportDraft = null },
-        )
-    }
-    if (reportCenterOpen) {
-        ReportCenterDialog(
-            draft = reportCenterDraft,
-            pendingReports = pendingReports,
-            onSubmit = { reason, comment, contextIds ->
-                reportCenterDraft?.let { onSubmitReport(it, reason, comment, contextIds) }
-                reportCenterOpen = false
-            },
-            onDeletePendingReport = onDeletePendingReport,
-            onDismiss = { reportCenterOpen = false },
-        )
+        if (renameDialogOpen) {
+            RenameSessionDialog(
+                title = renameText,
+                onTitleChange = { renameText = it },
+                onDismiss = {
+                    renameSessionId = null
+                    renameDialogOpen = false
+                },
+                onConfirm = {
+                    renameSessionId?.let { viewModel.renameSession(it, renameText) }
+                    renameSessionId = null
+                    renameDialogOpen = false
+                },
+            )
+        }
+        reportDraft?.let { draft ->
+            GeneratedContentReportDialog(
+                draft = draft,
+                onSubmit = { reason, comment, contextIds ->
+                    onSubmitReport(draft, reason, comment, contextIds)
+                    reportDraft = null
+                },
+                onDismiss = { reportDraft = null },
+            )
+        }
+        if (reportCenterOpen) {
+            ReportCenterDialog(
+                draft = reportCenterDraft,
+                pendingReports = pendingReports,
+                onSubmit = { reason, comment, contextIds ->
+                    reportCenterDraft?.let { onSubmitReport(it, reason, comment, contextIds) }
+                    reportCenterOpen = false
+                },
+                onDeletePendingReport = onDeletePendingReport,
+                onDismiss = { reportCenterOpen = false },
+            )
+        }
+        val tourSteps = buildList {
+            add(
+                TourStep(
+                    id = "chat-history",
+                    anchorId = "chat-history",
+                    title = stringResource(R.string.tour_chat_history_title),
+                    body =
+                    stringResource(
+                        if (state.modelStatus == com.jesjobom.ararai.chat.ChatUiState.MODEL_AVAILABLE) {
+                            R.string.tour_chat_history_ready_body
+                        } else {
+                            R.string.tour_chat_history_body
+                        },
+                    ),
+                    targetDescription = stringResource(R.string.tour_chat_history_target),
+                ),
+            )
+            if (state.canEnableReasoning) {
+                add(
+                    TourStep(
+                        id = "chat-reasoning",
+                        anchorId = "chat-settings",
+                        title = stringResource(R.string.tour_chat_reasoning_title),
+                        body = stringResource(R.string.tour_chat_reasoning_body),
+                        targetDescription = stringResource(R.string.tour_chat_settings_target),
+                    ),
+                )
+            }
+            if (state.canShowReasoning) {
+                add(
+                    TourStep(
+                        id = "chat-reasoning-visibility",
+                        anchorId = "chat-settings",
+                        title = stringResource(R.string.tour_chat_reasoning_visibility_title),
+                        body = stringResource(R.string.tour_chat_reasoning_visibility_body),
+                        targetDescription = stringResource(R.string.tour_chat_settings_target),
+                    ),
+                )
+            }
+            if (transcriptionAvailable) {
+                add(
+                    TourStep(
+                        id = "chat-transcripts",
+                        anchorId = "chat-settings",
+                        title = stringResource(R.string.tour_chat_transcripts_title),
+                        body = stringResource(R.string.tour_chat_transcripts_body),
+                        targetDescription = stringResource(R.string.tour_chat_settings_target),
+                    ),
+                )
+            }
+        }
+        tourPreferenceStore?.let { store ->
+            TourOverlay(
+                tour = ScreenTour.Chat,
+                store = store,
+                steps = tourSteps,
+                anchors = tourAnchors,
+                progressText = { current, total -> stringResource(R.string.tour_progress, current, total) },
+                previousLabel = stringResource(R.string.action_back),
+                nextLabel = stringResource(R.string.action_next),
+                completeLabel = stringResource(R.string.action_complete),
+                closeDescription = stringResource(R.string.tour_close_screen),
+            )
+        }
     }
 }
 

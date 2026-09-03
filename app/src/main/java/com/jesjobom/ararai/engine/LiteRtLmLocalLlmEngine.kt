@@ -34,6 +34,8 @@ import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelAccelerationPolicy
 import com.jesjobom.ararai.model.ModelInputCapabilities
 import com.jesjobom.ararai.model.ModelRuntime
+import com.jesjobom.ararai.tools.ApplicationToolDispatcher
+import com.jesjobom.ararai.tools.modelApplicationToolDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -384,7 +386,17 @@ class AndroidLiteRtLmBridge(
     private val webSearchKnowledgeToolResolver: WebSearchKnowledgeToolResolver =
         WebSearchKnowledgeToolResolver { null },
     private val calculatorEngine: com.jesjobom.ararai.math.LocalMathEngine = EvalExLocalMathEngine(),
+    applicationToolDispatcher: ApplicationToolDispatcher? = null,
+    private val webSearchDisplayNameProvider: () -> String = {
+        webSearchKnowledgeToolResolver.resolve()?.displayName ?: "Web search"
+    },
 ) : LiteRtLmBridge {
+    private val toolDispatcher = applicationToolDispatcher ?: modelApplicationToolDispatcher(
+        wikipediaTool = wikipediaKnowledgeTool,
+        webSearchTool = webSearchKnowledgeToolResolver::resolve,
+        calculatorEngine = calculatorEngine,
+    )
+
     override suspend fun load(
         modelPath: String,
         config: InferenceConfig,
@@ -417,9 +429,8 @@ class AndroidLiteRtLmBridge(
             )
             AndroidLiteRtLmSession(
                 engine,
-                wikipediaKnowledgeTool,
-                webSearchKnowledgeToolResolver,
-                calculatorEngine,
+                toolDispatcher,
+                webSearchDisplayNameProvider,
                 toolNames,
             )
         } catch (error: Throwable) {
@@ -438,9 +449,8 @@ class AndroidLiteRtLmBridge(
 @OptIn(ExperimentalApi::class)
 private class AndroidLiteRtLmSession(
     private val engine: Engine,
-    private val wikipediaKnowledgeTool: KnowledgeTool,
-    private val webSearchKnowledgeToolResolver: WebSearchKnowledgeToolResolver,
-    private val calculatorEngine: com.jesjobom.ararai.math.LocalMathEngine,
+    private val toolDispatcher: ApplicationToolDispatcher,
+    private val webSearchDisplayNameProvider: () -> String,
     private val supportedToolNames: Set<String>,
 ) : LiteRtLmSession {
     private val conversations =
@@ -630,21 +640,26 @@ private class AndroidLiteRtLmSession(
         }
         val wikipediaTool =
             if (WIKIPEDIA_SEARCH_TOOL_NAME in requested) {
-                WikipediaOpenApiTool(wikipediaKnowledgeTool)
+                WikipediaOpenApiTool(toolDispatcher, supportedToolNames)
             } else {
                 null
             }
         val webSearchTool =
             if (WEB_SEARCH_TOOL_NAME in requested) {
                 WebSearchOpenApiTool(
-                    checkNotNull(webSearchKnowledgeToolResolver.resolve()) {
-                        "Selected web-search provider is unavailable"
-                    },
+                    dispatcher = toolDispatcher,
+                    verifiedModelToolIds = supportedToolNames,
+                    displayName = webSearchDisplayNameProvider(),
                 )
             } else {
                 null
             }
-        val calculatorTool = if (CALCULATOR_TOOL_NAME in requested) CalculatorOpenApiTool(calculatorEngine) else null
+        val calculatorTool =
+            if (CALCULATOR_TOOL_NAME in requested) {
+                CalculatorOpenApiTool(toolDispatcher, supportedToolNames)
+            } else {
+                null
+            }
         val configuredTools =
             listOfNotNull(
                 wikipediaTool?.let(::tool),

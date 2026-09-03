@@ -16,7 +16,6 @@ import com.jesjobom.ararai.chat.ConversationSelection
 import com.jesjobom.ararai.chat.InstructionPreferences
 import com.jesjobom.ararai.chat.InteractionMode
 import com.jesjobom.ararai.chat.conversationTurnSettings
-import com.jesjobom.ararai.chat.eligibleToolNames
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.knowledge.WebSearchPreferences
@@ -27,6 +26,8 @@ import com.jesjobom.ararai.model.requireInference
 import com.jesjobom.ararai.model.resolve
 import com.jesjobom.ararai.reporting.DiagnosticErrorReportCoordinator
 import com.jesjobom.ararai.reporting.DiagnosticOperationContext
+import com.jesjobom.ararai.tools.ApplicationToolRegistry
+import com.jesjobom.ararai.tools.eligibleModelToolIds
 import com.jesjobom.ararai.voice.AndroidVoiceTurnCapture
 import com.jesjobom.ararai.voice.SequentialVoiceSpeechQueue
 import com.jesjobom.ararai.voice.VoiceChatPreferences
@@ -70,6 +71,7 @@ internal fun rememberArarAiAppControllers(
     chatTextToSpeechServiceFactory: () -> ChatTextToSpeechService,
     chatLanguageIdentifierFactory: () -> ChatLanguageIdentifier,
     diagnosticErrorReportCoordinator: DiagnosticErrorReportCoordinator? = null,
+    applicationToolRegistry: ApplicationToolRegistry,
 ): ArarAiAppControllers {
     val controllers = remember {
         val runtime = AppLocalLlmRuntime(engineFactory = localLlmEngineFactory)
@@ -92,12 +94,7 @@ internal fun rememberArarAiAppControllers(
                     conversationTurnSettings(
                         settings,
                         InteractionMode.Chat,
-                        eligibleToolNames(
-                            settings,
-                            activeModel,
-                            webSearchPreferences.settings.value.preferredProvider,
-                            com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH,
-                        ),
+                        eligibleModelToolIds(applicationToolRegistry, activeModel),
                         webSearchProvider = webSearchPreferences.settings.value.preferredProvider,
                         webSearchFallbackProvider =
                         webSearchPreferences.settings.value.orderedEnabledProviders.getOrNull(1),
@@ -144,12 +141,7 @@ internal fun rememberArarAiAppControllers(
                     conversationTurnSettings(
                         settings,
                         InteractionMode.Voice,
-                        eligibleToolNames(
-                            settings,
-                            activeModel,
-                            webSearchPreferences.settings.value.preferredProvider,
-                            com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH,
-                        ),
+                        eligibleModelToolIds(applicationToolRegistry, activeModel),
                         webSearchProvider = webSearchPreferences.settings.value.preferredProvider,
                         webSearchFallbackProvider =
                         webSearchPreferences.settings.value.orderedEnabledProviders.getOrNull(1),

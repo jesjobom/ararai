@@ -1,12 +1,7 @@
 package com.jesjobom.ararai.knowledge
 
-enum class ApplicationToolCategory { ExternalKnowledge, LocalCompute }
-
-interface ApplicationTool<in Request, out Result> {
-    val displayName: String
-    val category: ApplicationToolCategory
-    suspend fun execute(request: Request): Result
-}
+import com.jesjobom.ararai.tools.ApplicationTool
+import com.jesjobom.ararai.tools.ApplicationToolCategory
 
 data class ToolRequest(
     val query: String,

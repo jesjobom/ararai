@@ -3,6 +3,15 @@ package com.jesjobom.ararai.knowledge
 import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.jesjobom.ararai.chat.WEB_SEARCH_TOOL_NAME
+import com.jesjobom.ararai.tools.ApplicationToolConsumer
+import com.jesjobom.ararai.tools.ApplicationToolDispatchResult
+import com.jesjobom.ararai.tools.ApplicationToolDispatcher
+import com.jesjobom.ararai.tools.ApplicationToolInvocation
+import com.jesjobom.ararai.tools.ApplicationToolRejection
+import com.jesjobom.ararai.tools.CURRENT_TOOL_CONTRACT_VERSION
+import com.jesjobom.ararai.tools.knowledgeResult
+import com.jesjobom.ararai.tools.singleWebSearchDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import java.util.Locale
@@ -10,12 +19,20 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class WebSearchOpenApiTool(
-    knowledgeTool: KnowledgeTool,
-    languageProvider: () -> String = { Locale.getDefault().language },
+    dispatcher: ApplicationToolDispatcher,
+    verifiedModelToolIds: Set<String>,
+    val displayName: String,
 ) : OpenApiTool {
-    val displayName: String = knowledgeTool.displayName
+    constructor(
+        knowledgeTool: KnowledgeTool,
+        languageProvider: () -> String = { Locale.getDefault().language },
+    ) : this(
+        dispatcher = singleWebSearchDispatcher(knowledgeTool, languageProvider),
+        verifiedModelToolIds = setOf(WEB_SEARCH_TOOL_NAME),
+        displayName = knowledgeTool.displayName,
+    )
 
-    private val turn = WebSearchToolTurn(knowledgeTool, languageProvider)
+    private val turn = WebSearchToolTurn(dispatcher, verifiedModelToolIds)
 
     override fun getToolDescriptionJsonString(): String = WebSearchToolTurn.TOOL_DESCRIPTION
 
@@ -27,9 +44,17 @@ class WebSearchOpenApiTool(
 }
 
 internal class WebSearchToolTurn(
-    private val knowledgeTool: KnowledgeTool,
-    private val languageProvider: () -> String = { Locale.getDefault().language },
+    private val dispatcher: ApplicationToolDispatcher,
+    private val verifiedModelToolIds: Set<String>,
 ) {
+    constructor(
+        knowledgeTool: KnowledgeTool,
+        languageProvider: () -> String = { Locale.getDefault().language },
+    ) : this(
+        dispatcher = singleWebSearchDispatcher(knowledgeTool, languageProvider),
+        verifiedModelToolIds = setOf(WEB_SEARCH_TOOL_NAME),
+    )
+
     private val invocationCount = AtomicInteger(0)
     private val capturedSources = AtomicReference<List<KnowledgeSource>>(emptyList())
     private val observer = AtomicReference<(ApplicationToolExecutionEvent) -> Unit>({})
@@ -47,21 +72,33 @@ internal class WebSearchToolTurn(
             return failureJson("CALL_LIMIT_REACHED", "Web search reached the per-turn call limit.")
         }
         observer.get().invoke(ApplicationToolExecutionEvent.Started)
-        val request =
-            parseRequest(paramsJsonString)
-                ?: return observedFailure(ToolFailureReason.InvalidArguments)
         val result =
             try {
-                runBlocking { knowledgeTool.execute(request) }
+                runBlocking {
+                    dispatcher.execute(
+                        ApplicationToolInvocation(
+                            id = WEB_SEARCH_TOOL_NAME,
+                            version = CURRENT_TOOL_CONTRACT_VERSION,
+                            consumer = ApplicationToolConsumer.Model,
+                            argumentsJson = paramsJsonString,
+                            verifiedModelToolIds = verifiedModelToolIds,
+                        ),
+                    )
+                }
             } catch (_: CancellationException) {
-                ToolResult.Failure(ToolFailureReason.Cancelled)
+                ApplicationToolDispatchResult.Rejected(ApplicationToolRejection.Cancelled)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
-                ToolResult.Failure(ToolFailureReason.Cancelled)
+                ApplicationToolDispatchResult.Rejected(ApplicationToolRejection.Cancelled)
             } catch (_: RuntimeException) {
-                ToolResult.Failure(ToolFailureReason.Unavailable)
+                ApplicationToolDispatchResult.Rejected(ApplicationToolRejection.Unavailable)
             }
-        return serializeObserved(result)
+        return when (result) {
+            is ApplicationToolDispatchResult.Executed -> serializeObserved(result.knowledgeResult())
+            is ApplicationToolDispatchResult.Rejected -> {
+                observedFailure(result.reason.toToolFailureReason())
+            }
+        }
     }
 
     fun consumeCapturedSources(): List<KnowledgeSource> = capturedSources.getAndSet(emptyList())
@@ -90,34 +127,6 @@ internal class WebSearchToolTurn(
     private fun observedFailure(reason: ToolFailureReason): String {
         observer.get().invoke(ApplicationToolExecutionEvent.Failed(reason))
         return failureJson(reason.code(), reason.message())
-    }
-
-    @Suppress("ReturnCount")
-    private fun parseRequest(raw: String): ToolRequest? {
-        val root =
-            runCatching { JsonParser.parseString(raw) }
-                .getOrNull()
-                ?.takeIf { it.isJsonObject }
-                ?.asJsonObject
-                ?: return null
-        if (root.keySet() != EXPECTED_ARGUMENTS) return null
-        val query = root.strictString("query") ?: return null
-        return ToolRequest(
-            query = query,
-            language = resolvedLanguage(),
-            focus = query,
-        ).takeIf(::validWebSearchRequest)
-    }
-
-    private fun resolvedLanguage(): String = languageProvider()
-        .trim()
-        .lowercase(Locale.ROOT)
-        .takeIf(LANGUAGE_PATTERN::matches)
-        ?: DEFAULT_LANGUAGE
-
-    private fun JsonObject.strictString(name: String): String? {
-        val value = get(name) ?: return null
-        return value.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
     }
 
     private fun failureJson(
@@ -153,6 +162,20 @@ internal class WebSearchToolTurn(
         ToolFailureReason.Cancelled -> "Web search was cancelled."
     }
 
+    private fun ApplicationToolRejection.toToolFailureReason(): ToolFailureReason = when (this) {
+        ApplicationToolRejection.InvalidArguments -> ToolFailureReason.InvalidArguments
+        ApplicationToolRejection.TimedOut -> ToolFailureReason.TimedOut
+        ApplicationToolRejection.Cancelled -> ToolFailureReason.Cancelled
+        ApplicationToolRejection.UnknownTool,
+        ApplicationToolRejection.UnsupportedVersion,
+        ApplicationToolRejection.Disabled,
+        ApplicationToolRejection.NotConfigured,
+        ApplicationToolRejection.IneligibleConsumer,
+        ApplicationToolRejection.UnsupportedModel,
+        ApplicationToolRejection.Unavailable,
+        -> ToolFailureReason.Unavailable
+    }
+
     companion object {
         const val MAX_CALLS_PER_TURN = 2
         val EXPECTED_ARGUMENTS = setOf("query")
@@ -162,8 +185,5 @@ internal class WebSearchToolTurn(
                 """the best available evidence.","parameters":{"type":"object","additionalProperties":false,""" +
                 """"properties":{"query":{"type":"string","description":"The specific question or """ +
                 """evidence to search for."}},"required":["query"]}}"""
-
-        private const val DEFAULT_LANGUAGE = "en"
-        private val LANGUAGE_PATTERN = Regex("[a-z]{2,3}")
     }
 }

@@ -2,7 +2,15 @@ package com.jesjobom.ararai.knowledge
 
 import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.gson.JsonObject
-import com.google.gson.JsonParser
+import com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME
+import com.jesjobom.ararai.tools.ApplicationToolConsumer
+import com.jesjobom.ararai.tools.ApplicationToolDispatchResult
+import com.jesjobom.ararai.tools.ApplicationToolDispatcher
+import com.jesjobom.ararai.tools.ApplicationToolInvocation
+import com.jesjobom.ararai.tools.ApplicationToolRejection
+import com.jesjobom.ararai.tools.CURRENT_TOOL_CONTRACT_VERSION
+import com.jesjobom.ararai.tools.knowledgeResult
+import com.jesjobom.ararai.tools.singleWikipediaDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.atomic.AtomicInteger
@@ -15,11 +23,17 @@ import java.util.concurrent.atomic.AtomicReference
  * including when the model supplies invalid arguments or the provider fails.
  */
 class WikipediaOpenApiTool(
-    knowledgeTool: KnowledgeTool,
+    dispatcher: ApplicationToolDispatcher,
+    verifiedModelToolIds: Set<String>,
+    val displayName: String = "Wikipedia",
 ) : OpenApiTool {
-    val displayName: String = knowledgeTool.displayName
+    constructor(knowledgeTool: KnowledgeTool) : this(
+        dispatcher = singleWikipediaDispatcher(knowledgeTool),
+        verifiedModelToolIds = setOf(WIKIPEDIA_SEARCH_TOOL_NAME),
+        displayName = knowledgeTool.displayName,
+    )
 
-    private val turn = WikipediaToolTurn(knowledgeTool)
+    private val turn = WikipediaToolTurn(dispatcher, verifiedModelToolIds)
 
     override fun getToolDescriptionJsonString(): String = WikipediaToolTurn.TOOL_DESCRIPTION
 
@@ -55,8 +69,14 @@ sealed interface ApplicationToolExecutionEvent {
  * runtime boundary.
  */
 internal class WikipediaToolTurn(
-    private val knowledgeTool: KnowledgeTool,
+    private val dispatcher: ApplicationToolDispatcher,
+    private val verifiedModelToolIds: Set<String>,
 ) {
+    constructor(knowledgeTool: KnowledgeTool) : this(
+        dispatcher = singleWikipediaDispatcher(knowledgeTool),
+        verifiedModelToolIds = setOf(WIKIPEDIA_SEARCH_TOOL_NAME),
+    )
+
     private val invocationCount = AtomicInteger(0)
     private val capturedSources = AtomicReference<List<KnowledgeSource>>(emptyList())
     private val observer = AtomicReference<(ApplicationToolExecutionEvent) -> Unit>({})
@@ -75,24 +95,34 @@ internal class WikipediaToolTurn(
         }
         observer.get().invoke(ApplicationToolExecutionEvent.Started)
 
-        val request =
-            parseRequest(paramsJsonString)
-                ?: return observedFailure(
-                    adapterFailure = ToolAdapterFailure.InvalidArguments,
-                    reason = ToolFailureReason.InvalidArguments,
-                )
         val result =
             try {
-                runBlocking { knowledgeTool.execute(request) }
+                runBlocking {
+                    dispatcher.execute(
+                        ApplicationToolInvocation(
+                            id = WIKIPEDIA_SEARCH_TOOL_NAME,
+                            version = CURRENT_TOOL_CONTRACT_VERSION,
+                            consumer = ApplicationToolConsumer.Model,
+                            argumentsJson = paramsJsonString,
+                            verifiedModelToolIds = verifiedModelToolIds,
+                        ),
+                    )
+                }
             } catch (_: CancellationException) {
-                ToolResult.Failure(ToolFailureReason.Cancelled)
+                ApplicationToolDispatchResult.Rejected(ApplicationToolRejection.Cancelled)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
-                ToolResult.Failure(ToolFailureReason.Cancelled)
+                ApplicationToolDispatchResult.Rejected(ApplicationToolRejection.Cancelled)
             } catch (_: RuntimeException) {
-                ToolResult.Failure(ToolFailureReason.Unavailable)
+                ApplicationToolDispatchResult.Rejected(ApplicationToolRejection.Unavailable)
             }
-        return serializeObserved(result)
+        return when (result) {
+            is ApplicationToolDispatchResult.Executed -> serializeObserved(result.knowledgeResult())
+            is ApplicationToolDispatchResult.Rejected -> {
+                val failure = result.reason.toToolFailureReason()
+                observedFailure(failure.toAdapterFailure(), failure)
+            }
+        }
     }
 
     /**
@@ -121,20 +151,6 @@ internal class WikipediaToolTurn(
         return failureJson(adapterFailure)
     }
 
-    @Suppress("ReturnCount")
-    private fun parseRequest(raw: String): ToolRequest? {
-        val root =
-            runCatching { JsonParser.parseString(raw) }
-                .getOrNull()
-                ?.takeIf { it.isJsonObject }
-                ?.asJsonObject
-                ?: return null
-        if (root.keySet() != EXPECTED_ARGUMENTS) return null
-        val query = root.strictString("query") ?: return null
-        val language = root.strictString("language") ?: return null
-        return ToolRequest(query = query, language = language)
-    }
-
     private fun serialize(result: ToolResult): String = when (result) {
         is ToolResult.Success -> {
             capturedSources.updateAndGet { existing ->
@@ -158,13 +174,6 @@ internal class WikipediaToolTurn(
             addProperty("message", failure.message)
         }.toString()
 
-    @Suppress("ReturnCount")
-    private fun JsonObject.strictString(name: String): String? {
-        val value = get(name) ?: return null
-        if (!value.isJsonPrimitive || !value.asJsonPrimitive.isString) return null
-        return value.asString
-    }
-
     private fun ToolFailureReason.toAdapterFailure(): ToolAdapterFailure = when (this) {
         ToolFailureReason.InvalidArguments -> ToolAdapterFailure.InvalidArguments
         ToolFailureReason.NoResults -> ToolAdapterFailure.NoResults
@@ -175,6 +184,20 @@ internal class WikipediaToolTurn(
         ToolFailureReason.MalformedResponse -> ToolAdapterFailure.MalformedResponse
         ToolFailureReason.TimedOut -> ToolAdapterFailure.TimedOut
         ToolFailureReason.Cancelled -> ToolAdapterFailure.Cancelled
+    }
+
+    private fun ApplicationToolRejection.toToolFailureReason(): ToolFailureReason = when (this) {
+        ApplicationToolRejection.InvalidArguments -> ToolFailureReason.InvalidArguments
+        ApplicationToolRejection.TimedOut -> ToolFailureReason.TimedOut
+        ApplicationToolRejection.Cancelled -> ToolFailureReason.Cancelled
+        ApplicationToolRejection.UnknownTool,
+        ApplicationToolRejection.UnsupportedVersion,
+        ApplicationToolRejection.Disabled,
+        ApplicationToolRejection.NotConfigured,
+        ApplicationToolRejection.IneligibleConsumer,
+        ApplicationToolRejection.UnsupportedModel,
+        ApplicationToolRejection.Unavailable,
+        -> ToolFailureReason.Unavailable
     }
 
     private enum class ToolAdapterFailure(

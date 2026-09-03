@@ -5,6 +5,15 @@ package com.jesjobom.ararai.math
 import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.jesjobom.ararai.chat.CALCULATOR_TOOL_NAME
+import com.jesjobom.ararai.tools.ApplicationToolConsumer
+import com.jesjobom.ararai.tools.ApplicationToolDispatchResult
+import com.jesjobom.ararai.tools.ApplicationToolDispatcher
+import com.jesjobom.ararai.tools.ApplicationToolInvocation
+import com.jesjobom.ararai.tools.ApplicationToolRejection
+import com.jesjobom.ararai.tools.CURRENT_TOOL_CONTRACT_VERSION
+import com.jesjobom.ararai.tools.mathResult
+import com.jesjobom.ararai.tools.singleCalculatorDispatcher
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -14,8 +23,16 @@ sealed interface CalculatorExecutionEvent {
     data class Finished(val failure: MathFailureReason? = null) : CalculatorExecutionEvent
 }
 
-class CalculatorOpenApiTool(engine: LocalMathEngine) : OpenApiTool {
-    private val turn = CalculatorToolTurn(engine)
+class CalculatorOpenApiTool(
+    dispatcher: ApplicationToolDispatcher,
+    verifiedModelToolIds: Set<String>,
+) : OpenApiTool {
+    constructor(engine: LocalMathEngine) : this(
+        dispatcher = singleCalculatorDispatcher(engine),
+        verifiedModelToolIds = setOf(CALCULATOR_TOOL_NAME),
+    )
+
+    private val turn = CalculatorToolTurn(dispatcher, verifiedModelToolIds)
     fun beginTurn(observer: (CalculatorExecutionEvent) -> Unit = {}) = turn.beginTurn(observer)
     override fun getToolDescriptionJsonString(): String = CalculatorToolTurn.DESCRIPTION
     override fun execute(paramsJsonString: String): String = turn.execute(paramsJsonString)
@@ -25,7 +42,15 @@ class CalculatorOpenApiTool(engine: LocalMathEngine) : OpenApiTool {
     }
 }
 
-internal class CalculatorToolTurn(private val engine: LocalMathEngine) {
+internal class CalculatorToolTurn(
+    private val dispatcher: ApplicationToolDispatcher,
+    private val verifiedModelToolIds: Set<String>,
+) {
+    constructor(engine: LocalMathEngine) : this(
+        dispatcher = singleCalculatorDispatcher(engine),
+        verifiedModelToolIds = setOf(CALCULATOR_TOOL_NAME),
+    )
+
     private val calls = AtomicInteger()
     private val observer = AtomicReference<(CalculatorExecutionEvent) -> Unit>({})
 
@@ -37,27 +62,57 @@ internal class CalculatorToolTurn(private val engine: LocalMathEngine) {
     fun execute(paramsJsonString: String): String {
         if (calls.incrementAndGet() > MAX_CALLS_PER_TURN) return failure(MathFailureReason.ComplexityLimit, "CALL_LIMIT_REACHED")
         observer.get()(CalculatorExecutionEvent.Started)
-        val expression = parse(paramsJsonString)
-            ?: return failure(MathFailureReason.InvalidExpression, "INVALID_ARGUMENTS")
-        return when (val result = runBlocking { engine.evaluate(expression) }) {
-            is MathEvaluationResult.Success -> JsonObject().apply {
-                addProperty("ok", true)
-                addProperty("value", result.value)
-                addProperty("precision", result.kind.name.lowercase())
-            }.toString().also { observer.get()(CalculatorExecutionEvent.Finished()) }
-            is MathEvaluationResult.Failure -> failure(result.reason, result.reason.name.uppercase())
+        return when (
+            val dispatched = runBlocking {
+                dispatcher.execute(
+                    ApplicationToolInvocation(
+                        id = CALCULATOR_TOOL_NAME,
+                        version = CURRENT_TOOL_CONTRACT_VERSION,
+                        consumer = ApplicationToolConsumer.Model,
+                        argumentsJson = paramsJsonString,
+                        verifiedModelToolIds = verifiedModelToolIds,
+                    ),
+                )
+            }
+        ) {
+            is ApplicationToolDispatchResult.Executed -> when (val result = dispatched.mathResult()) {
+                is MathEvaluationResult.Success -> JsonObject().apply {
+                    addProperty("ok", true)
+                    addProperty("value", result.value)
+                    addProperty("precision", result.kind.name.lowercase())
+                }.toString().also { observer.get()(CalculatorExecutionEvent.Finished()) }
+                is MathEvaluationResult.Failure -> failure(result.reason, result.reason.name.uppercase())
+            }
+            is ApplicationToolDispatchResult.Rejected -> {
+                val reason = dispatched.reason.toMathFailureReason()
+                val code = if (dispatched.reason == ApplicationToolRejection.InvalidArguments) {
+                    "INVALID_ARGUMENTS"
+                } else {
+                    reason.name.uppercase()
+                }
+                failure(reason, code)
+            }
         }
     }
-
-    private fun parse(raw: String): String? = runCatching { JsonParser.parseString(raw) }.getOrNull()
-        ?.takeIf { it.isJsonObject }?.asJsonObject
-        ?.takeIf { it.keySet() == setOf("expression") }
-        ?.get("expression")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
 
     private fun failure(reason: MathFailureReason, code: String): String = JsonObject().apply {
         addProperty("ok", false)
         addProperty("error", code)
     }.toString().also { observer.get()(CalculatorExecutionEvent.Finished(reason)) }
+
+    private fun ApplicationToolRejection.toMathFailureReason(): MathFailureReason = when (this) {
+        ApplicationToolRejection.InvalidArguments -> MathFailureReason.InvalidExpression
+        ApplicationToolRejection.TimedOut -> MathFailureReason.TimedOut
+        ApplicationToolRejection.Cancelled -> MathFailureReason.Cancelled
+        ApplicationToolRejection.UnknownTool,
+        ApplicationToolRejection.UnsupportedVersion,
+        ApplicationToolRejection.Disabled,
+        ApplicationToolRejection.NotConfigured,
+        ApplicationToolRejection.IneligibleConsumer,
+        ApplicationToolRejection.UnsupportedModel,
+        ApplicationToolRejection.Unavailable,
+        -> MathFailureReason.Unavailable
+    }
 
     companion object {
         const val MAX_CALLS_PER_TURN = 3

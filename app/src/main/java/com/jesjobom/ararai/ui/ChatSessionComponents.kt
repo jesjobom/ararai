@@ -42,11 +42,12 @@ internal fun SessionListButton(
     title: String,
     isBusy: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     OutlinedButton(
         onClick = onClick,
         enabled = !isBusy,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp),
     ) {

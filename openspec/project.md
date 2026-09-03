@@ -40,6 +40,12 @@ inference remains device-, driver-, model-, and workload-dependent.
   applied to its KV-cache capacity; unsupported independent response limits are
   disclosed rather than simulated. Runtime-backed last-turn metrics are
   ephemeral and benchmark runs retain fixed isolated parameters.
+- Application tools are registered once with stable versioned contracts,
+  independently declared model/widget eligibility, user enablement, credential
+  readiness, and bounded structured dispatch. Current tools remain model-only;
+  a model-independent widget execution gateway is present as an internal seam,
+  but widget generation, rendering, persistence, management, and scheduling are
+  not implemented.
 - The optional calculator uses EvalEx 3.7.0 behind an application-owned bounded
   grammar and generic local-compute tool boundary. It is disabled by default,
   capability-gated per model, runs without network access, and never persists
@@ -70,6 +76,10 @@ inference remains device-, driver-, model-, and workload-dependent.
   Firestore Rules validate and store accepted reports privately.
 - Settings exposes generated license and attribution metadata for the resolved
   Gradle graph plus reviewed disclosures for native and downloadable artifacts.
+- Local first-visit spotlight tours provide sequential, capability-aware guidance
+  in Chat, Voice Chat, Model Management, and Assistant configuration. Home keeps
+  only its first-model consent onboarding. Tour completion or dismissal is
+  persisted per screen and can be restored from Settings.
 
 Model downloads contact only the artifact URLs declared in the catalog. A valid
 local model is sufficient for the core Chat inference flow.
@@ -128,6 +138,11 @@ The principal boundaries are:
   direct-audio/transcript routing;
 - `voice/`: contextual voice-loop coordination, PCM capture/VAD, experimental
   preprocessing and diagnostics, response segmentation, and sequential TTS;
+- `tools/`: stable application-tool contracts, registry, operational readiness,
+  consumer eligibility, typed execution bindings, and bounded dispatch shared by
+  model adapters and future non-model consumers;
+- `widget/`: a narrow model-independent tool execution gateway only; no widget
+  lifecycle, UI, persistence, or background scheduler exists yet;
 - `ui/`: navigation and Compose presentation, with injectable adapters around
   a dedicated controller composition root that owns the shared local-LLM runtime,
   image import, audio recording/playback, response language identification,
