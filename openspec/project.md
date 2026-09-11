@@ -42,10 +42,25 @@ inference remains device-, driver-, model-, and workload-dependent.
   ephemeral and benchmark runs retain fixed isolated parameters.
 - Application tools are registered once with stable versioned contracts,
   independently declared model/widget eligibility, user enablement, credential
-  readiness, and bounded structured dispatch. Current tools remain model-only;
-  a model-independent widget execution gateway is present as an internal seam,
-  but widget generation, rendering, persistence, management, and scheduling are
-  not implemented.
+  readiness, and bounded structured dispatch. `wikipedia_pages@1` provides
+  direct stable page lookup and `wikipedia_on_this_day@1` provides actual
+  historical events for a calendar date; both are typed contracts available to
+  verified models and widgets. The legacy `wikipedia_search@1` binding remains
+  registered for compatibility.
+- Managed in-app widgets provide bounded multi-round model authorship, strict
+  staged validation, explicit source/permission/schedule consent, immutable local
+  revisions, unique inexact WorkManager schedules, manual refresh, stale cache,
+  bounded observations and sanitized runs, and fixed Compose rendering. A model
+  runs only during an explicit foreground authoring attempt; refreshes execute
+  the confirmed program without model inference. Eligibility is declared through
+  `widget_authoring_pipeline_v1` only after the per-stage and complete physical
+  diagnostic pass; no checked-in model currently carries that marker.
+- The widget runtime validates strict JSON manifests and separately hashed
+  JavaScript, then executes bounded `plan` and `render` phases in fresh data-only
+  QuickJS isolates. Plans reach only confirmed widget-eligible tools through the
+  gateway. Presentations are validated renderer-neutral trees; canonical
+  Wikipedia links must be result-proven and pass a second application-owned
+  allowlist before a user gesture opens them.
 - The optional calculator uses EvalEx 3.7.0 behind an application-owned bounded
   grammar and generic local-compute tool boundary. It is disabled by default,
   capability-gated per model, runs without network access, and never persists
@@ -91,9 +106,11 @@ local model is sufficient for the core Chat inference flow.
 - Kotlin 2.3.21; Jetpack Compose BOM 2026.06.00
 - Canonical Android Gradle runtime: JDK 17; Firebase Emulator runtime: JDK 21;
   Android Gradle Plugin 9.2.x; Gradle 9.4.1
-- Build Tools 36.0.0; Whisper uses NDK 28.2.13676358 and CMake 3.22.1
+- Build Tools 36.0.0; Whisper and QuickJS use NDK 28.2.13676358 and CMake 3.22.1
 - LiteRT-LM 0.14.0 for configured Gemma 4 LiteRT-LM bundles
 - whisper.cpp through JNI/NDK for transcription artifacts
+- QuickJS 2026-06-04 through a project-owned data-only JNI bridge for bounded
+  in-memory widget-program fixtures
 - Bundled ML Kit Language ID 17.0.6 for offline response-language detection
 - EvalEx 3.7.0 for bounded DECIMAL128 local calculation
 - CameraX 1.5.0 for lifecycle-aware in-app photo preview and capture
@@ -141,9 +158,14 @@ The principal boundaries are:
 - `tools/`: stable application-tool contracts, registry, operational readiness,
   consumer eligibility, typed execution bindings, and bounded dispatch shared by
   model adapters and future non-model consumers;
-- `widget/`: a narrow model-independent tool execution gateway only; no widget
-  lifecycle, UI, persistence, or background scheduler exists yet;
-- `ui/`: navigation and Compose presentation, with injectable adapters around
+- `widget/`: the model-independent tool gateway, strict program/capability/
+  two-phase runtime contracts, managed SQLite repository, execution leases,
+  scheduling, authorship/consent pipeline, constrained presentation decoder, and
+  lifecycle controllers;
+- `quickjs-runtime/`: vendored QuickJS library subset and data-only JNI adapter
+  with fresh contexts, memory/stack/deadline/output limits, and cancellation;
+- `ui/`: navigation, fixed widget rendering/management/authorship screens, and
+  Compose presentation, with injectable adapters around
   a dedicated controller composition root that owns the shared local-LLM runtime,
   image import, audio recording/playback, response language identification,
   native text-to-speech, decoding, and draft cleanup;
@@ -174,12 +196,20 @@ and `FIREBASE_JAVA_HOME` pointing to a full JDK 21 installation. The Firebase
 wrapper temporarily selects JDK 21 only for emulator tests; Gradle remains on
 the canonical JDK 17 baseline. The gate runs pinned Kotlin
 formatting and static analysis, unit/Robolectric tests, lint, debug app and
-instrumentation builds, and `openspec validate --all --strict`. Android
-instrumentation execution requires a connected arm64 device:
+instrumentation builds, optimized release-candidate app and QuickJS
+instrumentation builds, host-native execution of the shared QuickJS sandbox
+core under ASan/UBSan and optimized release, verification of the
+release-candidate-only manual runtime validator, and `openspec validate --all
+--strict`. Android instrumentation execution requires a connected arm64 device:
 
 ```sh
 ./gradlew connectedDebugAndroidTest
 ```
+
+When ADB is unavailable, the optimized release-candidate APK provides a
+separate self-service QuickJS/runtime launcher that exports bounded device,
+artifact, timing, termination, and process-memory evidence. Building that APK
+does not replace a passing physical run. See `docs/device-validation.md`.
 
 Physical validation remains mandatory for real-model inference, actual GPU
 backend selection/fallback, JNI/vendor behavior, lifecycle under load, memory,

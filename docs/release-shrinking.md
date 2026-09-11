@@ -21,6 +21,11 @@ excluded from Git.
 - **Whisper JNI:** `libararai_whisper.so` exports symbols containing the exact
   `com.jesjobom.ararai.whisper.WhisperRuntime` class and method names. That
   object is kept explicitly.
+- **QuickJS JNI:** `libararai_quickjs.so` uses a linker version script that
+  exports only its four data-only JNI operations. The runtime foundation is not
+  composed into a user-facing widget yet, so R8 may remove its unreachable
+  Kotlin adapter until the managed-widget change supplies a production caller.
+  The native instrumentation matrix remains mandatory before release use.
 - **LiteRT-LM JNI:** version 0.14.0 contains name-based native methods and
   native-to-Java callbacks but does not ship complete consumer ProGuard rules.
   Physical release-candidate testing proved that native code also looks up
@@ -57,6 +62,16 @@ does not prove runtime compatibility.
 
 The current locally signed release-candidate APK is 53,310,651 bytes (SHA-256
 `fd24168ec49a4384147c1894cfdf912867ae33a6bb918331a0ee36580bcabcdc`).
+
+With the uncomposed QuickJS runtime foundation and shared host-testable sandbox
+core packaged, the locally signed release-candidate APK is 54,514,571 bytes
+(SHA-256
+`1e74bfe5652ef4255c4e622b7a774732c93898ea9284022d1bb5309b6e937a46`), an
+increase of 1,203,920 bytes over that candidate. The stripped arm64
+`libararai_quickjs.so` is 1,071,696 bytes (SHA-256
+`93a1c0716fe5a4596f3a29e2ca37e6a4b59134d1e713215212d7ff2fb5810e31`).
+This records build impact only; the runtime remains unavailable to users until
+the separate widget-management change composes it.
 
 The production build produced all four diagnostic artifacts. Their verified
 handoff location is `artifacts/ararai/release-diagnostics-vc2/`, alongside the

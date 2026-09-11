@@ -40,6 +40,8 @@ class ModelConfigParserTest {
         assertEquals(false, config.reasoningCapabilities.request)
         assertEquals(false, config.reasoningCapabilities.output)
         assertEquals(emptySet<String>(), config.toolCapabilities.toolNames)
+        assertEquals(emptySet<String>(), config.toolCapabilities.authoringToolNames)
+        assertEquals(emptySet<String>(), config.toolCapabilities.authoringProtocolNames)
         assertEquals("models/smollm2-135m-q4.gguf", config.relativePath)
         assertEquals(1234L, config.expectedBytes)
         assertEquals(4294967296L, config.recommendedFreeRamBytes)
@@ -134,6 +136,65 @@ class ModelConfigParserTest {
             setOf("wikipedia_search", "calendar_lookup"),
             config.toolCapabilities.toolNames,
         )
+    }
+
+    @Test
+    fun `parses explicit widget authorship separately from normal model tools`() {
+        val config = ModelConfigParser.parse(
+            validRawConfig() +
+                """
+
+                model.capabilities.tools=wikipedia_search
+                model.capabilities.authoringTools=propose_widget
+                """.trimIndent(),
+        )
+
+        assertEquals(setOf("wikipedia_search"), config.toolCapabilities.toolNames)
+        assertEquals(setOf(PROPOSE_WIDGET_TOOL_NAME), config.toolCapabilities.authoringToolNames)
+    }
+
+    @Test
+    fun `parses versioned widget authoring protocol separately from the historical capture tool`() {
+        val config = ModelConfigParser.parse(
+            validRawConfig() +
+                """
+
+                model.capabilities.authoringProtocols=widget_authoring_pipeline_v1
+                """.trimIndent(),
+        )
+
+        assertEquals(setOf(WIDGET_AUTHORING_PIPELINE_V1), config.toolCapabilities.authoringProtocolNames)
+        assertEquals(emptySet<String>(), config.toolCapabilities.authoringToolNames)
+        assertFalse(config.toolCapabilities.supportsAuthoring(PROPOSE_WIDGET_TOOL_NAME))
+        assertEquals(true, config.toolCapabilities.supportsAuthoringProtocol(WIDGET_AUTHORING_PIPELINE_V1))
+    }
+
+    @Test
+    fun `rejects unknown or malformed widget authoring declarations`() {
+        listOf("calendar_agent", "propose-widget", "PROPOSE_WIDGET").forEach { capability ->
+            assertInvalid(
+                raw = validRawConfig() +
+                    """
+
+                    model.capabilities.authoringTools=$capability
+                    """.trimIndent(),
+                expectedMessage = "unsupported model authoring tool capability",
+            )
+        }
+    }
+
+    @Test
+    fun `rejects unknown widget authoring protocol declarations`() {
+        listOf("widget_authoring_pipeline_v2", "widget-authoring-pipeline-v1").forEach { capability ->
+            assertInvalid(
+                raw = validRawConfig() +
+                    """
+
+                    model.capabilities.authoringProtocols=$capability
+                    """.trimIndent(),
+                expectedMessage = "unsupported model authoring protocol capability",
+            )
+        }
     }
 
     @Test
@@ -297,9 +358,13 @@ class ModelConfigParserTest {
             assertEquals(ModelArtifactFormat.LiteRtLmBundle, model.artifactFormat)
             assertEquals("gemma-4", model.family)
             assertEquals(
-                setOf("wikipedia_search", "web_search", "calculator"),
+                setOf("wikipedia_pages", "wikipedia_on_this_day", "web_search", "calculator"),
                 model.toolCapabilities.toolNames,
             )
+        }
+        chatModels.forEach { model ->
+            assertEquals(emptySet<String>(), model.toolCapabilities.authoringToolNames)
+            assertEquals(emptySet<String>(), model.toolCapabilities.authoringProtocolNames)
         }
         val candidates = catalog.models.filter { it.supportsTask(ModelTask.Transcription) }
         assertEquals(2, candidates.size)

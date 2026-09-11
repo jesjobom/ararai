@@ -13,17 +13,28 @@ import com.jesjobom.ararai.knowledge.KnowledgeTool
 import com.jesjobom.ararai.knowledge.ToolRequest
 import com.jesjobom.ararai.knowledge.ToolResult
 import com.jesjobom.ararai.knowledge.WebSearchPreferences
+import com.jesjobom.ararai.knowledge.WikipediaHistoricalEvent
+import com.jesjobom.ararai.knowledge.WikipediaOnThisDayRequest
+import com.jesjobom.ararai.knowledge.WikipediaOnThisDayResult
+import com.jesjobom.ararai.knowledge.WikipediaOnThisDayTool
+import com.jesjobom.ararai.knowledge.WikipediaPage
+import com.jesjobom.ararai.knowledge.WikipediaPagesResult
+import com.jesjobom.ararai.knowledge.WikipediaPagesTool
 import com.jesjobom.ararai.knowledge.validWebSearchRequest
 import com.jesjobom.ararai.math.EvalExLocalMathEngine
 import com.jesjobom.ararai.math.LocalMathEngine
 import com.jesjobom.ararai.math.MathEvaluationResult
 import com.jesjobom.ararai.model.LocalModel
+import java.time.DateTimeException
+import java.time.LocalDate
 import java.util.Locale
 
 fun defaultApplicationToolRegistry(
     instructionPreferences: InstructionPreferences,
     webSearchPreferences: WebSearchPreferences,
     wikipediaTool: KnowledgeTool,
+    wikipediaPagesTool: WikipediaPagesTool,
+    wikipediaOnThisDayTool: WikipediaOnThisDayTool,
     webSearchTool: () -> KnowledgeTool?,
     calculatorEngine: LocalMathEngine = EvalExLocalMathEngine(),
     experimentalWebSearchEnabled: Boolean,
@@ -32,6 +43,24 @@ fun defaultApplicationToolRegistry(
     listOf(
         wikipediaApplicationTool(
             tool = wikipediaTool,
+            state = {
+                ApplicationToolOperationalState(
+                    enabled = instructionPreferences.settings.value.wikipediaEnabled,
+                    ready = true,
+                )
+            },
+        ),
+        wikipediaPagesApplicationTool(
+            tool = wikipediaPagesTool,
+            state = {
+                ApplicationToolOperationalState(
+                    enabled = instructionPreferences.settings.value.wikipediaEnabled,
+                    ready = true,
+                )
+            },
+        ),
+        wikipediaOnThisDayApplicationTool(
+            tool = wikipediaOnThisDayTool,
             state = {
                 ApplicationToolOperationalState(
                     enabled = instructionPreferences.settings.value.wikipediaEnabled,
@@ -61,6 +90,82 @@ fun defaultApplicationToolRegistry(
             },
         ),
     ),
+)
+
+internal fun wikipediaWidgetApplicationToolRegistry(
+    pagesTool: WikipediaPagesTool,
+    onThisDayTool: WikipediaOnThisDayTool,
+    state: () -> ApplicationToolOperationalState,
+): ApplicationToolRegistry = ApplicationToolRegistry(
+    listOf(
+        wikipediaPagesApplicationTool(pagesTool, state),
+        wikipediaOnThisDayApplicationTool(onThisDayTool, state),
+    ),
+)
+
+internal fun wikipediaPagesApplicationTool(
+    tool: WikipediaPagesTool,
+    state: () -> ApplicationToolOperationalState,
+): RegisteredApplicationTool = applicationToolBinding(
+    contract = ApplicationToolContract(
+        id = WIKIPEDIA_PAGES_TOOL_NAME,
+        version = CURRENT_TOOL_CONTRACT_VERSION,
+        displayName = WIKIPEDIA_PAGES_DISPLAY_NAME,
+        category = ApplicationToolCategory.ExternalKnowledge,
+        consumers = setOf(ApplicationToolConsumer.Model, ApplicationToolConsumer.Widget),
+        inputSchemaJson = WIKIPEDIA_INPUT_SCHEMA,
+        outputSchemaJson = WIKIPEDIA_PAGES_OUTPUT_SCHEMA,
+    ),
+    state = state,
+    executor = ApplicationTool(
+        displayName = WIKIPEDIA_PAGES_DISPLAY_NAME,
+        category = ApplicationToolCategory.ExternalKnowledge,
+        execute = tool::fetch,
+    ),
+    decodeArguments = { arguments ->
+        arguments.takeIf { it.keySet() == setOf("query", "language") }
+            ?.let {
+                val language = it.strictString("language")?.takeIf(LANGUAGE_PATTERN::matches)
+                ToolRequest(
+                    it.strictString("query") ?: return@let null,
+                    language ?: return@let null,
+                )
+            }
+    },
+    encodeResult = ::encodeWikipediaPagesResult,
+)
+
+internal fun wikipediaOnThisDayApplicationTool(
+    tool: WikipediaOnThisDayTool,
+    state: () -> ApplicationToolOperationalState,
+): RegisteredApplicationTool = applicationToolBinding(
+    contract = ApplicationToolContract(
+        id = WIKIPEDIA_ON_THIS_DAY_TOOL_NAME,
+        version = CURRENT_TOOL_CONTRACT_VERSION,
+        displayName = WIKIPEDIA_ON_THIS_DAY_DISPLAY_NAME,
+        category = ApplicationToolCategory.ExternalKnowledge,
+        consumers = setOf(ApplicationToolConsumer.Model, ApplicationToolConsumer.Widget),
+        inputSchemaJson = WIKIPEDIA_ON_THIS_DAY_INPUT_SCHEMA,
+        outputSchemaJson = WIKIPEDIA_ON_THIS_DAY_OUTPUT_SCHEMA,
+    ),
+    state = state,
+    executor = ApplicationTool(
+        displayName = WIKIPEDIA_ON_THIS_DAY_DISPLAY_NAME,
+        category = ApplicationToolCategory.ExternalKnowledge,
+        execute = tool::fetch,
+    ),
+    decodeArguments = { arguments ->
+        arguments.takeIf { it.keySet() == setOf("month", "day", "language") }
+            ?.let {
+                val month = it.strictInt("month") ?: return@let null
+                val day = it.strictInt("day") ?: return@let null
+                val language = it.strictString("language")?.takeIf(LANGUAGE_PATTERN::matches)
+                    ?: return@let null
+                WikipediaOnThisDayRequest(month, day, language)
+                    .takeIf { request -> validWikipediaCalendarDay(request.month, request.day) }
+            }
+    },
+    encodeResult = ::encodeWikipediaOnThisDayResult,
 )
 
 fun eligibleModelToolIds(
@@ -224,11 +329,30 @@ internal fun modelApplicationToolDispatcher(
 internal fun ApplicationToolDispatchResult.Executed.knowledgeResult(): ToolResult = domainResult as ToolResult
 
 @Suppress("MaxLineLength")
+internal fun ApplicationToolDispatchResult.Executed.wikipediaPagesResult(): WikipediaPagesResult = domainResult as WikipediaPagesResult
+
+@Suppress("MaxLineLength")
+internal fun ApplicationToolDispatchResult.Executed.wikipediaOnThisDayResult(): WikipediaOnThisDayResult = domainResult as WikipediaOnThisDayResult
+
+@Suppress("MaxLineLength")
 internal fun ApplicationToolDispatchResult.Executed.mathResult(): MathEvaluationResult = domainResult as MathEvaluationResult
 
 private fun JsonObject.strictString(name: String): String? = get(name)
     ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
     ?.asString
+
+private fun JsonObject.strictInt(name: String): Int? = get(name)
+    ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }
+    ?.asString
+    ?.takeIf(UNSIGNED_INTEGER_PATTERN::matches)
+    ?.toIntOrNull()
+
+private fun validWikipediaCalendarDay(month: Int, day: Int): Boolean = try {
+    LocalDate.of(2000, month, day)
+    true
+} catch (_: DateTimeException) {
+    false
+}
 
 private fun normalizedLanguage(raw: String): String = raw
     .trim()
@@ -246,6 +370,45 @@ private fun encodeKnowledgeResult(result: ToolResult): String = when (result) {
         addProperty("kind", "failure")
         addProperty("reason", result.reason.name)
     }.toString()
+}
+
+private fun encodeWikipediaPagesResult(result: WikipediaPagesResult): String = when (result) {
+    is WikipediaPagesResult.Success -> JsonObject().apply {
+        addProperty("kind", "success")
+        add("pages", JsonArray().apply { result.pages.forEach { add(it.toJson()) } })
+    }.toString()
+    is WikipediaPagesResult.Failure -> JsonObject().apply {
+        addProperty("kind", "failure")
+        addProperty("reason", result.reason.name)
+    }.toString()
+}
+
+private fun encodeWikipediaOnThisDayResult(result: WikipediaOnThisDayResult): String = when (result) {
+    is WikipediaOnThisDayResult.Success -> JsonObject().apply {
+        addProperty("kind", "success")
+        add("events", JsonArray().apply { result.events.forEach { add(it.toJson()) } })
+        addProperty("language", result.language)
+        addProperty("retrievedAtMillis", result.retrievedAtMillis)
+    }.toString()
+    is WikipediaOnThisDayResult.Failure -> JsonObject().apply {
+        addProperty("kind", "failure")
+        addProperty("reason", result.reason.name)
+    }.toString()
+}
+
+private fun WikipediaPage.toJson(): JsonObject = JsonObject().apply {
+    addProperty("title", title)
+    addProperty("extract", extract)
+    addProperty("canonicalUrl", canonicalUrl)
+    addProperty("language", language)
+    addProperty("retrievedAtMillis", retrievedAtMillis)
+}
+
+private fun WikipediaHistoricalEvent.toJson(): JsonObject = JsonObject().apply {
+    addProperty("year", year)
+    addProperty("text", text)
+    addProperty("title", title)
+    addProperty("canonicalUrl", canonicalUrl)
 }
 
 private fun KnowledgeSource.toJson(): JsonObject = JsonObject().apply {
@@ -269,18 +432,29 @@ private fun encodeMathResult(result: MathEvaluationResult): String = when (resul
 }
 
 internal const val CURRENT_TOOL_CONTRACT_VERSION = 1
+internal const val WIKIPEDIA_PAGES_TOOL_NAME = "wikipedia_pages"
+internal const val WIKIPEDIA_PAGES_DISPLAY_NAME = "Wikipedia pages"
+internal const val WIKIPEDIA_ON_THIS_DAY_TOOL_NAME = "wikipedia_on_this_day"
+internal const val WIKIPEDIA_ON_THIS_DAY_DISPLAY_NAME = "Wikipedia events by date"
 internal const val WEB_SEARCH_DISPLAY_NAME = "Web search"
 internal const val CALCULATOR_DISPLAY_NAME = "Local calculator"
 
 private const val DEFAULT_LANGUAGE = "en"
 private val LANGUAGE_PATTERN = Regex("[a-z]{2,3}")
+private val UNSIGNED_INTEGER_PATTERN = Regex("0|[1-9][0-9]*")
 private const val WIKIPEDIA_INPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string"},"language":{"type":"string","pattern":"^[a-z]{2,3}$"}},"required":["query","language"]}"""
+private const val WIKIPEDIA_ON_THIS_DAY_INPUT_SCHEMA =
+    """{"type":"object","additionalProperties":false,"properties":{"month":{"type":"integer","minimum":1,"maximum":12},"day":{"type":"integer","minimum":1,"maximum":31},"language":{"type":"string","pattern":"^[a-z]{2,3}$"}},"required":["month","day","language"]}"""
 private const val WEB_SEARCH_INPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"]}"""
 private const val CALCULATOR_INPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"expression":{"type":"string","maxLength":512}},"required":["expression"]}"""
 private const val KNOWLEDGE_OUTPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"untrustedContext":{"type":"string"},"sources":{"type":"array"},"reason":{"type":"string"}},"required":["kind"]}"""
+private const val WIKIPEDIA_PAGES_OUTPUT_SCHEMA =
+    """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"pages":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string","maxLength":200},"extract":{"type":"string","maxLength":2000},"canonicalUrl":{"type":"string","maxLength":2048},"language":{"type":"string","pattern":"^[a-z]{2,3}$"},"retrievedAtMillis":{"type":"integer"}},"required":["title","extract","canonicalUrl","language","retrievedAtMillis"]}},"reason":{"type":"string"}},"required":["kind"]}"""
+private const val WIKIPEDIA_ON_THIS_DAY_OUTPUT_SCHEMA =
+    """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"events":{"type":"array","maxItems":64,"items":{"type":"object","additionalProperties":false,"properties":{"year":{"type":"integer"},"text":{"type":"string","maxLength":1000},"title":{"type":"string","maxLength":200},"canonicalUrl":{"type":"string","maxLength":2048}},"required":["year","text","title","canonicalUrl"]}},"language":{"type":"string","pattern":"^[a-z]{2,3}$"},"retrievedAtMillis":{"type":"integer"},"reason":{"type":"string"}},"required":["kind"]}"""
 private const val CALCULATOR_OUTPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"value":{"type":"string"},"precision":{"type":"string"},"reason":{"type":"string"}},"required":["kind"]}"""

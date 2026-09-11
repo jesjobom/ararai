@@ -419,6 +419,7 @@ class CriticalComposeJourneysTest {
                     appVersionLabel = "test",
                     onOpenChat = { opened += "chat" },
                     onOpenVoiceChat = { opened += "voice" },
+                    onOpenWidgets = { opened += "widgets" },
                     onOpenModelStatus = { opened += "models" },
                     onOpenInstructionsTools = { opened += "assistant" },
                     onOpenSettings = { opened += "settings" },
@@ -429,6 +430,7 @@ class CriticalComposeJourneysTest {
         listOf(
             "Chat" to "chat",
             "Voice Chat" to "voice",
+            "Widgets" to "widgets",
             "Model Manager" to "models",
             "Assistant configuration" to "assistant",
             "Settings" to "settings",

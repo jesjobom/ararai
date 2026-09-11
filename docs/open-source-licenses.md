@@ -26,11 +26,15 @@ that attribution is unnecessary.
 
 ## Native runtime
 
+- QuickJS 2026-06-04: MIT License, <https://bellard.org/quickjs/>. The exact
+  official archive checksum, selected library files, excluded host helpers,
+  and update procedure are recorded in `quickjs-runtime/ORIGIN.md`; its license
+  is checked in beside the vendored source.
 - whisper.cpp at commit `f049fff95a089aa9969deb009cdd4892b3e74916`:
   MIT License, <https://github.com/ggml-org/whisper.cpp>.
 
-The pinned CMake revision and its upstream license must be reviewed together
-whenever the native source revision changes.
+Each pinned native revision and its upstream license must be reviewed together
+whenever native source changes.
 
 ## Downloadable models
 

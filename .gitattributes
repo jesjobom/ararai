@@ -1,0 +1,4 @@
+# Preserve the pinned upstream QuickJS sources byte-for-byte. The archive uses
+# trailing whitespace in multiple files, so exclude only this vendored subtree
+# from Git's whitespace diagnostics.
+quickjs-runtime/src/main/cpp/quickjs/** -whitespace

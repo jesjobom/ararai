@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {"durationMillis": 15, "id": "data_only_fixture", "outcome": "pass", "passed": true, "pssAfterKb": 87332, "pssBeforeKb": 65524, "pssPeakKb": 87332},
+    {"durationMillis": 6, "id": "forbidden_globals", "outcome": "pass", "passed": true, "pssAfterKb": 97840, "pssBeforeKb": 87332, "pssPeakKb": 97840},
+    {"durationMillis": 5, "id": "prototype_host_access", "outcome": "pass", "passed": true, "pssAfterKb": 98196, "pssBeforeKb": 98132, "pssPeakKb": 98196},
+    {"durationMillis": 5, "id": "imports_rejected", "outcome": "pass", "passed": true, "pssAfterKb": 98208, "pssBeforeKb": 98216, "pssPeakKb": 98216},
+    {"durationMillis": 4, "id": "fresh_isolates_immutable_inputs", "outcome": "pass", "passed": true, "pssAfterKb": 98232, "pssBeforeKb": 98212, "pssPeakKb": 98232},
+    {"durationMillis": 4, "id": "deterministic_explicit_inputs", "outcome": "pass", "passed": true, "pssAfterKb": 98268, "pssBeforeKb": 98256, "pssPeakKb": 98268},
+    {"durationMillis": 4, "id": "malformed_requests_bounded_output", "outcome": "pass", "passed": true, "pssAfterKb": 98292, "pssBeforeKb": 98268, "pssPeakKb": 98292},
+    {"durationMillis": 55, "id": "infinite_loop_timeout_recovery", "outcome": "pass", "passed": true, "pssAfterKb": 98800, "pssBeforeKb": 98312, "pssPeakKb": 98800},
+    {"durationMillis": 10, "id": "recursion_allocation_bounds", "outcome": "pass", "passed": true, "pssAfterKb": 100280, "pssBeforeKb": 98800, "pssPeakKb": 100280},
+    {"durationMillis": 26, "id": "caller_cancellation_recovery", "outcome": "pass", "passed": true, "pssAfterKb": 100376, "pssBeforeKb": 100300, "pssPeakKb": 100376},
+    {"durationMillis": 27, "id": "repeated_isolate_recovery", "outcome": "pass", "passed": true, "pssAfterKb": 100556, "pssBeforeKb": 100400, "pssPeakKb": 100556},
+    {"durationMillis": 7, "id": "two_phase_widget_runtime", "outcome": "pass", "passed": true, "pssAfterKb": 100864, "pssBeforeKb": 100580, "pssPeakKb": 100864}
+  ],
+  "environment": {
+    "accepted": true,
+    "androidRelease": "16",
+    "apkSha256": "dbd660ec667760be23f3fb156b4089141a09d81c493678d8633adf6ce3d593e4",
+    "appVersion": "202609051113",
+    "buildDisplay": "BP4A.251205.006.S942WVLS4AZG3",
+    "buildType": "releaseCandidate",
+    "generatedAtUtc": "2026-09-05T18:06:39.661798Z",
+    "manufacturer": "samsung",
+    "model": "SM-S942W",
+    "quickJsLibraryBytes": 1071696,
+    "quickJsLibrarySha256": "93a1c0716fe5a4596f3a29e2ca37e6a4b59134d1e713215212d7ff2fb5810e31",
+    "sdkInt": 36,
+    "supportedAbis": ["arm64-v8a"],
+    "versionCode": 29810353
+  },
+  "failedCount": 0,
+  "overallPassed": true,
+  "passedCount": 12,
+  "suiteVersion": 1
+}

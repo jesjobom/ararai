@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="runtime_validation_app_name">Validação do Runtime ArarAI</string>
+    <string name="runtime_validation_title">Validação do runtime</string>
+    <string name="runtime_validation_subtitle">releaseCandidate · arm64</string>
+    <string name="runtime_validation_description">Executa neste dispositivo físico a matriz do QuickJS isolado e do runtime de widgets em duas fases. Mantenha o ArarAI aberto até o relatório ficar pronto.</string>
+    <string name="runtime_validation_privacy">O relatório contém identificadores do dispositivo/build e medidas limitadas de tempo/memória. Ele nunca inclui prompts, credenciais, código-fonte, mensagens de exceção ou stack traces. Revise antes de compartilhar.</string>
+    <string name="runtime_validation_ready">Pronto para executar 12 casos locais. Nenhuma rede ou modelo será usado.</string>
+    <string name="runtime_validation_run">Executar matriz de validação</string>
+    <string name="runtime_validation_running">Validação em andamento…</string>
+    <string name="runtime_validation_running_note">Os casos de loop infinito, cancelamento, alocação, recuperação, isolamento e ataques podem aumentar brevemente o uso de CPU e memória.</string>
+    <string name="runtime_validation_internal_failure">Não foi possível criar o relatório. Feche o validador e tente novamente.</string>
+    <string name="runtime_validation_passed">APROVADO · %1$d casos</string>
+    <string name="runtime_validation_failed">REPROVADO · %1$d passaram · %2$d falharam</string>
+    <string name="runtime_validation_environment">%1$s %2$s · Android %3$s/API %4$d · %5$s</string>
+    <string name="runtime_validation_case_pass">OK · %1$s</string>
+    <string name="runtime_validation_case_fail">FALHA · %1$s · %2$s</string>
+    <string name="runtime_validation_case_metrics">%1$d ms · PSS KB antes/pico/depois: %2$d/%3$d/%4$d</string>
+    <string name="runtime_validation_copy">Copiar relatório</string>
+    <string name="runtime_validation_copied">Relatório de validação copiado</string>
+    <string name="runtime_validation_share">Compartilhar relatório</string>
+    <string name="runtime_validation_share_subject">Relatório de validação do runtime ArarAI</string>
+    <string name="runtime_validation_run_again">Executar novamente</string>
+</resources>

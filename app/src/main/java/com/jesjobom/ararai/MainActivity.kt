@@ -26,7 +26,6 @@ import androidx.lifecycle.lifecycleScope
 import com.jesjobom.ararai.chat.DeferredNewChatSessionStore
 import com.jesjobom.ararai.chat.FileChatMediaRepository
 import com.jesjobom.ararai.chat.SharedPreferencesChatPreferences
-import com.jesjobom.ararai.chat.SharedPreferencesInstructionPreferences
 import com.jesjobom.ararai.chat.SqliteChatSessionStore
 import com.jesjobom.ararai.chat.WhisperCppAudioTranscriber
 import com.jesjobom.ararai.engine.prepareLiteRtLmCacheDir
@@ -76,7 +75,7 @@ class MainActivity : ComponentActivity() {
         val chatPreferences = SharedPreferencesChatPreferences(this)
         val pendingReportQueue = app.pendingReportQueue
         val reportDeliveryReceiptStore = app.reportDeliveryReceiptStore
-        val instructionPreferences = SharedPreferencesInstructionPreferences(this)
+        val instructionPreferences = app.instructionPreferences
         val generationPreferences = SharedPreferencesGenerationPreferences(this)
         val modelDownloadPromptPreferenceStore = SharedPreferencesModelDownloadPromptPreferenceStore(this)
         val transcriptionLanguagePreferences = SharedPreferencesTranscriptionLanguagePreferences(this)
@@ -172,6 +171,8 @@ class MainActivity : ComponentActivity() {
                         prepareLiteRtLmCacheDir(cacheDir) { error ->
                             Log.w("ArarAI.LiteRtLm", "Unable to prepare LiteRT-LM cache", error)
                         },
+                        managedWidgetServices = app.managedWidgetApplicationServices,
+                        onShareWidgetToolCallingDiagnostic = ::shareWidgetToolCallingDiagnostic,
                     )
                 }
             }
@@ -189,6 +190,20 @@ class MainActivity : ComponentActivity() {
             openModelManagementRequests.value += 1
             intent.removeExtra(EXTRA_OPEN_MODELS)
         }
+    }
+
+    private fun shareWidgetToolCallingDiagnostic(report: String) {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.widget_tool_diagnostic_share_subject))
+            putExtra(Intent.EXTRA_TEXT, report)
+        }
+        startActivity(
+            Intent.createChooser(
+                shareIntent,
+                getString(R.string.widget_tool_diagnostic_share),
+            ),
+        )
     }
 
     companion object {

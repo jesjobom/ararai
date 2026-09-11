@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="runtime_validation_app_name">ArarAI Runtime Validation</string>
+    <string name="runtime_validation_title">Runtime validation</string>
+    <string name="runtime_validation_subtitle">releaseCandidate · arm64</string>
+    <string name="runtime_validation_description">Runs the isolated QuickJS and two-phase widget runtime matrix on this physical device. Keep ArarAI open until the report is ready.</string>
+    <string name="runtime_validation_privacy">The report contains device/build identifiers and bounded timing/memory measurements. It never includes prompts, credentials, source code, exception messages, or stack traces. Review it before sharing.</string>
+    <string name="runtime_validation_ready">Ready to execute 12 local validation cases. No network or model is used.</string>
+    <string name="runtime_validation_run">Run validation matrix</string>
+    <string name="runtime_validation_running">Validation is running…</string>
+    <string name="runtime_validation_running_note">Infinite-loop, cancellation, allocation, recovery, isolation, and adversarial cases may briefly increase CPU and memory use.</string>
+    <string name="runtime_validation_internal_failure">The report could not be created. Close the validator and try again.</string>
+    <string name="runtime_validation_passed">PASS · %1$d cases</string>
+    <string name="runtime_validation_failed">FAIL · %1$d passed · %2$d failed</string>
+    <string name="runtime_validation_environment">%1$s %2$s · Android %3$s/API %4$d · %5$s</string>
+    <string name="runtime_validation_case_pass">PASS · %1$s</string>
+    <string name="runtime_validation_case_fail">FAIL · %1$s · %2$s</string>
+    <string name="runtime_validation_case_metrics">%1$d ms · PSS KB before/peak/after: %2$d/%3$d/%4$d</string>
+    <string name="runtime_validation_copy">Copy report</string>
+    <string name="runtime_validation_copied">Validation report copied</string>
+    <string name="runtime_validation_share">Share report</string>
+    <string name="runtime_validation_share_subject">ArarAI runtime validation report</string>
+    <string name="runtime_validation_run_again">Run again</string>
+</resources>

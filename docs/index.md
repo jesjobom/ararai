@@ -14,6 +14,10 @@ models locally on supported devices.
 - [Generated-content reporting operations]({{ '/reporting-operations/' | relative_url }})
 - [Google Play Data safety maintainer draft]({{ '/data-safety/' | relative_url }})
 
+## Product guides
+
+- [Managed in-app widgets]({{ '/managed-widgets/' | relative_url }})
+
 The privacy policy applies to the official Google Play distribution published
 by **Jesjobom** and operated by **Jairton Junior**. Forks and third-party
 distributions must publish their own privacy and Data safety information and use

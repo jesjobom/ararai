@@ -22,10 +22,13 @@ import com.jesjobom.ararai.chat.WEB_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.knowledge.ApplicationToolExecutionEvent
 import com.jesjobom.ararai.knowledge.KnowledgeTool
+import com.jesjobom.ararai.knowledge.StructuredWikipediaTool
 import com.jesjobom.ararai.knowledge.ToolFailureReason
 import com.jesjobom.ararai.knowledge.WebSearchOpenApiTool
 import com.jesjobom.ararai.knowledge.WikipediaKnowledgeTool
+import com.jesjobom.ararai.knowledge.WikipediaModelToolBudget
 import com.jesjobom.ararai.knowledge.WikipediaOpenApiTool
+import com.jesjobom.ararai.knowledge.WikipediaStructuredOpenApiTool
 import com.jesjobom.ararai.math.CalculatorExecutionEvent
 import com.jesjobom.ararai.math.CalculatorOpenApiTool
 import com.jesjobom.ararai.math.EvalExLocalMathEngine
@@ -35,6 +38,8 @@ import com.jesjobom.ararai.model.ModelAccelerationPolicy
 import com.jesjobom.ararai.model.ModelInputCapabilities
 import com.jesjobom.ararai.model.ModelRuntime
 import com.jesjobom.ararai.tools.ApplicationToolDispatcher
+import com.jesjobom.ararai.tools.WIKIPEDIA_ON_THIS_DAY_TOOL_NAME
+import com.jesjobom.ararai.tools.WIKIPEDIA_PAGES_TOOL_NAME
 import com.jesjobom.ararai.tools.modelApplicationToolDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -63,6 +68,7 @@ class LiteRtLmLocalLlmEngine(
     private var loadedConfig: InferenceConfig? = null
     private var loadedInputCapabilities: ModelInputCapabilities? = null
     private var loadedToolNames: Set<String> = emptySet()
+    private var loadedAuthoringToolNames: Set<String> = emptySet()
     private var loadedUseGpu: Boolean = false
     private var loadedProfile: LiteRtLmWorkloadProfile? = null
 
@@ -103,6 +109,7 @@ class LiteRtLmLocalLlmEngine(
                         loadedConfig = config
                         loadedInputCapabilities = model.inputCapabilities
                         loadedToolNames = model.toolCapabilities.toolNames
+                        loadedAuthoringToolNames = model.toolCapabilities.allowedAuthoringToolNames
                     }
                     isLoaded
                 }
@@ -118,7 +125,7 @@ class LiteRtLmLocalLlmEngine(
                 config = config,
                 useGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred,
                 inputCapabilities = model.inputCapabilities,
-                toolNames = model.toolCapabilities.toolNames,
+                toolNames = model.toolCapabilities.allToolNames,
                 profile = profile,
             )
 
@@ -129,6 +136,7 @@ class LiteRtLmLocalLlmEngine(
                 loadedConfig = config
                 loadedInputCapabilities = model.inputCapabilities
                 loadedToolNames = model.toolCapabilities.toolNames
+                loadedAuthoringToolNames = model.toolCapabilities.allowedAuthoringToolNames
                 loadedUseGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred
                 loadedProfile = profile
             }
@@ -144,7 +152,7 @@ class LiteRtLmLocalLlmEngine(
                 if (loadedSession == null || config == null || capabilities == null) {
                     null
                 } else {
-                    LoadedState(config, capabilities, loadedToolNames)
+                    LoadedState(config, capabilities, loadedToolNames, loadedAuthoringToolNames)
                 }
             }
 
@@ -161,7 +169,7 @@ class LiteRtLmLocalLlmEngine(
                         trySend(expectedGenerationFailure(failure))
                         return@launch
                     }
-                    if (!initialState.toolNames.containsAll(request.normalizedAdvertisedToolNames())) {
+                    if (!request.toolsAreSupported(initialState)) {
                         trySend(expectedGenerationFailure("Selected model does not support the requested tools"))
                         return@launch
                     }
@@ -210,6 +218,7 @@ class LiteRtLmLocalLlmEngine(
                 loadedConfig = null
                 loadedInputCapabilities = null
                 loadedToolNames = emptySet()
+                loadedAuthoringToolNames = emptySet()
                 loadedUseGpu = false
                 loadedProfile = null
                 current
@@ -226,6 +235,7 @@ class LiteRtLmLocalLlmEngine(
         val config: InferenceConfig,
         val capabilities: ModelInputCapabilities,
         val toolNames: Set<String>,
+        val authoringToolNames: Set<String>,
     )
 
     private suspend fun ensureProfile(desiredProfile: LiteRtLmWorkloadProfile): LiteRtLmSession {
@@ -237,7 +247,7 @@ class LiteRtLmLocalLlmEngine(
                     modelPath = checkNotNull(loadedModelPath) { "Model is not loaded" },
                     config = checkNotNull(loadedConfig) { "Model is not loaded" },
                     capabilities = checkNotNull(loadedInputCapabilities) { "Model is not loaded" },
-                    toolNames = loadedToolNames,
+                    toolNames = loadedToolNames + loadedAuthoringToolNames,
                     useGpu = loadedUseGpu,
                 )
             }
@@ -279,6 +289,18 @@ class LiteRtLmLocalLlmEngine(
         imageAttachments.isNotEmpty() && !capabilities.image -> "Selected model does not support image input"
         audioPrompt != null && !capabilities.audio -> "Selected model does not support audio input"
         else -> null
+    }
+
+    private fun PromptRequest.toolsAreSupported(state: LoadedState): Boolean {
+        val requested = normalizedAdvertisedToolNames()
+        val ephemeralNames = ephemeralTools.mapTo(mutableSetOf(), EphemeralLocalLlmTool::name)
+        return if (ephemeralNames.isEmpty()) {
+            state.toolNames.containsAll(requested)
+        } else {
+            ephemeralNames.size == ephemeralTools.size &&
+                requested == ephemeralNames &&
+                state.authoringToolNames.containsAll(ephemeralNames)
+        }
     }
 
     private fun LiteRtLmChunk.toGenerationEvents(): List<GenerationEvent> = buildList {
@@ -493,10 +515,11 @@ private class AndroidLiteRtLmSession(
         val created =
             if (canReuse) {
                 ProductionConversation(
-                    retained.resource,
-                    retained.state.wikipediaTool,
-                    retained.state.webSearchTool,
-                    retained.state.calculatorTool,
+                    conversation = retained.resource,
+                    wikipediaTool = retained.state.wikipediaTool,
+                    structuredWikipediaTools = retained.state.structuredWikipediaTools,
+                    webSearchTool = retained.state.webSearchTool,
+                    calculatorTool = retained.state.calculatorTool,
                 )
             } else {
                 retained?.resource?.let { conversations.invalidate(it, cancelFirst = false) }
@@ -511,6 +534,17 @@ private class AndroidLiteRtLmSession(
                     toolDisplayName = created.wikipediaTool.displayName,
                 ),
             )
+        }
+        created.structuredWikipediaTools.forEach { wikipediaTool ->
+            wikipediaTool.beginTurn { event ->
+                trySend(
+                    LiteRtLmChunk(
+                        toolEvent = event,
+                        toolName = wikipediaTool.toolId,
+                        toolDisplayName = wikipediaTool.displayName,
+                    ),
+                )
+            }
         }
         created.webSearchTool?.beginTurn { event ->
             trySend(
@@ -600,6 +634,7 @@ private class AndroidLiteRtLmSession(
                                     key = key,
                                     transcript = request.transcriptAfter(previousText),
                                     wikipediaTool = created.wikipediaTool,
+                                    structuredWikipediaTools = created.structuredWikipediaTools,
                                     webSearchTool = created.webSearchTool,
                                     calculatorTool = created.calculatorTool,
                                 ),
@@ -635,15 +670,14 @@ private class AndroidLiteRtLmSession(
         samplerConfig: SamplerConfig,
     ): ProductionConversation {
         val requested = request.normalizedAdvertisedToolNames()
-        require(supportedToolNames.containsAll(requested)) {
-            "Requested tool is not supported by the loaded model"
-        }
+        requireSupportedTools(requested)
         val wikipediaTool =
             if (WIKIPEDIA_SEARCH_TOOL_NAME in requested) {
                 WikipediaOpenApiTool(toolDispatcher, supportedToolNames)
             } else {
                 null
             }
+        val structuredWikipediaTools = createStructuredWikipediaTools(requested)
         val webSearchTool =
             if (WEB_SEARCH_TOOL_NAME in requested) {
                 WebSearchOpenApiTool(
@@ -660,12 +694,13 @@ private class AndroidLiteRtLmSession(
             } else {
                 null
             }
+        val ephemeralTools = request.ephemeralTools.map(::EphemeralOpenApiTool)
         val configuredTools =
             listOfNotNull(
                 wikipediaTool?.let(::tool),
                 webSearchTool?.let(::tool),
                 calculatorTool?.let(::tool),
-            )
+            ) + structuredWikipediaTools.map(::tool) + ephemeralTools.map(::tool)
         if (configuredTools.isNotEmpty()) {
             ExperimentalFlags.enableConversationConstrainedDecoding = true
         }
@@ -682,6 +717,7 @@ private class AndroidLiteRtLmSession(
                     ),
                 ),
                 wikipediaTool = wikipediaTool,
+                structuredWikipediaTools = structuredWikipediaTools,
                 webSearchTool = webSearchTool,
                 calculatorTool = calculatorTool,
             )
@@ -692,12 +728,45 @@ private class AndroidLiteRtLmSession(
         }
     }
 
+    private fun requireSupportedTools(requested: Set<String>) {
+        require(supportedToolNames.containsAll(requested)) {
+            "Requested tool is not supported by the loaded model"
+        }
+    }
+
     private data class ProductionConversation(
         val conversation: Conversation,
         val wikipediaTool: WikipediaOpenApiTool?,
+        val structuredWikipediaTools: List<WikipediaStructuredOpenApiTool>,
         val webSearchTool: WebSearchOpenApiTool?,
         val calculatorTool: CalculatorOpenApiTool?,
     )
+
+    private fun createStructuredWikipediaTools(requested: Set<String>): List<WikipediaStructuredOpenApiTool> {
+        val budget = WikipediaModelToolBudget()
+        return buildList {
+            if (WIKIPEDIA_PAGES_TOOL_NAME in requested) {
+                add(
+                    WikipediaStructuredOpenApiTool(
+                        StructuredWikipediaTool.Pages,
+                        toolDispatcher,
+                        supportedToolNames,
+                        budget,
+                    ),
+                )
+            }
+            if (WIKIPEDIA_ON_THIS_DAY_TOOL_NAME in requested) {
+                add(
+                    WikipediaStructuredOpenApiTool(
+                        StructuredWikipediaTool.OnThisDay,
+                        toolDispatcher,
+                        supportedToolNames,
+                        budget,
+                    ),
+                )
+            }
+        }
+    }
 
     override fun cancel() {
         conversations.cancelActive()
@@ -730,9 +799,18 @@ private class AndroidLiteRtLmSession(
         val key: LiteRtLmConversationKey,
         val transcript: List<PromptChatMessage>,
         val wikipediaTool: WikipediaOpenApiTool? = null,
+        val structuredWikipediaTools: List<WikipediaStructuredOpenApiTool> = emptyList(),
         val webSearchTool: WebSearchOpenApiTool? = null,
         val calculatorTool: CalculatorOpenApiTool? = null,
     )
+}
+
+private class EphemeralOpenApiTool(
+    private val delegate: EphemeralLocalLlmTool,
+) : com.google.ai.edge.litertlm.OpenApiTool {
+    override fun getToolDescriptionJsonString(): String = delegate.descriptionJson
+
+    override fun execute(paramsJsonString: String): String = delegate.execute(paramsJsonString)
 }
 
 internal fun liteRtLmGenerationMetrics(

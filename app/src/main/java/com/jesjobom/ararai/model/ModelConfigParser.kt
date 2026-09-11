@@ -103,6 +103,8 @@ object ModelConfigParser {
                 optionalList("${modelPrefix}capabilities.tools") +
                     optionalList("${modelPrefix}capabilities.knowledgeTools")
                 ).toSet(),
+            authoringToolNames = optionalList("${modelPrefix}capabilities.authoringTools").toSet(),
+            authoringProtocolNames = optionalList("${modelPrefix}capabilities.authoringProtocols").toSet(),
         ),
     ).also { it.validate() }
 
@@ -225,8 +227,17 @@ object ModelConfigParser {
         require(toolCapabilities.toolNames.all { it.matches(Regex("[a-z][a-z0-9_]{0,63}")) }) {
             "tool capability names must use lowercase snake_case identifiers"
         }
-        require(toolCapabilities.toolNames.isEmpty() || runtime == ModelRuntime.LiteRtLm) {
+        require(toolCapabilities.authoringToolNames.all { it in SUPPORTED_AUTHORING_TOOL_NAMES }) {
+            "unsupported model authoring tool capability"
+        }
+        require(toolCapabilities.authoringProtocolNames.all { it in SUPPORTED_AUTHORING_PROTOCOL_NAMES }) {
+            "unsupported model authoring protocol capability"
+        }
+        require(toolCapabilities.allToolNames.isEmpty() || runtime == ModelRuntime.LiteRtLm) {
             "tool capabilities require the LiteRT-LM runtime"
         }
     }
+
+    private val SUPPORTED_AUTHORING_TOOL_NAMES = setOf(PROPOSE_WIDGET_TOOL_NAME)
+    private val SUPPORTED_AUTHORING_PROTOCOL_NAMES = setOf(WIDGET_AUTHORING_PIPELINE_V1)
 }

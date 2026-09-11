@@ -47,8 +47,21 @@ backend, or external database.
   transcription performance.
 - Resumable model downloads continue under an Android foreground service with
   progress and cancellation in a persistent notification.
-- Home, Chat, Voice Chat, Models, Assistant configuration, and Settings destinations implemented with
-  Jetpack Compose; model benchmarks are opened from downloaded model cards.
+- Home, Chat, Voice Chat, Widgets, Models, Assistant configuration, and Settings
+  destinations implemented with Jetpack Compose; model benchmarks are opened
+  from downloaded model cards.
+- Local managed widgets with bounded multi-round model authorship, explicit source and
+  permission review, immutable revisions, optional inexact WorkManager schedules,
+  manual refresh, fixed Compose rendering, stale-cache behavior, sanitized run
+  history, duplication, enable/disable, and complete confirmed deletion. Refresh
+  executes the stored bounded JavaScript program without loading a model. The
+  initial structured data sources are application-owned Wikipedia page lookup
+  and historical-events-by-date tools.
+  Feasibility, algorithm, call functions, orchestration, and presentation are
+  generated in isolated structured rounds, validated between stages, and may
+  use at most two scoped repairs. No checked-in model is advertised for this new
+  protocol until the physical suite-v3 gate passes; normal model workloads are
+  unchanged.
 - Optional first-visit spotlight tours explain non-obvious controls in Chat,
   Voice Chat, Models, and Assistant configuration without adding a Home tour.
   Each screen can be completed or closed independently, and Settings can restore
@@ -58,10 +71,11 @@ backend, or external database.
 - A localized Settings disclosure lists resolved direct and transitive Gradle
   library licenses together with reviewed native-runtime and downloadable-model
   notices.
-- Optional Wikipedia knowledge retrieval for the validated Gemma 4 E2B and E4B
+- Optional Wikipedia knowledge retrieval for the configured Gemma 4 E2B and E4B
   bundles in normal Chat and Voice Chat. The model selects structured calls
   semantically; successful answers retain bounded canonical source links in the
-  shared local conversation.
+  shared local conversation. The new page/event selection requires the
+  documented physical-device validation before release acceptance.
 
 The checked-in catalog is authoritative for models the UI can manage. A feature
 being present in the UI does not prove that every model or device supports it;
@@ -74,8 +88,9 @@ memory, thermal, and multimodal behavior require physical-device validation.
 - Android: min SDK 28, compile/target SDK 36, arm64-v8a
 - Kotlin 2.3.21 and Compose BOM 2026.06.00
 - JDK 17 for Android Gradle builds, AGP 9.2.x, Gradle wrapper 9.4.1
-- Build Tools 36.0.0; Whisper uses NDK 28.2.13676358 and CMake 3.22.1
-- LLM runtime: LiteRT-LM 0.14.0; transcription runtime: whisper.cpp
+- Build Tools 36.0.0; Whisper and QuickJS use NDK 28.2.13676358 and CMake 3.22.1
+- LLM runtime: LiteRT-LM 0.14.0; transcription runtime: whisper.cpp; widget
+  program runtime: QuickJS 2026-06-04 behind the project-owned bounded JNI bridge
 - Bundled ML Kit Language ID 17.0.6
 - Android VAD 2.0.10 (WebRTC and Silero) plus ONNX Runtime Android 1.22.0
   transitively for the experimental Silero comparison
@@ -217,14 +232,17 @@ Model downloads still require network access to their configured artifact URLs.
 Once a valid model is present, core inference and Chat do not call a hosted
 inference service.
 
-Application-owned tools now use one versioned registry and validated execution
-boundary. A tool independently declares whether it is eligible for model tool
-calling, a future widget data runtime, or both; user enablement and required
-provider credentials remain additional gates. The current Wikipedia, web-search,
-and calculator tools remain model-only and keep their existing model-visible
-schemas and limits. A headless widget execution gateway exists for future
-structured widget tools, but this release does not create, render, persist,
-manage, or schedule widgets.
+Application-owned tools use one versioned registry and validated execution
+boundary. A tool independently declares model and widget eligibility; user
+enablement and operational readiness remain additional gates. The legacy
+`wikipedia_search@1` binding remains registered for compatibility.
+Checked-in Chat models advertise `wikipedia_pages@1` for direct stable page
+lookup and `wikipedia_on_this_day@1` for actual historical events on a calendar
+date; both contracts are also widget-eligible. Managed widgets keep source,
+revisions, consent, cached presentation, typed observations, and sanitized run
+history in a separate app-private SQLite database. See
+[Managed in-app widgets](docs/managed-widgets.md) for creation, consent,
+scheduling, privacy, deletion, non-goals, and validation boundaries.
 
 The optional **Local calculator** under **Assistant configuration → Tools** is
 disabled by default and runs entirely on-device. It is advertised only to the
@@ -238,17 +256,20 @@ sent over the network or persisted as conversation messages.
 
 Wikipedia is an explicit opt-in exception to otherwise local Chat processing.
 Enable it under **Assistant configuration → Tools**. A request is sent only when the
-selected installed model advertises `wikipedia_search` and the model emits that
-structured call for the current turn. Enabling the option does not send data by
+selected installed model advertises one of the structured Wikipedia tools and
+the model emits that call for the current turn. Enabling the option does not send data by
 itself and does not guarantee that every factual prompt will trigger research.
 
-Each eligible call sends only the model-selected query and a validated
-Wikipedia language code to the corresponding official MediaWiki HTTPS endpoint. ArarAI does
+Page lookup sends only the model-selected query and a validated Wikipedia
+language code to the official MediaWiki HTTPS endpoint. Event lookup sends only
+numeric month/day and the language code to the fixed official Wikipedia
+on-this-day REST path. ArarAI does
 not send the conversation history, system instruction, session identifier,
 audio, image, or local model data. The provider allows up to three calls per
 user turn, rejects redirects and non-Wikipedia URLs,
 applies a 12-second total deadline and bounded response/context limits, and
-returns at most three sources. Wikipedia content is external untrusted
+retains at most three sources with a completed model answer. Both Wikipedia
+tools share the three-call model-turn ceiling. Wikipedia content is external untrusted
 reference material and is not guaranteed to be current or complete.
 
 Completed assistant answers persist only bounded source metadata: provider,

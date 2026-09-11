@@ -3,6 +3,8 @@ package com.jesjobom.ararai.chat
 import android.content.Context
 import com.jesjobom.ararai.knowledge.WebSearchProvider
 import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.tools.WIKIPEDIA_ON_THIS_DAY_TOOL_NAME
+import com.jesjobom.ararai.tools.WIKIPEDIA_PAGES_TOOL_NAME
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -167,19 +169,7 @@ fun conversationTurnSettings(
             if (CALCULATOR_TOOL_NAME !in normalizedTools) {
                 add(CALCULATOR_UNAVAILABLE_INSTRUCTION)
             }
-            if (WIKIPEDIA_SEARCH_TOOL_NAME in normalizedTools) {
-                add(
-                    "Use wikipedia_search only for a direct, stable encyclopedic lookup, such as a person's " +
-                        "birth date, a country's capital or currency, a short biography, or a concise summary " +
-                        "of a concept or notable work. Do not use it for current news, changing facts, " +
-                        "comparisons, recommendations, troubleshooting, broad research, or claims that require " +
-                        "multiple independent sources; use web_search for those when available. " +
-                        "Use at most three calls per user turn. Search in English first. " +
-                        "If the English result is missing or unsatisfactory, automatically detect the language " +
-                        "of the user's question and retry in that language when a Wikipedia edition exists. " +
-                        "Never expose tool protocol or JSON.",
-                )
-            }
+            addAll(wikipediaToolInstructions(normalizedTools))
             if (WEB_SEARCH_TOOL_NAME in normalizedTools && webSearchProvider != null) {
                 add(
                     "Use web_search through ${webSearchProvider.displayName} for current, comparative, or " +
@@ -215,16 +205,48 @@ fun conversationTurnSettings(
     )
 }
 
+private fun wikipediaToolInstructions(advertisedTools: Set<String>): List<String> = buildList {
+    if (WIKIPEDIA_PAGES_TOOL_NAME in advertisedTools) {
+        add(
+            "Use wikipedia_pages only for a direct, stable encyclopedic page lookup, such as a person's " +
+                "birth date, a country's capital or currency, a short biography, or a concise summary " +
+                "of a concept or notable work. Do not use it for events on a calendar date when " +
+                "wikipedia_on_this_day is available. Do not use it for current news, changing facts, " +
+                "comparisons, recommendations, troubleshooting, broad research, or claims that require " +
+                "multiple independent sources; use web_search for those when available. " +
+                "Use the language requested by the user. Never expose tool protocol or JSON.",
+        )
+    }
+    if (WIKIPEDIA_ON_THIS_DAY_TOOL_NAME in advertisedTools) {
+        add(
+            "Use wikipedia_on_this_day only for historical events on a specific calendar month and day, " +
+                "including requests such as 'today in history'. For relative dates, derive month and day " +
+                "from the current date supplied by the system. It returns actual events, not a date-index " +
+                "page. Use wikipedia_pages for people, places, concepts, works, dates themselves, and " +
+                "other direct encyclopedic lookups. Across both Wikipedia tools, use at most three calls " +
+                "per user turn. Use the language requested by the user and never expose tool protocol or JSON.",
+        )
+    }
+    if (WIKIPEDIA_SEARCH_TOOL_NAME in advertisedTools && WIKIPEDIA_PAGES_TOOL_NAME !in advertisedTools) {
+        add(
+            "Use wikipedia_search only for a direct, stable encyclopedic lookup. Do not use it for " +
+                "current news, changing facts, comparisons, recommendations, troubleshooting, broad " +
+                "research, or multi-source evidence. Use at most three calls per user turn and never " +
+                "expose tool protocol or JSON.",
+        )
+    }
+}
+
 fun eligibleToolNames(
     settings: InstructionSettings,
     model: LocalModel?,
     selectedWebProvider: WebSearchProvider? = null,
     experimentalWebSearchEnabled: Boolean = false,
 ): Set<String> = buildSet {
-    if (settings.wikipediaEnabled &&
-        model?.toolCapabilities?.supports(WIKIPEDIA_SEARCH_TOOL_NAME) == true
-    ) {
-        add(WIKIPEDIA_SEARCH_TOOL_NAME)
+    if (settings.wikipediaEnabled) {
+        WIKIPEDIA_MODEL_TOOL_NAMES
+            .filter { model?.toolCapabilities?.supports(it) == true }
+            .forEach(::add)
     }
     if (selectedWebProvider != null &&
         experimentalWebSearchEnabled &&
@@ -240,6 +262,12 @@ fun eligibleToolNames(
 const val WIKIPEDIA_SEARCH_TOOL_NAME = "wikipedia_search"
 const val WEB_SEARCH_TOOL_NAME = "web_search"
 const val CALCULATOR_TOOL_NAME = "calculator"
+
+private val WIKIPEDIA_MODEL_TOOL_NAMES = setOf(
+    WIKIPEDIA_SEARCH_TOOL_NAME,
+    WIKIPEDIA_PAGES_TOOL_NAME,
+    WIKIPEDIA_ON_THIS_DAY_TOOL_NAME,
+)
 
 private const val CALCULATOR_UNAVAILABLE_INSTRUCTION =
     "No calculator or math tool is available for this turn. Answer directly without emitting " +

@@ -12,6 +12,32 @@ import java.net.URI
 
 class WikipediaKnowledgeToolTest {
     @Test
+    fun `exposes the same validated response as bounded typed pages`() = runTest {
+        val tool = toolReturning(
+            """
+            {"query":{"pages":[{
+              "title":"Ada Lovelace",
+              "extract":"Mathematician.",
+              "canonicalurl":"https://en.wikipedia.org/wiki/Ada_Lovelace"
+            }]}}
+            """,
+        )
+
+        val result = tool.fetch(ToolRequest("Ada Lovelace", "en")) as WikipediaPagesResult.Success
+
+        assertEquals(
+            WikipediaPage(
+                title = "Ada Lovelace",
+                extract = "Mathematician.",
+                canonicalUrl = "https://en.wikipedia.org/wiki/Ada_Lovelace",
+                language = "en",
+                retrievedAtMillis = result.pages.single().retrievedAtMillis,
+            ),
+            result.pages.single(),
+        )
+    }
+
+    @Test
     fun `returns bounded multilingual untrusted context and official sources`() = runTest {
         var requestedUrl = ""
         val tool =

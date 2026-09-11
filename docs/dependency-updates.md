@@ -16,7 +16,8 @@ dependency update.
    ```
 
 3. Review every changed module/version in `gradle.lockfile`,
-   `app/gradle.lockfile`, and `whisper-runtime/gradle.lockfile`.
+   `app/gradle.lockfile`, `quickjs-runtime/gradle.lockfile`, and
+   `whisper-runtime/gradle.lockfile`.
 4. Review new or changed components and checksums in
    `gradle/verification-metadata.xml`. Check the artifact origin and release
    independently; never accept metadata solely because Gradle downloaded it.
@@ -45,3 +46,6 @@ Android SDK/NDK packages, CMake-provisioned native sources, signing keys, and AP
 provenance require separate controls. Release signing and distribution are not
 enabled by this workflow.
 
+Vendored QuickJS updates follow the additional checksum, file-selection,
+license, ABI, adversarial, R8, size, and physical-device procedure in
+`quickjs-runtime/ORIGIN.md` and `docs/widget-script-runtime.md`.

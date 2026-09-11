@@ -86,6 +86,8 @@ jobs:
             app/build/test-results/testDebugUnitTest/
             app/build/reports/lint-results-debug.html
             app/build/reports/lint-results-debug.xml
+            build/quickjs-host-tests/Testing/Temporary/
+            build/quickjs-host-tests-release/Testing/Temporary/
 
       - name: Upload debug APK
         if: success()
@@ -96,11 +98,24 @@ jobs:
           retention-days: 7
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Upload instrumentation APK
+      - name: Upload instrumentation APKs
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ararai-instrumentation-apk
           if-no-files-found: error
           retention-days: 7
-          path: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          path: |
+            app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            app/build/outputs/apk/androidTest/releaseCandidate/app-releaseCandidate-androidTest.apk
+            quickjs-runtime/build/outputs/apk/androidTest/debug/quickjs-runtime-debug-androidTest.apk
+            quickjs-runtime/build/outputs/apk/androidTest/release/quickjs-runtime-release-androidTest.apk
+
+      - name: Upload self-service runtime validation APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ararai-runtime-validation-apk
+          if-no-files-found: error
+          retention-days: 7
+          path: app/build/outputs/apk/releaseCandidate/app-releaseCandidate.apk

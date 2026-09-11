@@ -27,9 +27,35 @@ data class ModelReasoningCapabilities(
 
 data class ModelToolCapabilities(
     val toolNames: Set<String> = emptySet(),
+    val authoringToolNames: Set<String> = emptySet(),
+    val authoringProtocolNames: Set<String> = emptySet(),
 ) {
     fun supports(toolName: String): Boolean = toolName in toolNames
+
+    fun supportsAuthoring(toolName: String): Boolean = toolName in authoringToolNames
+
+    fun supportsAuthoringProtocol(protocolName: String): Boolean = protocolName in authoringProtocolNames
+
+    internal val allowedAuthoringToolNames: Set<String>
+        get() = authoringToolNames + if (WIDGET_AUTHORING_PIPELINE_V1 in authoringProtocolNames) {
+            WIDGET_AUTHORING_PIPELINE_V1_TOOL_NAMES
+        } else {
+            emptySet()
+        }
+
+    internal val allToolNames: Set<String>
+        get() = toolNames + allowedAuthoringToolNames
 }
+
+const val PROPOSE_WIDGET_TOOL_NAME = "propose_widget"
+const val WIDGET_AUTHORING_PIPELINE_V1 = "widget_authoring_pipeline_v1"
+internal val WIDGET_AUTHORING_PIPELINE_V1_TOOL_NAMES = setOf(
+    "submit_widget_feasibility",
+    "submit_widget_algorithm",
+    "submit_widget_call_function",
+    "submit_widget_plan_function",
+    "submit_widget_render_function",
+)
 
 enum class ModelRuntime(
     val configValue: String,

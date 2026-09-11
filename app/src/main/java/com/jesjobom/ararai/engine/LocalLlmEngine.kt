@@ -49,6 +49,7 @@ data class PromptRequest(
     val reasoningEnabled: Boolean = false,
     val chatSessionId: String? = null,
     val advertisedToolNames: Set<String> = emptySet(),
+    val ephemeralTools: List<EphemeralLocalLlmTool> = emptyList(),
 ) {
     constructor(prompt: String) : this(MessageContent.TextPrompt(prompt), userChatMessages(prompt))
 
@@ -86,6 +87,13 @@ data class PromptRequest(
             listOf(PromptChatMessage(PromptChatRole.User, prompt))
         }
     }
+}
+
+interface EphemeralLocalLlmTool {
+    val name: String
+    val descriptionJson: String
+
+    fun execute(argumentsJson: String): String
 }
 
 data class PromptChatMessage(
