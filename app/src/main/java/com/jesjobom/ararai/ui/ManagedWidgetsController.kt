@@ -2,6 +2,8 @@
 
 package com.jesjobom.ararai.ui
 
+import android.util.Log
+import com.jesjobom.ararai.BuildConfig
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
@@ -27,6 +29,7 @@ import com.jesjobom.ararai.widget.managed.WidgetDraftSummary
 import com.jesjobom.ararai.widget.managed.WidgetProgramRevision
 import com.jesjobom.ararai.widget.managed.WidgetRunRecord
 import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticEnvironment
+import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticMode
 import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticReport
 import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticRunner
 import com.jesjobom.ararai.widget.managed.consentDigest
@@ -219,12 +222,26 @@ internal class ManagedWidgetsController(
         model: LocalModel,
         inference: InferenceConfig,
         environment: WidgetToolCallingDiagnosticEnvironment,
+        mode: WidgetToolCallingDiagnosticMode = WidgetToolCallingDiagnosticMode.FullMatrix,
     ): WidgetToolCallingDiagnosticReport {
         val productionPrompt = WidgetAuthoringContextBuilder.build(
-            userInstruction = TOOL_CALLING_DIAGNOSTIC_PROMPT,
+            userInstruction = if (mode == WidgetToolCallingDiagnosticMode.FeasibilityCompactExplicit) {
+                TOOL_CALLING_DIAGNOSTIC_EXPLICIT_PROMPT
+            } else {
+                TOOL_CALLING_DIAGNOSTIC_PROMPT
+            },
             toolContracts = services.toolRegistry.descriptors(),
         )
-        return toolCallingDiagnostic.run(model, inference, productionPrompt, environment)
+        return toolCallingDiagnostic.run(
+            model,
+            inference,
+            productionPrompt,
+            environment,
+            mode,
+            captureRawArtifacts = BuildConfig.DEBUG,
+        ).also { report ->
+            if (BuildConfig.DEBUG) report.logControlledTrace()
+        }
     }
 
     suspend fun confirm(
@@ -250,7 +267,18 @@ internal class ManagedWidgetsController(
     }
 }
 
-private const val TOOL_CALLING_DIAGNOSTIC_PROMPT = "mostre um evento aleatório da Wikipedia"
+internal const val TOOL_CALLING_DIAGNOSTIC_PROMPT =
+    "Mostre um evento aleatório da Wikipédia para o dia e o mês de hoje. " +
+        "Atualize o evento a cada hora."
+internal const val TOOL_CALLING_DIAGNOSTIC_EXPLICIT_PROMPT =
+    "Mostre um evento da Wikipédia para o dia e o mês de hoje e atualize a cada hora. " +
+        "Use wikipedia_on_this_day@1 com a data de runtime.currentLocalDateTime() e escolha o evento com " +
+        "runtime.seededIndex(events.length)."
+private const val WIDGET_DIAGNOSTIC_LOG_TAG = "ArarAI.WidgetDiagnostic"
+
+private fun WidgetToolCallingDiagnosticReport.logControlledTrace() {
+    controlledLogLines().forEach { line -> Log.i(WIDGET_DIAGNOSTIC_LOG_TAG, line) }
+}
 
 private fun currentManagedWidgetRuntimeContext(): WidgetRuntimeContext {
     val now = ZonedDateTime.now()

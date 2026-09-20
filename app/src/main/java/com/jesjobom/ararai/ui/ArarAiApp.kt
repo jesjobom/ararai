@@ -221,6 +221,7 @@ internal fun ArarAiApp(
     localLlmEngineFactory: (() -> LocalLlmEngine)? = null,
     managedWidgetServices: ManagedWidgetApplicationServices? = null,
     onShareWidgetToolCallingDiagnostic: (String) -> Unit = {},
+    onShareRawWidgetToolCallingDiagnostic: (String) -> Unit = {},
 ) {
     val resourceContext = androidx.compose.ui.platform.LocalContext.current
     val appContext = resourceContext.applicationContext
@@ -604,6 +605,7 @@ internal fun ArarAiApp(
                     },
                     onOpenToolSettings = { destination = AppDestination.InstructionsTools },
                     onShareDiagnosticReport = onShareWidgetToolCallingDiagnostic,
+                    onShareRawDiagnosticReport = onShareRawWidgetToolCallingDiagnostic,
                 )
             }
         }

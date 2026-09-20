@@ -142,15 +142,37 @@ conversation state is never reused implicitly; each stage receives only the
 original instruction, validated artifacts it needs, and bounded non-secret API
 metadata.
 
+That metadata declares the authoring operation as `create` or `edit`; the
+instruction itself describes desired behavior/content and need not repeat the
+UI operation or even the word "widget". The program API also translates
+natural random/varied/shuffled selection language, including common supported
+user-language equivalents, into the `seed` grant and
+`runtime.seededIndex(length)`. It explains that `Math.random` is unavailable,
+fresh executions may vary, and the same runtime snapshot reproduces the same
+index. This keeps implementation policy in application-owned context while
+allowing ordinary user phrasing.
+
+The feasibility stage receives a small choose-first decision contract in
+addition to its capture schema. The model returns exactly four fields:
+`outcome`, one outcome-dependent `message`, `periodicIntervalHours`, and the
+minimum registered `toolIds`. The application maps the message to a display
+name, reason, or clarification question and derives protocol metadata,
+enablement, registered tool versions, deterministic runtime grants,
+allowlisted presentation grants, and terminal normalization. This reduces
+mechanical schema work for a small local model without transferring authority
+to it. Later stages continue to preserve the resulting validated envelope
+exactly.
+
 The base pipeline is:
 
-1. **Feasibility and capability selection.** Return `achievable`,
-   `unachievable`, or `needs_clarification`, plus bounded display/schedule intent,
-   required registered tool/version IDs, runtime values, presentation features,
-   and a controlled explanation. The application rejects invented or
-   ineligible capabilities and treats the model's feasibility judgment as an
-   untrusted proposal. A request that needs an unavailable operation or a later
-   live-result-dependent call ends without code generation or mutation.
+1. **Feasibility and tool selection.** Return `achievable`, `unachievable`, or
+   `needs_clarification`, plus one bounded message, bounded schedule intent, and
+   the minimum registered tool IDs. The application resolves eligible versions
+   and derives the remaining capability envelope from checked-in policy. It
+   rejects invented or ineligible tools and treats the model's feasibility
+   judgment as an untrusted proposal. A request that needs an unavailable
+   operation or a later live-result-dependent call ends without code generation
+   or mutation.
 2. **Typed algorithm.** For an achievable request, return a bounded acyclic IR
    of runtime inputs, independent planned tool calls, transformations, and one
    presentation objective. Step IDs and dependencies are explicit. Tool-call
@@ -212,6 +234,11 @@ code; it cannot broaden tools, capabilities, schedule, or presentation scope.
 Exhaustion ends the attempt without mutation. This bounded explicit-foreground
 repair supersedes the earlier rejection of all automatic repair loops; ongoing,
 background, or open-ended repair remains forbidden.
+Each controlled failure code also maps to a checked-in actionable correction
+instruction. In particular, an outcome-contract failure repeats the three
+feasibility outcome invariants, while a missing artifact explicitly requires
+one capture-tool call. The model still receives no arbitrary validator message,
+exception, provider content, or additional authority.
 
 The UI presents the state machine directly: analyzing feasibility, selecting
 tools, designing the algorithm, generating call N of M, generating
@@ -260,16 +287,68 @@ program quality. The revised diagnostic characterizes every stage-specific
 capture schema and then runs the complete pipeline against synthetic runtime
 and tool-result fixtures without production provider access.
 It aborts after a callback timeout rather than reusing a potentially wedged
-native runtime. The matrix never
-persists or uploads a report. Suite v4 copy/share results contain only controlled
-outcome codes, durations, whether and how many tool callbacks were observed,
-per-tool aggregate argument byte counts, controlled complete-pipeline failure
-stage/code when applicable, and device/app/model/schema hashes. The stage/code
-fields are null for successful or non-stage terminal outcomes. Prompts,
-generated arguments, JavaScript, raw model output, exception messages, and stack
-traces are excluded.
+native runtime. The matrix never persists or uploads a report. Suite v10 adds
+three independent single-generation feasibility probes: full context with the
+natural request, compact feasibility-only context with that request, and
+compact context with an explicit implementation control. Each is selected and
+reported independently so a physical comparison can force-stop the process
+between probes instead of thermally priming the production case with the schema
+matrix. The compact context retains operation semantics, supported schedule,
+runtime and presentation values, registered tool identities and field names,
+random-selection guidance, and current-widget metadata without source, while
+omitting later-stage examples and full nested schemas. Copy/share results
+contain only controlled outcome codes, durations, whether
+and how many tool callbacks were observed, per-tool aggregate argument byte
+counts, controlled complete-pipeline failure stage/code when applicable, and
+device/app/model/schema hashes. Probe results additionally contain UTF-8 byte
+sizes for system instruction, user text, context, and schema; estimated input
+characters; a context SHA-256; and monotonic first-event, tool-capture,
+terminal, watchdog, return, and cleanup-overrun timings. Feasibility rejection
+is localized to bounded
+JSON/root, exact field set, protocol, display-name, enabled, schedule, tool
+selection, runtime grant, presentation grant, or outcome-contract categories.
+The same category scopes a bounded repair. The report includes the controlled
+stage/code, attempt number, and argument byte count for each failed attempt so
+repair progression remains observable without the rejected value. Debug builds
+emit those already-sanitized lines under one Logcat tag for terminal-only ADB
+collection. The stage/code fields are null for successful or non-stage terminal
+outcomes. Prompts, generated arguments, JavaScript, raw model output, exception
+messages, and stack traces are excluded from both report and controlled Logcat.
 This distinguishes schema/protocol stages without creating a remote diagnostic
 data path or exposing the native parser's potentially content-bearing error.
+
+Suite v12 retains the bounded compact context promoted in suite v11 and replaces
+the feasibility wire artifact with the four-field decision above. The algorithm
+and source-fragment stages still receive their full stage-specific validated
+inputs. `complete_pipeline_compact_natural` remains one cold, production-like
+pipeline run with the natural request and no preceding schema matrix or probe.
+This separates end-to-end model behavior from thermal and runtime state
+accumulated by characterization generations; it remains diagnostic evidence and
+does not bypass the complete eligibility matrix.
+
+Suite v13 adds `algorithm_natural`, a separate one-generation algorithm probe.
+The application supplies a normalized achievable feasibility fixture derived
+from its registered Wikipedia capability, then builds the same natural prompt,
+algorithm context, schema, capture, and semantic validation used by production.
+The probe cannot call a provider and reports only controlled outcome, aggregate
+capture metadata, sanitized input metrics, and lifecycle timings. Complete
+pipeline modes also record one lifecycle entry per stage-local attempt: repair
+flag, controlled outcome, first generation event, tool capture, terminal event,
+watchdog, return, and cleanup overrun. Together these signals distinguish a
+native generation stall, no callback, transport/parser rejection, and captured
+but structurally invalid output without placing raw content in the normal report
+or Logcat.
+
+For diagnosing model/schema mismatches that controlled codes cannot identify,
+debug builds may retain an in-memory raw trace only for the user-initiated
+diagnostic run. The normal report and Logcat remain sanitized. After a separate
+warning and explicit confirmation, the UI may write a replace-on-export JSON
+sidecar under the application cache and share it through a read-only
+`FileProvider` grant. The sidecar preserves the exact stage instruction,
+effective context, capture schema, and callback argument string for each round;
+rounds with no callback remain empty rather than inventing native output. The
+control is absent in release builds, the file is excluded from backup, and no
+automatic upload or telemetry path is added.
 
 The historical suite-v2 result is model- and inference-budget-specific. E4B at
 4,096 context tokens completed all five cases, including the full production

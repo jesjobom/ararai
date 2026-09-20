@@ -2,6 +2,7 @@ package com.jesjobom.ararai.widget.managed
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.engine.GenerationEvent
 import com.jesjobom.ararai.engine.GenerationFailureKind
@@ -134,6 +135,7 @@ class WidgetAuthoringTest {
         assertTrue(prompt.apiContextJson.contains("runtime.language"))
         assertTrue(prompt.apiContextJson.contains("runtime.seededIndex"))
         assertTrue(prompt.apiContextJson.contains("wikipediaBehaviorGuidance"))
+        assertTrue(prompt.apiContextJson.contains("\"mode\":\"edit\""))
         assertTrue(prompt.apiContextJson.contains("function plan(runtime)"))
         assertTrue(prompt.apiContextJson.contains("function render(runtime, outcomes, state)"))
         assertFalse(prompt.apiContextJson.contains("private_model_tool"))
@@ -143,6 +145,26 @@ class WidgetAuthoringTest {
         assertFalse(prompt.apiContextJson.contains(revision.programDigest))
         assertFalse(prompt.apiContextJson.contains("sourceSha256"))
         assertFalse(prompt.apiContextJson.contains("memoryBytes"))
+    }
+
+    @Test
+    fun `authoring context owns creation semantics and maps natural variation to seeded selection`() {
+        val prompt = WidgetAuthoringContextBuilder.build(
+            userInstruction = "Mostre um evento aleatório da Wikipédia para hoje",
+            toolContracts = listOf(onThisDayContract()),
+        )
+
+        val root = JsonParser.parseString(prompt.apiContextJson).asJsonObject
+        val task = root.getAsJsonObject("authoringTask")
+        val programApi = root.getAsJsonObject("programApi")
+
+        assertEquals("create", task.get("mode").asString)
+        assertTrue(task.get("instructionSemantics").asString.contains("desired widget behavior"))
+        assertTrue(task.get("instructionSemantics").asString.contains("do not require"))
+        assertTrue(programApi.get("randomSelection").asString.contains("aleatório"))
+        assertTrue(programApi.get("randomSelection").asString.contains("runtime.seededIndex(length)"))
+        assertTrue(programApi.get("randomSelection").asString.contains("Math.random is unavailable"))
+        assertTrue(programApi.get("randomSelection").asString.contains("same runtime snapshot"))
     }
 
     @Test

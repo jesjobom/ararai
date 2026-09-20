@@ -42,10 +42,11 @@ class WidgetToolCallingDiagnosticTest {
             environment = environment(),
         )
 
-        assertTrue(report.overallPassed)
+        assertTrue(report.toCanonicalJson(), report.overallPassed)
         assertEquals(6, report.cases.size)
         assertTrue(report.cases.all { it.passed && it.toolCallObserved && it.argumentBytes != null })
         assertTrue(report.cases.all { it.failureStage == null && it.failureCode == null })
+        assertTrue(report.cases.all { it.attemptFailures.isEmpty() })
         assertTrue(report.cases.take(5).all { it.captures.single().callCount == 1 })
         assertEquals(EXPECTED_STAGE_TOOLS, report.cases.last().captures.mapTo(mutableSetOf()) { it.toolName })
         assertEquals(6, report.cases.map { it.schemaSha256 }.distinct().size)
@@ -56,7 +57,7 @@ class WidgetToolCallingDiagnosticTest {
         assertTrue(engine.requests.all { it.ephemeralTools.single().name in EXPECTED_STAGE_TOOLS })
 
         val encoded = report.toCanonicalJson()
-        assertTrue(encoded.contains("\"suiteVersion\":4"))
+        assertEquals(13, JsonParser.parseString(encoded).asJsonObject.get("suiteVersion").asInt)
         assertTrue(encoded.contains("\"containsRawModelOutput\":false"))
         assertTrue(encoded.contains("\"failureStage\":null"))
         assertTrue(encoded.contains("\"failureCode\":null"))
@@ -66,6 +67,210 @@ class WidgetToolCallingDiagnosticTest {
         assertFalse(encoded.contains("private prompt marker"))
         assertFalse(encoded.contains(DiagnosticFakeEngine.RAW_ARGUMENT_MARKER))
         assertFalse(encoded.contains(CALL_SOURCE))
+    }
+
+    @Test
+    fun `cold feasibility probes expose bounded input and lifecycle metrics without raw context`() = runTest {
+        val full = runner(DiagnosticFakeEngine(DiagnosticMode.Pass)).run(
+            model(),
+            INFERENCE,
+            prompt("private natural prompt marker"),
+            environment(),
+            WidgetToolCallingDiagnosticMode.FeasibilityFullNatural,
+        )
+        val compact = runner(DiagnosticFakeEngine(DiagnosticMode.Pass)).run(
+            model(),
+            INFERENCE,
+            prompt("private natural prompt marker"),
+            environment(),
+            WidgetToolCallingDiagnosticMode.FeasibilityCompactNatural,
+        )
+
+        assertTrue(full.overallPassed)
+        assertTrue(compact.overallPassed)
+        assertEquals(1, full.cases.size)
+        assertEquals(1, compact.cases.size)
+        assertEquals("feasibility_full_natural", full.mode.wireName)
+        assertEquals("feasibility_compact_natural", compact.mode.wireName)
+        val fullInput = full.cases.single().inputMetrics!!
+        val compactInput = compact.cases.single().inputMetrics!!
+        assertTrue(fullInput.contextUtf8Bytes > compactInput.contextUtf8Bytes)
+        assertEquals(WidgetAuthoringStageSchemas.feasibility.toByteArray().size, compactInput.schemaUtf8Bytes)
+        assertTrue(compactInput.systemInstructionUtf8Bytes > 0)
+        assertTrue(compactInput.userTextUtf8Bytes > 0)
+        assertTrue(compactInput.estimatedInputChars > compactInput.contextUtf8Bytes)
+        assertTrue(compactInput.contextSha256.matches(Regex("[0-9a-f]{64}")))
+        val lifecycle = compact.cases.single().lifecycle!!
+        assertTrue(lifecycle.firstGenerationEventMillis != null)
+        assertTrue(lifecycle.terminalEventMillis != null)
+        assertEquals(null, lifecycle.watchdogMillis)
+        assertEquals(null, lifecycle.cleanupOverrunMillis)
+        assertTrue(lifecycle.returnMillis >= lifecycle.terminalEventMillis!!)
+
+        val encoded = compact.toCanonicalJson()
+        assertTrue(encoded.contains("\"diagnosticMode\":\"feasibility_compact_natural\""))
+        assertTrue(encoded.contains("\"plannedCaseCount\":1"))
+        assertTrue(encoded.contains("\"contextUtf8Bytes\":"))
+        assertTrue(encoded.contains("\"firstGenerationEventMillis\":"))
+        assertFalse(encoded.contains("private natural prompt marker"))
+        assertFalse(encoded.contains("runtime.seededIndex"))
+        assertFalse(encoded.contains(DiagnosticFakeEngine.RAW_ARGUMENT_MARKER))
+    }
+
+    @Test
+    fun `timed out feasibility probe distinguishes watchdog from cleanup return`() = runTest {
+        val report = runner(DiagnosticFakeEngine(DiagnosticMode.Timeout), timeoutMillis = 1)
+            .run(
+                model(),
+                INFERENCE,
+                prompt("private prompt marker"),
+                environment(),
+                WidgetToolCallingDiagnosticMode.FeasibilityCompactNatural,
+            )
+
+        val result = report.cases.single()
+        assertEquals(DIAGNOSTIC_CASE_TIMEOUT, result.outcome)
+        assertEquals(WidgetAuthoringStage.Feasibility, result.failureStage)
+        assertEquals(WidgetAuthoringStageFailureCode.TimedOut, result.failureCode)
+        assertEquals(1L, result.lifecycle?.watchdogMillis)
+        assertTrue(requireNotNull(result.lifecycle?.cleanupOverrunMillis) >= 0)
+        assertTrue(requireNotNull(result.lifecycle).returnMillis >= 1)
+        assertFalse(report.toCanonicalJson().contains("private prompt marker"))
+    }
+
+    @Test
+    fun `cold algorithm probe uses production context lifecycle and semantic validation`() = runTest {
+        val engine = DiagnosticFakeEngine(DiagnosticMode.Pass)
+        val report = runner(engine).run(
+            model(),
+            INFERENCE,
+            prompt("private algorithm prompt marker"),
+            environment(),
+            WidgetToolCallingDiagnosticMode.AlgorithmNatural,
+        )
+
+        assertTrue(report.toCanonicalJson(), report.overallPassed)
+        assertEquals("algorithm_natural", report.mode.wireName)
+        assertEquals(SUBMIT_WIDGET_ALGORITHM_TOOL, engine.requests.single().ephemeralTools.single().name)
+        val result = report.cases.single()
+        assertEquals(WidgetAuthoringStageSchemas.algorithm.toByteArray().size, result.inputMetrics?.schemaUtf8Bytes)
+        assertTrue(requireNotNull(result.inputMetrics).contextUtf8Bytes > 0)
+        assertTrue(result.lifecycle?.toolCaptureMillis != null)
+        assertTrue(result.lifecycle?.terminalEventMillis != null)
+        assertTrue(result.attemptFailures.isEmpty())
+        val encoded = report.toCanonicalJson()
+        assertFalse(encoded.contains("private algorithm prompt marker"))
+        assertFalse(encoded.contains(DiagnosticFakeEngine.RAW_ARGUMENT_MARKER))
+
+        val invalid = runner(DiagnosticFakeEngine(DiagnosticMode.InvalidPipelineAlgorithm)).run(
+            model(),
+            INFERENCE,
+            prompt(),
+            environment(),
+            WidgetToolCallingDiagnosticMode.AlgorithmNatural,
+        ).cases.single()
+        assertEquals(DIAGNOSTIC_PIPELINE_INVALID, invalid.outcome)
+        assertEquals(WidgetAuthoringStage.Algorithm, invalid.failureStage)
+        assertEquals(WidgetAuthoringStageFailureCode.InvalidAlgorithm, invalid.failureCode)
+        assertEquals(2L, invalid.attemptFailures.single().argumentBytes)
+    }
+
+    @Test
+    fun `cold complete pipeline runs without preceding schema matrix`() = runTest {
+        val engine = DiagnosticFakeEngine(DiagnosticMode.Pass)
+
+        val report = runner(engine).run(
+            model(),
+            INFERENCE,
+            prompt("private natural prompt marker"),
+            environment(),
+            WidgetToolCallingDiagnosticMode.CompletePipelineCompactNatural,
+        )
+
+        assertTrue(report.toCanonicalJson(), report.overallPassed)
+        assertEquals("complete_pipeline_compact_natural", report.mode.wireName)
+        assertEquals(1, report.cases.size)
+        assertEquals("complete_synthetic_pipeline", report.cases.single().id)
+        assertEquals(5, engine.requests.size)
+        assertEquals(
+            listOf(
+                SUBMIT_WIDGET_FEASIBILITY_TOOL,
+                SUBMIT_WIDGET_ALGORITHM_TOOL,
+                SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
+                SUBMIT_WIDGET_PLAN_FUNCTION_TOOL,
+                SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
+            ),
+            engine.requests.map { it.ephemeralTools.single().name },
+        )
+        assertEquals(5, report.cases.single().roundLifecycles.size)
+        assertEquals(
+            listOf(
+                WidgetAuthoringStage.Feasibility,
+                WidgetAuthoringStage.Algorithm,
+                WidgetAuthoringStage.CallFunction,
+                WidgetAuthoringStage.PlanFunction,
+                WidgetAuthoringStage.RenderFunction,
+            ),
+            report.cases.single().roundLifecycles.map { it.stage },
+        )
+        assertTrue(report.cases.single().roundLifecycles.all { it.outcome == WidgetAuthoringRoundOutcome.Captured })
+        assertTrue(report.toCanonicalJson().contains("\"roundLifecycles\":[{"))
+        assertTrue(report.controlledLogLines().any { it.startsWith("roundLifecycle stage=algorithm attempt=1") })
+        assertFalse(report.toCanonicalJson().contains("private natural prompt marker"))
+    }
+
+    @Test
+    fun `opt in raw trace exports exact requests and captures without contaminating sanitized report`() = runTest {
+        val report = runner(DiagnosticFakeEngine(DiagnosticMode.Pass)).run(
+            model(),
+            INFERENCE,
+            prompt("private raw export marker"),
+            environment(),
+            WidgetToolCallingDiagnosticMode.CompletePipelineCompactNatural,
+            captureRawArtifacts = true,
+        )
+
+        val sanitized = report.toCanonicalJson()
+        val raw = requireNotNull(report.toRawDiagnosticJson())
+        val trace = requireNotNull(report.rawTrace)
+        assertFalse(sanitized.contains("private raw export marker"))
+        assertFalse(sanitized.contains(CALL_SOURCE))
+        assertTrue(raw.contains("\"containsRawModelOutput\":true"))
+        assertTrue(raw.contains("private raw export marker"))
+        assertTrue(
+            trace.exchanges.any { exchange ->
+                exchange.capturedArgumentsJson.any { arguments ->
+                    JsonParser.parseString(arguments).asJsonObject.get("source")?.asString == CALL_SOURCE
+                }
+            },
+        )
+        assertTrue(raw.contains("\"capturedArgumentsJson\":["))
+        assertEquals(5, trace.exchanges.size)
+        assertEquals(
+            listOf(
+                SUBMIT_WIDGET_FEASIBILITY_TOOL,
+                SUBMIT_WIDGET_ALGORITHM_TOOL,
+                SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
+                SUBMIT_WIDGET_PLAN_FUNCTION_TOOL,
+                SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
+            ),
+            trace.exchanges.map { it.toolName },
+        )
+        assertTrue(trace.exchanges.all { it.capturedArgumentsJson.size == 1 })
+    }
+
+    @Test
+    fun `raw trace is absent unless explicitly enabled`() = runTest {
+        val report = runner(DiagnosticFakeEngine(DiagnosticMode.Pass)).run(
+            model(),
+            INFERENCE,
+            prompt("private disabled raw marker"),
+            environment(),
+            WidgetToolCallingDiagnosticMode.FeasibilityCompactNatural,
+        )
+
+        assertEquals(null, report.rawTrace)
+        assertEquals(null, report.toRawDiagnosticJson())
     }
 
     @Test
@@ -95,11 +300,23 @@ class WidgetToolCallingDiagnosticTest {
         )
         assertEquals(4, complete.captureCount)
         assertEquals(6 + feasibilityArtifact().toByteArray().size.toLong(), complete.argumentBytes)
+        assertEquals(
+            (1..3).map { attempt ->
+                WidgetAuthoringAttemptFailure(
+                    stage = WidgetAuthoringStage.Algorithm,
+                    attempt = attempt,
+                    code = WidgetAuthoringStageFailureCode.InvalidAlgorithm,
+                    argumentBytes = 2,
+                )
+            },
+            complete.attemptFailures,
+        )
 
         val encoded = report.toCanonicalJson()
         assertTrue(encoded.contains("\"failureStage\":\"algorithm\""))
         assertTrue(encoded.contains("\"failureCode\":\"invalid_algorithm\""))
         assertTrue(encoded.contains("\"captureCount\":4"))
+        assertTrue(encoded.contains("\"attemptFailures\":[{"))
         val algorithmCapture = JsonParser.parseString(encoded).asJsonObject
             .getAsJsonArray("cases")
             .last().asJsonObject
@@ -111,6 +328,90 @@ class WidgetToolCallingDiagnosticTest {
         assertFalse(encoded.contains("private prompt marker"))
         assertFalse(encoded.contains(DiagnosticFakeEngine.RAW_ARGUMENT_MARKER))
         assertFalse(encoded.contains(DiagnosticFakeEngine.RAW_EXCEPTION_MARKER))
+    }
+
+    @Test
+    fun `complete pipeline exposes sanitized lifecycle for every algorithm timeout`() = runTest {
+        val report = runner(DiagnosticFakeEngine(DiagnosticMode.AlgorithmTimeout), timeoutMillis = 1).run(
+            model(),
+            INFERENCE,
+            prompt("private lifecycle marker"),
+            environment(),
+            WidgetToolCallingDiagnosticMode.CompletePipelineCompactNatural,
+        )
+
+        val complete = report.cases.single()
+        assertEquals(DIAGNOSTIC_PIPELINE_INVALID, complete.outcome)
+        assertEquals(WidgetAuthoringStage.Algorithm, complete.failureStage)
+        assertEquals(WidgetAuthoringStageFailureCode.TimedOut, complete.failureCode)
+        assertEquals(4, complete.roundLifecycles.size)
+        assertEquals(WidgetAuthoringRoundOutcome.Captured, complete.roundLifecycles.first().outcome)
+        complete.roundLifecycles.drop(1).forEachIndexed { index, lifecycle ->
+            assertEquals(WidgetAuthoringStage.Algorithm, lifecycle.stage)
+            assertEquals(index + 1, lifecycle.attempt)
+            assertEquals(index > 0, lifecycle.isRepair)
+            assertEquals(WidgetAuthoringRoundOutcome.TimedOut, lifecycle.outcome)
+            assertEquals(null, lifecycle.firstGenerationEventMillis)
+            assertEquals(null, lifecycle.toolCaptureMillis)
+            assertEquals(null, lifecycle.terminalEventMillis)
+            assertEquals(1L, lifecycle.watchdogMillis)
+            assertTrue(lifecycle.returnMillis >= 0)
+            assertTrue(requireNotNull(lifecycle.cleanupOverrunMillis) >= 0)
+        }
+        val encoded = report.toCanonicalJson()
+        val controlledLog = report.controlledLogLines().joinToString("\n")
+        assertTrue(encoded.contains("\"roundLifecycles\":[{"))
+        assertTrue(encoded.contains("\"outcome\":\"timed_out\""))
+        assertTrue(controlledLog.contains("roundLifecycle stage=algorithm attempt=3"))
+        assertTrue(controlledLog.contains("firstEventMillis=none"))
+        assertFalse(encoded.contains("private lifecycle marker"))
+    }
+
+    @Test
+    fun `complete pipeline exports structural subcode and attempt sequence without rejected values`() = runTest {
+        val report = runner(DiagnosticFakeEngine(DiagnosticMode.InvalidPipelineFeasibilityFields))
+            .run(model(), INFERENCE, prompt("private prompt marker"), environment())
+
+        assertFalse(report.overallPassed)
+        val complete = report.cases.last()
+        assertEquals(DIAGNOSTIC_PIPELINE_INVALID, complete.outcome)
+        assertEquals(WidgetAuthoringStage.Feasibility, complete.failureStage)
+        assertEquals(
+            WidgetAuthoringStageFailureCode.InvalidFeasibilityFields,
+            complete.failureCode,
+        )
+        assertEquals(
+            listOf(
+                WidgetToolCallingDiagnosticCapture(
+                    toolName = SUBMIT_WIDGET_FEASIBILITY_TOOL,
+                    callCount = 3,
+                    argumentBytes = invalidFieldsArtifact().toByteArray().size.toLong() * 3,
+                ),
+            ),
+            complete.captures,
+        )
+        assertEquals(
+            (1..3).map { attempt ->
+                WidgetAuthoringAttemptFailure(
+                    stage = WidgetAuthoringStage.Feasibility,
+                    attempt = attempt,
+                    code = WidgetAuthoringStageFailureCode.InvalidFeasibilityFields,
+                    argumentBytes = invalidFieldsArtifact().toByteArray().size.toLong(),
+                )
+            },
+            complete.attemptFailures,
+        )
+
+        val encoded = report.toCanonicalJson()
+        val controlledLog = report.controlledLogLines().joinToString("\n")
+        assertTrue(encoded.contains("\"failureStage\":\"feasibility\""))
+        assertTrue(encoded.contains("\"failureCode\":\"invalid_feasibility_fields\""))
+        assertTrue(encoded.contains("\"attempt\":3"))
+        assertTrue(controlledLog.contains("attemptFailure stage=feasibility attempt=3"))
+        assertTrue(controlledLog.contains("code=invalid_feasibility_fields"))
+        assertFalse(encoded.contains("raw-shape-marker"))
+        assertFalse(controlledLog.contains("raw-shape-marker"))
+        assertFalse(controlledLog.contains("private prompt marker"))
     }
 
     @Test
@@ -169,7 +470,7 @@ class WidgetToolCallingDiagnosticTest {
 
     private fun prompt(instruction: String = "Create a widget") = WidgetAuthoringPrompt(
         instruction,
-        """{"tools":[{"id":"wikipedia_on_this_day","version":1,"displayName":"Wikipedia on this day","networkRequired":true,"inputSchema":{"type":"object"},"outputSchema":{"type":"object","properties":{"kind":{"type":"string"},"events":{"type":"array","items":{"type":"object","properties":{"year":{"type":"integer"},"text":{"type":"string"},"canonicalUrl":{"type":"string"}}}}}}}]}""",
+        """{"authoringTask":{"mode":"create","instructionSemantics":"behavior"},"supportedIntervalsHours":[1,6,12,24],"supportedRuntimeValues":["locale","local_time","seed","timezone"],"supportedPresentation":["card","https_link","text"],"maxSourceBytes":32768,"programApi":{"randomSelection":"runtime.seededIndex(length)","irrelevantLaterStageDetail":"${"x".repeat(1024)}"},"tools":[{"id":"wikipedia_on_this_day","version":1,"displayName":"Wikipedia on this day","networkRequired":true,"inputSchema":{"type":"object"},"outputSchema":{"type":"object","properties":{"kind":{"type":"string"},"events":{"type":"array","items":{"type":"object","properties":{"year":{"type":"integer"},"text":{"type":"string"},"canonicalUrl":{"type":"string"}}}}}}}],"wikipediaBehaviorGuidance":{"toolId":"wikipedia_on_this_day","contractVersion":1,"selection":"runtime.seededIndex(events.length)"},"currentWidget":null}""",
     )
 
     private fun environment() = WidgetToolCallingDiagnosticEnvironment(
@@ -200,7 +501,15 @@ class WidgetToolCallingDiagnosticTest {
     }
 }
 
-private enum class DiagnosticMode { Pass, InvalidPipelineAlgorithm, ToolCallParsing, LoadFailure, Timeout }
+private enum class DiagnosticMode {
+    Pass,
+    InvalidPipelineAlgorithm,
+    InvalidPipelineFeasibilityFields,
+    AlgorithmTimeout,
+    ToolCallParsing,
+    LoadFailure,
+    Timeout,
+}
 
 private class DiagnosticFakeEngine(private val mode: DiagnosticMode) : LocalLlmEngine {
     var loadedInference: InferenceConfig? = null
@@ -212,7 +521,6 @@ private class DiagnosticFakeEngine(private val mode: DiagnosticMode) : LocalLlmE
     }
 
     override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
-        val requestIndex = requests.size
         requests += request
         when (mode) {
             DiagnosticMode.ToolCallParsing -> emit(
@@ -220,15 +528,25 @@ private class DiagnosticFakeEngine(private val mode: DiagnosticMode) : LocalLlmE
             )
             DiagnosticMode.Pass,
             DiagnosticMode.InvalidPipelineAlgorithm,
+            DiagnosticMode.InvalidPipelineFeasibilityFields,
+            DiagnosticMode.AlgorithmTimeout,
             -> {
                 val toolName = request.ephemeralTools.single().name
-                val artifact = if (requestIndex < 5) {
+                if (mode == DiagnosticMode.AlgorithmTimeout && toolName == SUBMIT_WIDGET_ALGORITHM_TOOL) {
+                    kotlinx.coroutines.awaitCancellation()
+                }
+                val artifact = if (!request.plainChatPrompt.contains("Objective:")) {
                     "{\"value\":\"$RAW_ARGUMENT_MARKER\"}"
                 } else if (
                     mode == DiagnosticMode.InvalidPipelineAlgorithm &&
                     toolName == SUBMIT_WIDGET_ALGORITHM_TOOL
                 ) {
                     "{}"
+                } else if (
+                    mode == DiagnosticMode.InvalidPipelineFeasibilityFields &&
+                    toolName == SUBMIT_WIDGET_FEASIBILITY_TOOL
+                ) {
+                    invalidFieldsArtifact()
                 } else {
                     pipelineArtifact(toolName)
                 }
@@ -312,34 +630,14 @@ private fun registry() = ApplicationToolRegistry(
 )
 
 private fun feasibilityArtifact(): String = JsonObject().apply {
-    addProperty("protocolVersion", 1)
     addProperty("outcome", "achievable")
-    addProperty("displayName", "Today in history")
-    addProperty("enabled", true)
+    addProperty("message", "Today in history")
     addProperty("periodicIntervalHours", 24)
-    add(
-        "tools",
-        JsonArray().apply {
-            add(
-                JsonObject().apply {
-                    addProperty("id", "wikipedia_on_this_day")
-                    addProperty("version", 1)
-                    addProperty("purpose", "Load current-date historical events")
-                },
-            )
-        },
-    )
-    add(
-        "runtime",
-        JsonArray().apply {
-            add("locale")
-            add("local_time")
-            add("seed")
-        },
-    )
-    add("presentation", JsonArray().apply { add("text") })
-    add("reason", JsonNull.INSTANCE)
-    add("clarificationQuestion", JsonNull.INSTANCE)
+    add("toolIds", JsonArray().apply { add("wikipedia_on_this_day") })
+}.toString()
+
+private fun invalidFieldsArtifact(): String = JsonParser.parseString(feasibilityArtifact()).asJsonObject.apply {
+    addProperty("unexpectedField", "raw-shape-marker")
 }.toString()
 
 private fun algorithmArtifact(): String = JsonObject().apply {

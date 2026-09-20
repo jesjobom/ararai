@@ -15,8 +15,10 @@ import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.WIDGET_AUTHORING_PIPELINE_V1
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 internal data class WidgetAuthoringRoundRequest(
@@ -51,11 +53,49 @@ internal sealed interface WidgetAuthoringRoundResult {
     data class Failed(val kind: GenerationFailureKind) : WidgetAuthoringRoundResult
 }
 
+internal enum class WidgetAuthoringRoundOutcome(val diagnosticWireName: String) {
+    Captured("captured"),
+    NoArtifact("no_artifact"),
+    TimedOut("timed_out"),
+    InputTooLarge("input_too_large"),
+    GenerationRejected("generation_rejected"),
+    ToolCallParsing("tool_call_parsing"),
+    GenerationFailed("generation_failed"),
+}
+
+internal data class WidgetAuthoringRoundLifecycle(
+    val stage: WidgetAuthoringStage,
+    val isRepair: Boolean,
+    val outcome: WidgetAuthoringRoundOutcome,
+    val firstGenerationEventMillis: Long?,
+    val toolCaptureMillis: Long?,
+    val terminalEventMillis: Long?,
+    val watchdogMillis: Long?,
+    val returnMillis: Long,
+    val cleanupOverrunMillis: Long?,
+) {
+    init {
+        listOfNotNull(
+            firstGenerationEventMillis,
+            toolCaptureMillis,
+            terminalEventMillis,
+            watchdogMillis,
+            cleanupOverrunMillis,
+        ).forEach { require(it >= 0) }
+        require(returnMillis >= 0)
+        require((watchdogMillis == null) == (cleanupOverrunMillis == null))
+        require((outcome == WidgetAuthoringRoundOutcome.TimedOut) == (watchdogMillis != null))
+    }
+}
+
 internal class WidgetAuthoringPipelineModelController(
     private val engine: LocalLlmEngine,
     private val maxContextTokens: Int = MAX_WIDGET_AUTHORING_CONTEXT_TOKENS,
     private val generationTimeoutMillis: Long = WidgetAuthoringPipelinePolicy.PER_STAGE_TIMEOUT_MILLIS,
     private val onCapture: (toolName: String, argumentBytes: Int) -> Unit = { _, _ -> },
+    private val onRoundRequest: (WidgetAuthoringRoundRequest) -> Unit = {},
+    private val onRawCapture: (toolName: String, argumentsJson: String) -> Unit = { _, _ -> },
+    private val onRoundLifecycle: (WidgetAuthoringRoundLifecycle) -> Unit = {},
     private val requireDeclaredProtocol: Boolean = true,
 ) {
     private var preparedModelId: String? = null
@@ -93,16 +133,51 @@ internal class WidgetAuthoringPipelineModelController(
     ): WidgetAuthoringRoundResult {
         check(preparedModelId == model.id) { "Authoring model must be prepared before a stage" }
         if (request.estimatedInputChars() > maximumStageInputChars()) {
-            return WidgetAuthoringRoundResult.InputTooLarge
+            return WidgetAuthoringRoundResult.InputTooLarge.also {
+                onRoundLifecycle(
+                    WidgetAuthoringRoundLifecycle(
+                        stage = request.stage,
+                        isRepair = request.repairCode != null,
+                        outcome = WidgetAuthoringRoundOutcome.InputTooLarge,
+                        firstGenerationEventMillis = null,
+                        toolCaptureMillis = null,
+                        terminalEventMillis = null,
+                        watchdogMillis = null,
+                        returnMillis = 0,
+                        cleanupOverrunMillis = null,
+                    ),
+                )
+            }
         }
-        return try {
-            withTimeoutOrNull(generationTimeoutMillis) { captureRound(request) }
-                ?: WidgetAuthoringRoundResult.TimedOut
+        val started = monotonicMillis()
+        val firstEventAt = AtomicLong(UNSET_ROUND_MILLIS)
+        val captureAt = AtomicLong(UNSET_ROUND_MILLIS)
+        val terminalAt = AtomicLong(UNSET_ROUND_MILLIS)
+        val result = try {
+            withTimeoutOrNull(generationTimeoutMillis) {
+                captureRound(request, started, firstEventAt, captureAt, terminalAt)
+            } ?: WidgetAuthoringRoundResult.TimedOut
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: RuntimeException) {
             WidgetAuthoringRoundResult.Failed(GenerationFailureKind.Unexpected)
         }
+        val returnedAt = monotonicMillis() - started
+        val timedOut = result == WidgetAuthoringRoundResult.TimedOut
+        onRoundLifecycle(
+            WidgetAuthoringRoundLifecycle(
+                stage = request.stage,
+                isRepair = request.repairCode != null,
+                outcome = result.diagnosticOutcome(),
+                firstGenerationEventMillis = firstEventAt.valueOrNull(),
+                toolCaptureMillis = captureAt.valueOrNull(),
+                terminalEventMillis = terminalAt.valueOrNull(),
+                watchdogMillis = generationTimeoutMillis.takeIf { timedOut },
+                returnMillis = returnedAt,
+                cleanupOverrunMillis = (returnedAt - generationTimeoutMillis).coerceAtLeast(0).takeIf { timedOut },
+            ),
+        )
+        return result
     }
 
     private fun maximumStageInputChars(): Int = (maxContextTokens - WidgetAuthoringPipelinePolicy.OUTPUT_RESERVE_TOKENS)
@@ -112,8 +187,23 @@ internal class WidgetAuthoringPipelineModelController(
         preparedModelId = null
     }
 
-    private suspend fun captureRound(request: WidgetAuthoringRoundRequest): WidgetAuthoringRoundResult {
-        val capture = WidgetAuthoringStageCaptureTool(request.toolName, request.toolDescriptionJson, onCapture)
+    private suspend fun captureRound(
+        request: WidgetAuthoringRoundRequest,
+        started: Long,
+        firstEventAt: AtomicLong,
+        captureAt: AtomicLong,
+        terminalAt: AtomicLong,
+    ): WidgetAuthoringRoundResult {
+        onRoundRequest(request)
+        val capture = WidgetAuthoringStageCaptureTool(
+            request.toolName,
+            request.toolDescriptionJson,
+            onCapture = { toolName, argumentBytes ->
+                captureAt.compareAndSet(UNSET_ROUND_MILLIS, monotonicMillis() - started)
+                onCapture(toolName, argumentBytes)
+            },
+            onRawCapture = onRawCapture,
+        )
         val userText = request.toUserText()
         val prompt = PromptRequest(
             content = MessageContent.TextPrompt(userText),
@@ -126,6 +216,13 @@ internal class WidgetAuthoringPipelineModelController(
             ephemeralTools = listOf(capture),
         )
         val terminal = engine.generate(prompt)
+            .onEach { event ->
+                val elapsed = monotonicMillis() - started
+                firstEventAt.compareAndSet(UNSET_ROUND_MILLIS, elapsed)
+                if (event is GenerationEvent.Completed || event is GenerationEvent.Failed) {
+                    terminalAt.compareAndSet(UNSET_ROUND_MILLIS, elapsed)
+                }
+            }
             .firstOrNull { it is GenerationEvent.Completed || it is GenerationEvent.Failed }
         return capture.capturedOrNull()?.let(WidgetAuthoringRoundResult::Captured)
             ?: if (terminal is GenerationEvent.Failed) {
@@ -136,16 +233,36 @@ internal class WidgetAuthoringPipelineModelController(
     }
 }
 
+private fun WidgetAuthoringRoundResult.diagnosticOutcome(): WidgetAuthoringRoundOutcome = when (this) {
+    is WidgetAuthoringRoundResult.Captured -> WidgetAuthoringRoundOutcome.Captured
+    WidgetAuthoringRoundResult.NoArtifact -> WidgetAuthoringRoundOutcome.NoArtifact
+    WidgetAuthoringRoundResult.TimedOut -> WidgetAuthoringRoundOutcome.TimedOut
+    WidgetAuthoringRoundResult.InputTooLarge -> WidgetAuthoringRoundOutcome.InputTooLarge
+    is WidgetAuthoringRoundResult.Failed -> when (kind) {
+        GenerationFailureKind.Expected -> WidgetAuthoringRoundOutcome.GenerationRejected
+        GenerationFailureKind.ToolCallParsing -> WidgetAuthoringRoundOutcome.ToolCallParsing
+        GenerationFailureKind.Unexpected -> WidgetAuthoringRoundOutcome.GenerationFailed
+    }
+}
+
+private fun monotonicMillis(): Long = System.nanoTime() / 1_000_000
+
+private fun AtomicLong.valueOrNull(): Long? = get().takeIf { it != UNSET_ROUND_MILLIS }
+
+private const val UNSET_ROUND_MILLIS = -1L
+
 internal class WidgetAuthoringStageCaptureTool(
     override val name: String,
     override val descriptionJson: String,
     private val onCapture: (toolName: String, argumentBytes: Int) -> Unit = { _, _ -> },
+    private val onRawCapture: (toolName: String, argumentsJson: String) -> Unit = { _, _ -> },
 ) : EphemeralLocalLlmTool {
     private val calls = AtomicInteger()
     private val captured = AtomicReference<String?>()
 
     override fun execute(argumentsJson: String): String {
         onCapture(name, argumentsJson.toByteArray(Charsets.UTF_8).size)
+        onRawCapture(name, argumentsJson)
         return if (calls.incrementAndGet() == 1) {
             captured.set(argumentsJson)
             """{"accepted":true}"""
@@ -157,7 +274,7 @@ internal class WidgetAuthoringStageCaptureTool(
     fun capturedOrNull(): String? = captured.get()
 }
 
-private fun WidgetAuthoringRoundRequest.toUserText(): String = buildString {
+internal fun WidgetAuthoringRoundRequest.toUserText(): String = buildString {
     append("Objective: ")
     append(objective)
     append("\nValidated context: ")
@@ -166,18 +283,69 @@ private fun WidgetAuthoringRoundRequest.toUserText(): String = buildString {
         append("\nRepair only the rejected ")
         append(stage.name)
         append(" artifact. Controlled failure: ")
-        append(repairCode.name)
+        append(repairCode.diagnosticWireName)
+        append("\nCorrection: ")
+        append(repairCode.repairInstruction())
         append("\nRejected artifact: ")
         append(rejectedArtifact)
     }
 }
 
-private fun WidgetAuthoringRoundRequest.estimatedInputChars(): Int = toUserText().length + stageSystemInstruction(this).length + toolDescriptionJson.length
+internal fun WidgetAuthoringRoundRequest.estimatedInputChars(): Int = toUserText().length + stageSystemInstruction(this).length + toolDescriptionJson.length
 
-private fun stageSystemInstruction(request: WidgetAuthoringRoundRequest): String = "You are executing one isolated stage of ArarAI widget authoring protocol v1. " +
-    "Use only the validated context, keep every identifier and capability fixed, and call " +
-    "${request.toolName} exactly once. Do not answer in plain text. This tool captures an untrusted artifact only; " +
-    "it does not execute JavaScript, invoke providers, save data, or grant authority."
+internal fun stageSystemInstruction(request: WidgetAuthoringRoundRequest): String = buildString {
+    append("You are executing one isolated stage of ArarAI widget authoring protocol v1. ")
+    append("Use only the validated context. ")
+    if (request.stage == WidgetAuthoringStage.Feasibility) {
+        append("Select the minimum capabilities needed from the validated context; do not invent identifiers. ")
+    } else {
+        append("Keep every identifier and capability fixed. ")
+    }
+    append("Call ${request.toolName} exactly once and do not answer in plain text. ")
+    append("Return every required field. ")
+    if (request.stage == WidgetAuthoringStage.Feasibility) append(FEASIBILITY_OUTCOME_CONTRACT)
+    append("This tool captures an untrusted artifact only; it does not execute JavaScript, invoke providers, ")
+    append("save data, or grant authority.")
+}
+
+private fun WidgetAuthoringStageFailureCode.repairInstruction(): String = REPAIR_INSTRUCTIONS[this]
+    ?: "Correct only the rejected artifact according to its tool schema and validated context."
+
+private val REPAIR_INSTRUCTIONS = mapOf(
+    WidgetAuthoringStageFailureCode.InvalidFeasibilityJsonRoot to
+        "Return one valid JSON object through the tool call.",
+    WidgetAuthoringStageFailureCode.InvalidFeasibilityFields to
+        "Return exactly outcome, message, periodicIntervalHours, and toolIds with no other fields.",
+    WidgetAuthoringStageFailureCode.InvalidFeasibilityProtocol to
+        "Do not return protocol metadata; the application derives it.",
+    WidgetAuthoringStageFailureCode.InvalidFeasibilityDisplayName to
+        "For achievable, use message as a non-blank display name of at most 80 characters.",
+    WidgetAuthoringStageFailureCode.InvalidFeasibilityEnabled to
+        "Do not return enabled; the application derives it.",
+    WidgetAuthoringStageFailureCode.InvalidFeasibilitySchedule to
+        "Set periodicIntervalHours to null, 1, 6, 12, or 24.",
+    WidgetAuthoringStageFailureCode.InvalidFeasibilityTools to
+        "Set toolIds to unique available tool ids only; the application derives versions and purposes.",
+    WidgetAuthoringStageFailureCode.InvalidFeasibilityRuntime to
+        "Do not return runtime grants; the application derives the bounded deterministic runtime.",
+    WidgetAuthoringStageFailureCode.InvalidFeasibilityPresentation to
+        "Do not return presentation grants; the application derives the allowlisted presentation envelope.",
+    WidgetAuthoringStageFailureCode.InvalidFeasibilityOutcome to
+        "Keep outcome=achievable when the request is supported. Use message as its display name. For unachievable, " +
+        "use message as the reason; for needs_clarification, use message as the question. " +
+        FEASIBILITY_OUTCOME_CONTRACT,
+    WidgetAuthoringStageFailureCode.MissingArtifact to
+        "Call the advertised capture tool exactly once with the complete artifact; do not answer in plain text.",
+    WidgetAuthoringStageFailureCode.TimedOut to
+        "Call the advertised capture tool promptly with one complete bounded artifact.",
+    WidgetAuthoringStageFailureCode.ResourceLimit to
+        "Keep the artifact within the supplied size and context limits.",
+)
+
+private const val FEASIBILITY_OUTCOME_CONTRACT =
+    "Return exactly four fields. achievable => message is the display name, periodicIntervalHours is supported or " +
+        "null, and toolIds contains only the minimum available tool ids. unachievable => message is the reason. " +
+        "needs_clarification => message is one question. The application derives every other field. "
 
 private val STAGE_TOOL_NAMES = setOf(
     SUBMIT_WIDGET_FEASIBILITY_TOOL,

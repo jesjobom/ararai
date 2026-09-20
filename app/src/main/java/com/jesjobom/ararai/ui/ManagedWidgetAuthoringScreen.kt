@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,6 +40,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jesjobom.ararai.BuildConfig
 import com.jesjobom.ararai.R
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
@@ -49,6 +51,7 @@ import com.jesjobom.ararai.widget.managed.WidgetAuthoringStage
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringStageFailureCode
 import com.jesjobom.ararai.widget.managed.WidgetConfirmationMode
 import com.jesjobom.ararai.widget.managed.WidgetConfirmationResult
+import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticMode
 import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticReport
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -68,9 +71,9 @@ private sealed interface WidgetAuthoringError {
 
 private sealed interface ToolCallingDiagnosticState {
     data object Idle : ToolCallingDiagnosticState
-    data object Running : ToolCallingDiagnosticState
+    data class Running(val mode: WidgetToolCallingDiagnosticMode) : ToolCallingDiagnosticState
     data class Completed(val report: WidgetToolCallingDiagnosticReport) : ToolCallingDiagnosticState
-    data object Failed : ToolCallingDiagnosticState
+    data class Failed(val mode: WidgetToolCallingDiagnosticMode) : ToolCallingDiagnosticState
 }
 
 @Composable
@@ -84,6 +87,7 @@ internal fun ManagedWidgetAuthoringRoute(
     onConfirmed: (String) -> Unit,
     onOpenToolSettings: () -> Unit,
     onShareDiagnosticReport: (String) -> Unit,
+    onShareRawDiagnosticReport: (String) -> Unit,
 ) {
     var instruction by remember(widgetId) { mutableStateOf("") }
     var draft by remember(widgetId) { mutableStateOf<ManagedWidgetDraftUiState?>(null) }
@@ -98,7 +102,7 @@ internal fun ManagedWidgetAuthoringRoute(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val view = LocalView.current
-    val diagnosticRunning = diagnosticState == ToolCallingDiagnosticState.Running
+    val diagnosticRunning = diagnosticState is ToolCallingDiagnosticState.Running
     val busy = running || diagnosticRunning
     fun cancelAndBack() {
         job?.cancel()
@@ -156,7 +160,7 @@ internal fun ManagedWidgetAuthoringRoute(
             }
         }
     }
-    fun runToolCallingDiagnostic() {
+    fun runToolCallingDiagnostic(mode: WidgetToolCallingDiagnosticMode) {
         val inputs = model?.let { selectedModel ->
             inference?.let { selectedInference ->
                 modelArtifactSha256?.let { artifactSha256 ->
@@ -166,17 +170,17 @@ internal fun ManagedWidgetAuthoringRoute(
         }
         if (busy || inputs == null) return
         val (selectedModel, selectedInference, artifactSha256) = inputs
-        diagnosticState = ToolCallingDiagnosticState.Running
+        diagnosticState = ToolCallingDiagnosticState.Running(mode)
         job = scope.launch {
             diagnosticState = try {
                 val environment = widgetToolCallingDiagnosticEnvironment(context, artifactSha256)
                 ToolCallingDiagnosticState.Completed(
-                    controller.runToolCallingDiagnostic(selectedModel, selectedInference, environment),
+                    controller.runToolCallingDiagnostic(selectedModel, selectedInference, environment, mode),
                 )
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                ToolCallingDiagnosticState.Failed
+                ToolCallingDiagnosticState.Failed(mode)
             }
         }
     }
@@ -219,6 +223,7 @@ internal fun ManagedWidgetAuthoringRoute(
             Toast.makeText(context, R.string.widget_tool_diagnostic_copied, Toast.LENGTH_SHORT).show()
         },
         onShareDiagnosticReport = onShareDiagnosticReport,
+        onShareRawDiagnosticReport = onShareRawDiagnosticReport,
         onConfirmEnabled = { confirm(WidgetConfirmationMode.CreateAndEnable) },
         onSaveDisabled = { confirm(WidgetConfirmationMode.SaveDisabled) },
         onDeclineDraft = {
@@ -244,16 +249,17 @@ private fun ManagedWidgetAuthoringScreen(
     diagnosticState: ToolCallingDiagnosticState,
     onInstructionChange: (String) -> Unit,
     onGenerate: () -> Unit,
-    onRunToolCallingDiagnostic: () -> Unit,
+    onRunToolCallingDiagnostic: (WidgetToolCallingDiagnosticMode) -> Unit,
     onCopyDiagnosticReport: (String) -> Unit,
     onShareDiagnosticReport: (String) -> Unit,
+    onShareRawDiagnosticReport: (String) -> Unit,
     onConfirmEnabled: () -> Unit,
     onSaveDisabled: () -> Unit,
     onDeclineDraft: () -> Unit,
     onOpenToolSettings: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val diagnosticRunning = diagnosticState == ToolCallingDiagnosticState.Running
+    val diagnosticRunning = diagnosticState is ToolCallingDiagnosticState.Running
     val busy = running || diagnosticRunning
     ArarAiScaffold(
         title = stringResource(
@@ -302,6 +308,7 @@ private fun ManagedWidgetAuthoringScreen(
                 onRun = onRunToolCallingDiagnostic,
                 onCopy = onCopyDiagnosticReport,
                 onShare = onShareDiagnosticReport,
+                onShareRaw = onShareRawDiagnosticReport,
             )
             draft?.let {
                 WidgetDraftPreview(
@@ -322,9 +329,10 @@ private fun ManagedWidgetAuthoringScreen(
 private fun ToolCallingDiagnosticCard(
     modelAvailable: Boolean,
     state: ToolCallingDiagnosticState,
-    onRun: () -> Unit,
+    onRun: (WidgetToolCallingDiagnosticMode) -> Unit,
     onCopy: (String) -> Unit,
     onShare: (String) -> Unit,
+    onShareRaw: (String) -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -346,31 +354,91 @@ private fun ToolCallingDiagnosticCard(
                 style = MaterialTheme.typography.bodySmall,
             )
             when (state) {
-                ToolCallingDiagnosticState.Idle -> OutlinedButton(
-                    onClick = onRun,
-                    enabled = modelAvailable,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.widget_tool_diagnostic_run))
+                ToolCallingDiagnosticState.Idle -> {
+                    DiagnosticRunButton(
+                        label = R.string.widget_tool_diagnostic_probe_full,
+                        mode = WidgetToolCallingDiagnosticMode.FeasibilityFullNatural,
+                        enabled = modelAvailable,
+                        onRun = onRun,
+                    )
+                    DiagnosticRunButton(
+                        label = R.string.widget_tool_diagnostic_probe_compact,
+                        mode = WidgetToolCallingDiagnosticMode.FeasibilityCompactNatural,
+                        enabled = modelAvailable,
+                        onRun = onRun,
+                    )
+                    DiagnosticRunButton(
+                        label = R.string.widget_tool_diagnostic_probe_explicit,
+                        mode = WidgetToolCallingDiagnosticMode.FeasibilityCompactExplicit,
+                        enabled = modelAvailable,
+                        onRun = onRun,
+                    )
+                    DiagnosticRunButton(
+                        label = R.string.widget_tool_diagnostic_probe_algorithm,
+                        mode = WidgetToolCallingDiagnosticMode.AlgorithmNatural,
+                        enabled = modelAvailable,
+                        onRun = onRun,
+                    )
+                    DiagnosticRunButton(
+                        label = R.string.widget_tool_diagnostic_pipeline_cold,
+                        mode = WidgetToolCallingDiagnosticMode.CompletePipelineCompactNatural,
+                        enabled = modelAvailable,
+                        onRun = onRun,
+                    )
+                    DiagnosticRunButton(
+                        label = R.string.widget_tool_diagnostic_run,
+                        mode = WidgetToolCallingDiagnosticMode.FullMatrix,
+                        enabled = modelAvailable,
+                        onRun = onRun,
+                    )
                 }
-                ToolCallingDiagnosticState.Running -> {
+                is ToolCallingDiagnosticState.Running -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-                    Text(stringResource(R.string.widget_tool_diagnostic_running))
+                    Text(
+                        stringResource(
+                            when (state.mode) {
+                                WidgetToolCallingDiagnosticMode.FullMatrix ->
+                                    R.string.widget_tool_diagnostic_running
+                                WidgetToolCallingDiagnosticMode.CompletePipelineCompactNatural ->
+                                    R.string.widget_tool_diagnostic_pipeline_running
+                                WidgetToolCallingDiagnosticMode.AlgorithmNatural ->
+                                    R.string.widget_tool_diagnostic_algorithm_running
+                                else -> R.string.widget_tool_diagnostic_probe_running
+                            },
+                        ),
+                    )
                 }
-                ToolCallingDiagnosticState.Failed -> {
+                is ToolCallingDiagnosticState.Failed -> {
                     WidgetAuthoringMessage(R.string.widget_tool_diagnostic_internal_failure, warning = true)
-                    OutlinedButton(onClick = onRun, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { onRun(state.mode) }, modifier = Modifier.fillMaxWidth()) {
                         Text(stringResource(R.string.widget_tool_diagnostic_run_again))
                     }
                 }
                 is ToolCallingDiagnosticState.Completed -> ToolCallingDiagnosticResult(
                     report = state.report,
-                    onRunAgain = onRun,
+                    onRunAgain = { onRun(state.report.mode) },
                     onCopy = onCopy,
                     onShare = onShare,
+                    onShareRaw = onShareRaw,
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun DiagnosticRunButton(
+    label: Int,
+    mode: WidgetToolCallingDiagnosticMode,
+    enabled: Boolean,
+    onRun: (WidgetToolCallingDiagnosticMode) -> Unit,
+) {
+    OutlinedButton(
+        onClick = { onRun(mode) },
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(stringResource(label))
     }
 }
 
@@ -380,8 +448,11 @@ private fun ToolCallingDiagnosticResult(
     onRunAgain: () -> Unit,
     onCopy: (String) -> Unit,
     onShare: (String) -> Unit,
+    onShareRaw: (String) -> Unit,
 ) {
     val encoded = remember(report) { report.toCanonicalJson() }
+    val rawEncoded = remember(report) { report.toRawDiagnosticJson() }
+    var showRawExportWarning by remember(report) { mutableStateOf(false) }
     Text(
         text = stringResource(
             if (report.overallPassed) {
@@ -425,9 +496,36 @@ private fun ToolCallingDiagnosticResult(
         Button(onClick = { onShare(encoded) }) {
             Text(stringResource(R.string.widget_tool_diagnostic_share))
         }
+        if (BuildConfig.DEBUG && rawEncoded != null) {
+            Button(onClick = { showRawExportWarning = true }) {
+                Text(stringResource(R.string.widget_tool_diagnostic_export_raw))
+            }
+        }
         OutlinedButton(onClick = onRunAgain) {
             Text(stringResource(R.string.widget_tool_diagnostic_run_again))
         }
+    }
+    if (showRawExportWarning && rawEncoded != null) {
+        AlertDialog(
+            onDismissRequest = { showRawExportWarning = false },
+            title = { Text(stringResource(R.string.widget_tool_diagnostic_export_raw_title)) },
+            text = { Text(stringResource(R.string.widget_tool_diagnostic_export_raw_warning)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRawExportWarning = false
+                        onShareRaw(rawEncoded)
+                    },
+                ) {
+                    Text(stringResource(R.string.widget_tool_diagnostic_export_raw_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRawExportWarning = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
     }
 }
 

@@ -5,7 +5,6 @@ package com.jesjobom.ararai.widget.managed
 import com.google.gson.JsonArray
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
-import com.google.gson.JsonPrimitive
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeValue
 import com.jesjobom.ararai.widget.runtime.WidgetToolCapability
 import org.junit.Assert.assertEquals
@@ -21,41 +20,86 @@ class WidgetAuthoringPipelineContractsTest {
         val artifact = (parsed as WidgetFeasibilityParseResult.Valid).artifact
         assertEquals(WidgetFeasibilityOutcome.Achievable, artifact.outcome)
         assertEquals(listOf(TOOL), artifact.tools.map { it.capability })
-        assertEquals(setOf(WidgetRuntimeValue.Locale, WidgetRuntimeValue.LocalTime), artifact.runtimeValues)
+        assertEquals(WidgetRuntimeValue.entries.toSet(), artifact.runtimeValues)
+        assertEquals(null, artifact.reason)
+        assertEquals(null, artifact.clarificationQuestion)
     }
 
     @Test
-    fun `feasibility rejects additional fields unsupported tools and inconsistent terminal outcomes`() {
-        val additional = achievable().apply { addProperty("endpoint", "https://example.com") }
-        val invented = achievable().apply {
-            getAsJsonArray("tools").single().asJsonObject.addProperty("id", "http_get")
-        }
-        val terminalWithAuthority = achievable().apply {
-            addProperty("outcome", "unachievable")
-            addProperty("reason", "No registered operation")
-        }
+    fun `feasibility resolves the newest registered version in the application`() {
+        val newest = WidgetToolCapability(TOOL.id, 2)
 
-        listOf(additional, invented, terminalWithAuthority).forEach { artifact ->
+        val parsed = WidgetFeasibilityParser.parse(achievable().toString(), setOf(TOOL, newest))
+
+        assertTrue(parsed is WidgetFeasibilityParseResult.Valid)
+        assertEquals(listOf(newest), (parsed as WidgetFeasibilityParseResult.Valid).artifact.tools.map { it.capability })
+    }
+
+    @Test
+    fun `feasibility localizes controlled failures without retaining rejected values`() {
+        val additional = achievable().apply { addProperty("endpoint", "https://example.com") }
+        val unsupportedSchedule = achievable().apply { addProperty("periodicIntervalHours", 5) }
+        val invented = achievable().apply { add("toolIds", JsonArray().apply { add("http_get") }) }
+
+        listOf(
+            additional to WidgetAuthoringStageFailureCode.InvalidFeasibilityFields,
+            unsupportedSchedule to WidgetAuthoringStageFailureCode.InvalidFeasibilitySchedule,
+            invented to WidgetAuthoringStageFailureCode.InvalidFeasibilityTools,
+        ).forEach { (artifact, code) ->
             assertEquals(
-                WidgetFeasibilityParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidSchema),
+                WidgetFeasibilityParseResult.Invalid(code),
                 WidgetFeasibilityParser.parse(artifact.toString(), AVAILABLE_TOOLS),
             )
         }
     }
 
     @Test
-    fun `feasibility accepts unachievable and clarification only without authority`() {
-        val unachievable = terminal("unachievable", reason = "No supported provider")
-        val clarification = terminal("needs_clarification", question = "Which language should be used?")
+    fun `feasibility distinguishes every structural rejection without rejected content`() {
+        val missingField = achievable().apply { remove("toolIds") }
+        val invalidOutcome = achievable().apply { addProperty("outcome", "maybe") }
+        val invalidDisplayName = achievable().apply { addProperty("message", " ") }
 
-        assertTrue(
-            WidgetFeasibilityParser.parse(unachievable.toString(), AVAILABLE_TOOLS) is
-                WidgetFeasibilityParseResult.Valid,
+        listOf(
+            "not-json" to WidgetAuthoringStageFailureCode.InvalidFeasibilityJsonRoot,
+            missingField.toString() to WidgetAuthoringStageFailureCode.InvalidFeasibilityFields,
+            invalidOutcome.toString() to WidgetAuthoringStageFailureCode.InvalidFeasibilityOutcome,
+            invalidDisplayName.toString() to WidgetAuthoringStageFailureCode.InvalidFeasibilityDisplayName,
+        ).forEach { (raw, code) ->
+            assertEquals(
+                WidgetFeasibilityParseResult.Invalid(code),
+                WidgetFeasibilityParser.parse(raw, AVAILABLE_TOOLS),
+            )
+        }
+    }
+
+    @Test
+    fun `feasibility reports resource limit independently from contract categories`() {
+        val oversized = " ".repeat(WidgetAuthoringPipelinePolicy.MAX_ARTIFACT_BYTES + 1)
+
+        assertEquals(
+            WidgetFeasibilityParseResult.Invalid(WidgetAuthoringStageFailureCode.ResourceLimit),
+            WidgetFeasibilityParser.parse(oversized, AVAILABLE_TOOLS),
         )
-        assertTrue(
-            WidgetFeasibilityParser.parse(clarification.toString(), AVAILABLE_TOOLS) is
-                WidgetFeasibilityParseResult.Valid,
-        )
+    }
+
+    @Test
+    fun `feasibility accepts unachievable and clarification only without authority`() {
+        val unachievable = terminal("unachievable", "No supported provider")
+        val clarification = terminal("needs_clarification", "Which language should be used?")
+
+        val unavailable = WidgetFeasibilityParser.parse(unachievable.toString(), AVAILABLE_TOOLS)
+            as WidgetFeasibilityParseResult.Valid
+        val question = WidgetFeasibilityParser.parse(clarification.toString(), AVAILABLE_TOOLS)
+            as WidgetFeasibilityParseResult.Valid
+
+        assertEquals(false, unavailable.artifact.enabled)
+        assertEquals("No supported provider", unavailable.artifact.reason)
+        assertEquals(null, unavailable.artifact.periodicIntervalHours)
+        assertTrue(unavailable.artifact.tools.isEmpty())
+        assertTrue(unavailable.artifact.runtimeValues.isEmpty())
+        assertTrue(unavailable.artifact.presentation.isEmpty())
+        assertEquals("Which language should be used?", question.artifact.clarificationQuestion)
+        assertEquals(null, question.artifact.reason)
     }
 
     @Test
@@ -156,48 +200,17 @@ class WidgetAuthoringPipelineContractsTest {
         .artifact
 
     private fun achievable() = JsonObject().apply {
-        addProperty("protocolVersion", 1)
         addProperty("outcome", "achievable")
-        addProperty("displayName", "Today in history")
-        addProperty("enabled", true)
+        addProperty("message", "Today in history")
         addProperty("periodicIntervalHours", 24)
-        add(
-            "tools",
-            JsonArray().apply {
-                add(
-                    JsonObject().apply {
-                        addProperty("id", TOOL.id)
-                        addProperty("version", TOOL.version)
-                        addProperty("purpose", "Load historical events for the current date")
-                    },
-                )
-            },
-        )
-        add(
-            "runtime",
-            JsonArray().apply {
-                add("locale")
-                add("local_time")
-            },
-        )
-        add(
-            "presentation",
-            JsonArray().apply {
-                add("card")
-                add("text")
-            },
-        )
-        add("reason", JsonNull.INSTANCE)
-        add("clarificationQuestion", JsonNull.INSTANCE)
+        add("toolIds", JsonArray().apply { add(TOOL.id) })
     }
 
-    private fun terminal(outcome: String, reason: String? = null, question: String? = null) = achievable().apply {
+    private fun terminal(outcome: String, message: String) = achievable().apply {
         addProperty("outcome", outcome)
-        add("tools", JsonArray())
-        add("runtime", JsonArray())
-        add("presentation", JsonArray())
-        add("reason", reason?.let(::JsonPrimitive) ?: JsonNull.INSTANCE)
-        add("clarificationQuestion", question?.let(::JsonPrimitive) ?: JsonNull.INSTANCE)
+        addProperty("message", message)
+        addProperty("periodicIntervalHours", 5)
+        add("toolIds", JsonArray().apply { add("ignored_unavailable_tool") })
     }
 
     private fun algorithm() = JsonObject().apply {

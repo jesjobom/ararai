@@ -71,80 +71,128 @@ internal object WidgetFeasibilityParser {
     fun parse(
         raw: String,
         availableTools: Set<WidgetToolCapability>,
-    ): WidgetFeasibilityParseResult = try {
-        require(raw.utf8Size() <= WidgetAuthoringPipelinePolicy.MAX_ARTIFACT_BYTES)
-        val root = StrictJson.parse(
-            raw,
-            maxStringChars = WidgetAuthoringPipelinePolicy.MAX_TEXT_CHARS,
-        ).requiredObject()
-        root.requireFields(
-            "protocolVersion",
-            "outcome",
-            "displayName",
-            "enabled",
-            "periodicIntervalHours",
-            "tools",
-            "runtime",
-            "presentation",
-            "reason",
-            "clarificationQuestion",
-        )
-        require(root.requiredInt("protocolVersion") == WIDGET_AUTHORING_PROTOCOL_VERSION)
-        val outcome = WidgetFeasibilityOutcome.entries.single { it.wireName == root.requiredString("outcome") }
-        val displayName = root.requiredString("displayName")
-        require(displayName.isNotBlank() && displayName.length <= MAX_PIPELINE_DISPLAY_NAME_CHARS)
-        val enabled = root.strictBoolean("enabled")
-        val interval = root.strictNullableLong("periodicIntervalHours")
-        require(interval == null || interval in ManagedWidgetPolicy.SUPPORTED_PERIODIC_INTERVAL_HOURS)
-        val tools = root.requiredArray("tools").map { element ->
-            val tool = element.requiredObject()
-            tool.requireFields("id", "version", "purpose")
-            WidgetSelectedTool(
-                WidgetToolCapability(tool.requiredString("id"), tool.requiredInt("version")),
-                tool.requiredString("purpose").boundedText(),
-            )
+    ): WidgetFeasibilityParseResult {
+        if (raw.utf8Size() > WidgetAuthoringPipelinePolicy.MAX_ARTIFACT_BYTES) {
+            return WidgetFeasibilityParseResult.Invalid(WidgetAuthoringStageFailureCode.ResourceLimit)
         }
-        require(tools.size <= WidgetAuthoringPipelinePolicy.MAX_TOOLS)
-        require(tools.map { it.capability }.toSet().size == tools.size)
-        require(availableTools.containsAll(tools.map { it.capability }))
-        val runtime = root.requiredArray("runtime").strictEnumSet(WidgetRuntimeValue.entries) { it.wireName }
-        val presentation = root.requiredArray("presentation")
-            .strictEnumSet(WidgetPresentationCapability.entries) { it.wireName }
-        val reason = root.strictNullableString("reason", WidgetAuthoringPipelinePolicy.MAX_TEXT_CHARS)
-        val question = root.strictNullableString(
-            "clarificationQuestion",
-            WidgetAuthoringPipelinePolicy.MAX_QUESTION_CHARS,
-        )
-        when (outcome) {
-            WidgetFeasibilityOutcome.Achievable -> {
-                require(presentation.isNotEmpty())
-                require(reason == null && question == null)
-            }
-            WidgetFeasibilityOutcome.Unachievable -> {
-                require(tools.isEmpty() && runtime.isEmpty() && presentation.isEmpty())
-                require(!reason.isNullOrBlank() && question == null)
-            }
-            WidgetFeasibilityOutcome.NeedsClarification -> {
-                require(tools.isEmpty() && runtime.isEmpty() && presentation.isEmpty())
-                require(reason == null && !question.isNullOrBlank())
-            }
+        return try {
+            WidgetFeasibilityParseResult.Valid(parseArtifact(raw, availableTools))
+        } catch (failure: WidgetFeasibilityValidationFailure) {
+            WidgetFeasibilityParseResult.Invalid(failure.code)
+        } catch (_: Exception) {
+            WidgetFeasibilityParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidFeasibilityShape)
         }
-        WidgetFeasibilityParseResult.Valid(
-            WidgetFeasibilityArtifact(
-                outcome,
-                displayName,
-                enabled,
-                interval,
-                tools,
-                runtime,
-                presentation,
-                reason,
-                question,
-            ),
-        )
-    } catch (_: RuntimeException) {
-        WidgetFeasibilityParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidSchema)
     }
+
+    private fun parseArtifact(
+        raw: String,
+        availableTools: Set<WidgetToolCapability>,
+    ): WidgetFeasibilityArtifact {
+        val root = parseRoot(raw)
+        validateRootFields(root)
+        val outcome = parseOutcome(root)
+        val message = parseMessage(root, outcome)
+        val interval = if (outcome == WidgetFeasibilityOutcome.Achievable) parseSchedule(root) else null
+        val tools = if (outcome == WidgetFeasibilityOutcome.Achievable) parseTools(root, availableTools) else emptyList()
+        val runtime = WidgetRuntimeValue.entries.toSet().takeIf { outcome == WidgetFeasibilityOutcome.Achievable }.orEmpty()
+        val presentation = WidgetPresentationCapability.entries.toSet()
+            .takeIf { outcome == WidgetFeasibilityOutcome.Achievable }
+            .orEmpty()
+        return WidgetFeasibilityArtifact(
+            outcome,
+            message.take(MAX_PIPELINE_DISPLAY_NAME_CHARS),
+            outcome == WidgetFeasibilityOutcome.Achievable,
+            interval,
+            tools,
+            runtime,
+            presentation,
+            message.takeIf { outcome == WidgetFeasibilityOutcome.Unachievable },
+            message.takeIf { outcome == WidgetFeasibilityOutcome.NeedsClarification },
+        )
+    }
+
+    private fun parseRoot(raw: String): JsonObject = validateFeasibility(
+        WidgetAuthoringStageFailureCode.InvalidFeasibilityJsonRoot,
+    ) {
+        StrictJson.parse(
+            raw,
+            maxStringChars = WidgetAuthoringPipelinePolicy.MAX_ARTIFACT_BYTES,
+        ).requiredObject()
+    }
+
+    private fun validateRootFields(root: JsonObject) = validateFeasibility(
+        WidgetAuthoringStageFailureCode.InvalidFeasibilityFields,
+    ) {
+        root.requireFields("outcome", "message", "periodicIntervalHours", "toolIds")
+    }
+
+    private fun parseOutcome(root: JsonObject): WidgetFeasibilityOutcome = validateFeasibility(
+        WidgetAuthoringStageFailureCode.InvalidFeasibilityOutcome,
+    ) {
+        WidgetFeasibilityOutcome.entries.single { it.wireName == root.requiredString("outcome") }
+    }
+
+    private fun parseMessage(root: JsonObject, outcome: WidgetFeasibilityOutcome): String = validateFeasibility(
+        if (outcome == WidgetFeasibilityOutcome.Achievable) {
+            WidgetAuthoringStageFailureCode.InvalidFeasibilityDisplayName
+        } else {
+            WidgetAuthoringStageFailureCode.InvalidFeasibilityOutcome
+        },
+    ) {
+        root.requiredString("message").also { message ->
+            require(message.isNotBlank())
+            val maximum = if (outcome == WidgetFeasibilityOutcome.NeedsClarification) {
+                WidgetAuthoringPipelinePolicy.MAX_QUESTION_CHARS
+            } else if (outcome == WidgetFeasibilityOutcome.Achievable) {
+                MAX_PIPELINE_DISPLAY_NAME_CHARS
+            } else {
+                WidgetAuthoringPipelinePolicy.MAX_TEXT_CHARS
+            }
+            require(message.length <= maximum)
+        }
+    }
+
+    private fun parseSchedule(root: JsonObject): Long? = validateFeasibility(
+        WidgetAuthoringStageFailureCode.InvalidFeasibilitySchedule,
+    ) {
+        root.strictNullableLong("periodicIntervalHours").also {
+            require(it == null || it in ManagedWidgetPolicy.SUPPORTED_PERIODIC_INTERVAL_HOURS)
+        }
+    }
+
+    private fun parseTools(
+        root: JsonObject,
+        availableTools: Set<WidgetToolCapability>,
+    ): List<WidgetSelectedTool> = validateFeasibility(WidgetAuthoringStageFailureCode.InvalidFeasibilityTools) {
+        val ids = root.requiredArray("toolIds").map { element ->
+            require(element.isJsonPrimitive && element.asJsonPrimitive.isString)
+            element.asString
+        }
+        require(ids.size <= WidgetAuthoringPipelinePolicy.MAX_TOOLS)
+        require(ids.toSet().size == ids.size)
+        ids.map { id ->
+            val capability = availableTools
+                .filter { it.id == id }
+                .maxByOrNull(WidgetToolCapability::version)
+                ?: error("Unavailable tool")
+            WidgetSelectedTool(capability, "Use registered tool ${capability.id}")
+        }
+    }
+}
+
+private class WidgetFeasibilityValidationFailure(
+    val code: WidgetAuthoringStageFailureCode,
+) : RuntimeException()
+
+private inline fun <T> validateFeasibility(
+    code: WidgetAuthoringStageFailureCode,
+    block: () -> T,
+): T = try {
+    block()
+} catch (failure: WidgetFeasibilityValidationFailure) {
+    throw failure
+} catch (_: Exception) {
+    throw WidgetFeasibilityValidationFailure(code)
 }
 
 internal enum class WidgetAlgorithmStepKind(val wireName: String) {
@@ -332,18 +380,41 @@ internal enum class WidgetAuthoringStage {
     AssemblyValidation,
 }
 
-internal enum class WidgetAuthoringStageFailureCode {
-    InvalidSchema,
-    InvalidAlgorithm,
-    InvalidSource,
-    InvalidToolArguments,
-    InvalidPlan,
-    InvalidPresentation,
-    CapabilityExpansion,
-    ResourceLimit,
-    MissingArtifact,
-    TimedOut,
-    RuntimeUnavailable,
+internal enum class WidgetAuthoringStageFailureCode(val diagnosticWireName: String) {
+    InvalidSchema("invalid_schema"),
+    InvalidFeasibilityShape("invalid_feasibility_shape"),
+    InvalidFeasibilityJsonRoot("invalid_feasibility_json_root"),
+    InvalidFeasibilityFields("invalid_feasibility_fields"),
+    InvalidFeasibilityProtocol("invalid_feasibility_protocol"),
+    InvalidFeasibilityDisplayName("invalid_feasibility_display_name"),
+    InvalidFeasibilityEnabled("invalid_feasibility_enabled"),
+    InvalidFeasibilitySchedule("invalid_feasibility_schedule"),
+    InvalidFeasibilityTools("invalid_feasibility_tools"),
+    InvalidFeasibilityRuntime("invalid_feasibility_runtime"),
+    InvalidFeasibilityPresentation("invalid_feasibility_presentation"),
+    InvalidFeasibilityOutcome("invalid_feasibility_outcome"),
+    InvalidAlgorithm("invalid_algorithm"),
+    InvalidSource("invalid_source"),
+    InvalidToolArguments("invalid_tool_arguments"),
+    InvalidPlan("invalid_plan"),
+    InvalidPresentation("invalid_presentation"),
+    CapabilityExpansion("capability_expansion"),
+    ResourceLimit("resource_limit"),
+    MissingArtifact("missing_artifact"),
+    TimedOut("timed_out"),
+    RuntimeUnavailable("runtime_unavailable"),
+}
+
+internal data class WidgetAuthoringAttemptFailure(
+    val stage: WidgetAuthoringStage,
+    val attempt: Int,
+    val code: WidgetAuthoringStageFailureCode,
+    val argumentBytes: Long?,
+) {
+    init {
+        require(attempt in 1..WidgetAuthoringPipelinePolicy.MAX_REPAIRS + 1)
+        require(argumentBytes == null || argumentBytes >= 0)
+    }
 }
 
 internal sealed interface WidgetAuthoringProgress {
@@ -385,7 +456,7 @@ internal data class WidgetAuthoringAttemptBudget(
 }
 
 internal object WidgetAuthoringStageSchemas {
-    val feasibility: String = """{"name":"$SUBMIT_WIDGET_FEASIBILITY_TOOL","description":"Submit one bounded feasibility and capability artifact. This captures data only.","parameters":{"type":"object","additionalProperties":false,"properties":{"protocolVersion":{"type":"integer","const":1},"outcome":{"type":"string","enum":["achievable","unachievable","needs_clarification"]},"displayName":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"periodicIntervalHours":{"type":["integer","null"],"enum":[null,1,6,12,24]},"tools":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"version":{"type":"integer","minimum":1},"purpose":{"type":"string","minLength":1,"maxLength":512}},"required":["id","version","purpose"]}},"runtime":{"type":"array","uniqueItems":true,"items":{"type":"string","enum":["locale","timezone","local_time","seed"]}},"presentation":{"type":"array","uniqueItems":true,"items":{"type":"string","enum":["card","column","row","text","value","icon","https_link"]}},"reason":{"type":["string","null"],"maxLength":512},"clarificationQuestion":{"type":["string","null"],"maxLength":240}},"required":["protocolVersion","outcome","displayName","enabled","periodicIntervalHours","tools","runtime","presentation","reason","clarificationQuestion"]}}"""
+    val feasibility: String = """{"name":"$SUBMIT_WIDGET_FEASIBILITY_TOOL","description":"Submit one small feasibility decision. The application derives protocol metadata, tool versions, runtime grants, presentation grants, enablement, and terminal normalization.","parameters":{"type":"object","additionalProperties":false,"properties":{"outcome":{"type":"string","enum":["achievable","unachievable","needs_clarification"]},"message":{"type":"string","minLength":1,"maxLength":512},"periodicIntervalHours":{"type":["integer","null"],"enum":[null,1,6,12,24]},"toolIds":{"type":"array","maxItems":4,"uniqueItems":true,"items":{"type":"string"}}},"required":["outcome","message","periodicIntervalHours","toolIds"]}}"""
 
     val algorithm: String = """{"name":"$SUBMIT_WIDGET_ALGORITHM_TOOL","description":"Submit one bounded typed algorithm. This captures data only.","parameters":{"type":"object","additionalProperties":false,"properties":{"protocolVersion":{"type":"integer","const":1},"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"kind":{"type":"string","enum":["runtime_input","transform","tool_call"]},"objective":{"type":"string","minLength":1,"maxLength":512},"dependsOn":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"toolId":{"type":["string","null"]},"contractVersion":{"type":["integer","null"]},"runtimeInputs":{"type":"array","uniqueItems":true,"items":{"type":"string","enum":["locale","timezone","local_time","seed"]}}},"required":["id","kind","objective","dependsOn","toolId","contractVersion","runtimeInputs"]}},"presentationObjective":{"type":"string","minLength":1,"maxLength":512}},"required":["protocolVersion","steps","presentationObjective"]}}"""
 
@@ -401,11 +472,6 @@ internal fun WidgetFeasibilityArtifact.toUntrustedProposal(source: String): Untr
     presentation = presentation,
     source = source,
 )
-
-private fun JsonObject.strictBoolean(name: String): Boolean = get(name)
-    ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
-    ?.asBoolean
-    ?: error("Missing boolean")
 
 private fun JsonObject.strictNullableLong(name: String): Long? {
     val value = get(name) ?: error("Missing nullable number")

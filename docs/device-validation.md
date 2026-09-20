@@ -137,7 +137,7 @@ presentation decoding, URI policy, and a complete local-fake lifecycle. It does
 not validate real local-model proposal quality or Android background behavior.
 
 For OpenSpec tasks 9.3 and 12.4, first run the local **Tool-calling diagnostic**
-for every candidate model. Suite v4 has five isolated schema cases
+for every candidate model. Suite v13 keeps five isolated schema cases
 (`stage_feasibility_schema`, `stage_algorithm_schema`,
 `stage_call_function_schema`, `stage_plan_function_schema`, and
 `stage_render_function_schema`) followed by `complete_synthetic_pipeline`.
@@ -146,8 +146,69 @@ Every case must pass on the exact model/APK pair before adding
 report remains local until explicit copy/share and contains no prompt, algorithm,
 fragment, assembled source, tool arguments, provider content, exception, stack
 trace, or credential. A complete-pipeline failure reports only its controlled
-stage/code plus aggregate callback count and argument bytes per capture tool;
-successful and non-stage terminal cases use null stage/code values.
+stage/code plus aggregate callback count and argument bytes per capture tool.
+Its `attemptFailures` sequence records only stage, stage-local attempt number,
+controlled code, and argument byte count. Feasibility failures distinguish
+JSON/root, exact four-field set, display message, schedule, tool selection,
+outcome contract, and resource limit without including the rejected value.
+Successful and non-stage terminal cases use null stage/code values.
+
+Suite v13 also exposes three one-generation feasibility probes separately from
+that gate: `feasibility_full_natural`, `feasibility_compact_natural`, and
+`feasibility_compact_explicit`. Their reports add sanitized UTF-8 input sizes,
+estimated input characters, a context SHA-256, and monotonic lifecycle timings
+for first generation event, tool capture, terminal event, watchdog, method
+return, and cleanup overrun. They never include the prompt or context text.
+These probes diagnose context/prompt/cleanup effects; passing one probe is not
+model eligibility evidence. It additionally exposes `algorithm_natural`, an
+isolated production-like algorithm probe that starts from an application-owned,
+normalized achievable feasibility artifact. It uses the natural request and
+production algorithm context, validates the callback with the production
+parser, and reports the same sanitized input/lifecycle signals. This separates
+an algorithm-stage native stall from a missing callback, a transport/parser
+failure, or a structurally invalid algorithm without invoking a provider.
+
+Debug builds also expose **Export raw diagnostic** after completion. This is a
+separate, explicitly confirmed sidecar containing exact stage instructions,
+effective context, schemas, and captured tool argument strings. It may contain
+the user prompt and generated source. Use it only for local model/schema
+diagnosis, review before sharing, and never substitute it for the sanitized
+eligibility report. The file is replaced under app cache on each export, is
+excluded from backup, and the control is absent from release builds. A round
+with no callback has no model argument string to export.
+
+Suite v13 additionally exposes `complete_pipeline_compact_natural`. It runs the
+production-like pipeline alone, with the natural request and production compact
+feasibility context, without first running the schema matrix or a standalone
+probe. Force-stop and thermally normalize the device before selecting it. A
+pass characterizes the cold end-to-end path but does not replace the complete
+matrix required for model eligibility.
+
+Every complete-pipeline report also includes one sanitized lifecycle record per
+stage attempt: stage, stage-local attempt, repair flag, controlled outcome,
+first generation event, tool capture, terminal event, watchdog, method return,
+and post-watchdog cleanup overrun. A timeout with no callback is therefore
+distinguishable from invalid captured output. These records contain no prompt,
+context, generated argument, exception text, provider result, or source.
+
+For a physical A/B comparison, force-stop ArarAI and let the device return to a
+recorded thermal baseline before each probe. Launch the app, select exactly one
+probe, copy/share its report after completion, then force-stop again. Do not run
+the complete matrix immediately before a probe. The UI isolates the requests,
+but only the external force-stop and thermal check establish a cold process.
+
+On a debug APK, the same sanitized case and attempt metadata is available under
+the `ArarAI.WidgetDiagnostic` Logcat tag. With the app process running, capture
+one diagnostic repetition from a terminal with:
+
+```bash
+adb logcat -c
+adb logcat -v threadtime ArarAI.WidgetDiagnostic:I ArarAI.LiteRtLm:D '*:S' > ararai-widget-diagnostic.log
+```
+
+Stop with Ctrl+C after the report appears. This filtered log is supplementary;
+the copied/shared JSON remains the canonical evidence. Neither path includes
+generated arguments or raw validator/native exception text.
 
 After that gate, test the eligible artifact independently in English and
 Portuguese. Record the exact prompt separately from the sanitized diagnostic,
@@ -188,7 +249,7 @@ Wikipedia host, and WorkManager state. Do not capture authoring prompts, complet
 JavaScript source, provider response text, credentials, headers, or unrelated
 local data in shared evidence.
 
-Current status (2026-09-11): suite-v2 evidence below is retained as historical
+Current status (2026-09-13): suite-v2 evidence below is retained as historical
 transport characterization. The first physical suite-v3 run used debug APK
 SHA-256 `4c0667b9f2c4e9f2bf9d56a5b1854c93158326ce48223ddd53121aa7b07984b8`
 and E4B artifact SHA-256
@@ -206,6 +267,376 @@ callbacks and all 4,428 argument bytes to `submit_widget_feasibility`, ending
 after the initial attempt and two repairs with controlled stage/code
 `feasibility`/`invalid_schema`. The report file SHA-256 was
 `2b2e1b4b5d8c2f2ad5868b6d7c02366d1b9d03f890a664ffac707d9a71cb02ca`.
+Suite v5 then ran on the same device and E4B artifact with debug APK SHA-256
+`8a5c1cdc31e8ba08d936905d4bbda64569a0c25e791bf08b530ec7b5e41e842e`.
+It reproduced the four isolated passes and isolated algorithm
+`tool_call_parsing` failure. The complete pipeline made three feasibility
+callbacks totaling 3,564 argument bytes, ended
+`feasibility`/`invalid_feasibility_shape`, and never reached algorithm. The
+report file SHA-256 was
+`00de6eee43d9f5e77e98e2ad3e0682f31f78f78be343359a35a656413bf867f3`.
+Suite v6 then ran on a Samsung SM-S901E (Android 16/API 36) with E2B artifact
+SHA-256 `181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c`
+and debug APK SHA-256
+`2b54d64bd76e7c57bf9fdb47dafb59fcd94058c713f89a1dfde483b67fc60b8e`.
+All five isolated cases passed. The complete pipeline made two feasibility
+callbacks totaling 2,655 argument bytes: attempts one and two failed the
+explicit outcome contract, then attempt three returned no artifact. The final
+controlled stage/code was `feasibility`/`missing_artifact`; the JSON evidence
+SHA-256 was
+`c7f335a66555157e5ad23b7a11e768c6cc6d1dae5e1602d2b048d0245982707a`.
+
+Suite v7 makes the feasibility outcome invariants explicit in the stage prompt,
+allows feasibility to select the minimum capabilities before freezing them for
+later stages, and gives every controlled repair code a specific correction.
+Its first physical run on the same SM-S901E used E4B artifact SHA-256
+`0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0`
+and debug APK SHA-256
+`493abb50a14d9af7697cb3045871f1313dd8cfdf9524a04f3a4dbde5e8b441dd`.
+Feasibility, algorithm, call, and plan isolated cases passed, but progressive
+thermal throttling while the device was on wireless power caused the render
+case to reach its 90-second watchdog with no callback. The suite intentionally
+aborted before the complete pipeline. At collection time the app used about
+4.3 GiB PSS, battery was 46.3 degrees C, skin was 48.2 degrees C with thermal
+status 4, and AP temperature was 62.2 degrees C. The JSON evidence SHA-256 was
+`0cb5b3bf05c7ccd4fc167b457c7b338c9bc2e67d9079d0b92fb0d84dd3eca98d`.
+This run characterizes the thermal failure and is not model eligibility
+evidence. A second suite-v7 run therefore started with the device cool and off
+external power, using the same APK and E4B artifact. Model loading completed in
+16,814 ms and all five isolated cases passed, including render. The complete
+pipeline reached feasibility: attempt one made one callback with 738 argument
+bytes but failed `invalid_feasibility_outcome`; repair attempts two and three
+both reached their watchdog without a callback. The final controlled
+stage/code was `feasibility`/`timed_out`, with total complete-pipeline duration
+223,306 ms. At collection time the app used about 4.27 GiB PSS, battery was
+41.9 degrees C, skin was 44.4 degrees C with thermal status 3, and the device
+remained off external power. The sanitized JSON and filtered Logcat SHA-256
+values were respectively
+`86f61c56da379e707e24c6a8d52670e771c3f0041eed2fcb195fb85b77b13489`
+and
+`326926b6b0520477e24c8d6bb4704a4e4514e5fe42f880407ede4371747432ed`.
+This completed run is valid negative eligibility evidence for the E4B artifact
+and suite-v7 APK pair.
+
+Suite v8 replaced the ambiguous random-event request with a deterministic,
+explicitly feasible request and changed feasibility guidance to choose an
+outcome before filling outcome-dependent fields. It used the same SM-S901E and
+E4B artifact with debug app version `202609130218` (version code `29821338`)
+and APK SHA-256
+`fe681e228778b1ea709cad9e74c4988b575ac749cb61d10b9763cc970d085d83`.
+The first run loaded the model in 16,318 ms and began the third isolated case,
+but Android terminated the process under system memory pressure before the
+pipeline ran. `ApplicationExitInfo` classified PID 4098 as
+`reason=LOW_MEMORY`; this interrupted run is stability evidence only. The
+filtered Logcat, exit-info, and event-log SHA-256 values were respectively
+`4cc8028bed74c8df4bcf718aec6e2e552cb4f027913aac0a686777468f6ea662`,
+`7edeffafad672bbfc685054eb84dce3bdcbc893693914f87c0cb5a026a54d2f2`,
+and
+`2428e155a18e6c871557e0042fbb75f344857a09bc858ac529c13c364b85c6f2`.
+
+A clean suite-v8 retry followed after Android killed cached background
+processes. Model loading completed in 15,471 ms and all five isolated schemas
+passed in 10,071, 10,226, 8,322, 8,290, and 8,379 ms. The complete-pipeline
+telemetry recorded one 361-byte feasibility callback, while all three attempt
+outcomes reached the watchdog before producing an acceptable artifact. It
+ended with controlled stage/code `feasibility`/`timed_out` after 334,955 ms and
+never reached algorithm. This is an improvement over suite v7 because the prior
+`invalid_feasibility_outcome` did not recur, but it is still a pipeline failure,
+not eligibility evidence. At collection time the app used about 4.22 GiB PSS,
+including about 3.51 GiB attributed to graphics, with about 0.91 GiB system
+memory available. The device was off external power; battery was 44.2 degrees
+C, skin was 45.7 degrees C at thermal status 4, and AP temperature was 57.2
+degrees C. The sanitized JSON and filtered Logcat SHA-256 values were
+respectively
+`b27441a786ddefaed705b62296b17d920903a514147453abc8e3e294ac2131f7`
+and
+`8a7f9eaf8093ab99c6dbbb2b745b3ab8021f216954531454d467223ed3c06585`.
+The E4B artifact therefore remains ineligible for staged widget authorship.
+Suite v9 is the current operational matrix. It preserves the isolated and
+complete cases but makes application context declare create/edit mode and map
+natural random/varied selection to the deterministic runtime seed API. Its
+complete case uses the behavior-only Portuguese request "Mostre um evento
+aleatório da Wikipédia para o dia e o mês de hoje. Atualize o evento a cada
+hora." A physical run on the same SM-S901E and E4B artifact used debug app
+version `202609131106` (version code `29821866`) and APK SHA-256
+`64777ecc49b463ec0f3fbbbbcbe0d61d65a26279688b0ba3191383c4c7c1501b`.
+The device started off external power at thermal status 0 with battery at 26.1
+degrees C. Model loading completed in 16,206 ms and all five isolated schemas
+passed in 9,887, 14,497, 10,371, 10,415, and 42,643 ms. The natural complete
+pipeline produced no feasibility callback in any of its three attempts and
+ended with controlled stage/code `feasibility`/`timed_out` after 417,944 ms.
+At collection time the app used about 4.09 GiB PSS, including about 3.35 GiB
+attributed to graphics, with about 0.87 GiB system memory available. Battery
+was 43.1 degrees C, skin was 45.4 degrees C at thermal status 3, and AP
+temperature was 58.9 degrees C. The sanitized JSON and filtered Logcat SHA-256
+values were respectively
+`6685912aff878d1cff22f2150c3bad59cbbfe8c3628d82f4ea2ba727415494ac`
+and
+`152afddc324d956346ac0345415dbdb55adf78a2b0dc2aabdd6e318f35fdc8cd`.
+This is valid negative eligibility evidence for the natural instruction and
+suite-v9 APK/context pair. The suite-v8 evidence and hashes above remain
+immutable historical results for their exact APK/context pair.
+
+Suite v13 is the current diagnostic implementation. It retains the suite-v12
+four-field feasibility decision and adds the isolated production-like algorithm
+probe plus sanitized per-attempt lifecycle telemetry to complete-pipeline runs.
+The application still derives protocol metadata, enablement, eligible tool
+versions, deterministic runtime grants, allowlisted presentation grants, and
+terminal normalization. The suite-v10 through suite-v12 physical evidence below
+remains immutable for each exact APK and context pair.
+
+The first suite-v12 cold complete-pipeline run used the SM-S901E and the E4B
+artifact SHA-256
+`0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0`.
+The debug app version was `202609132302`, version code `29822582`, and APK
+SHA-256
+`6ea38c49028d386ef99a3c4d28f82627647d120002e66beaee88f3c1c1b55bd5`.
+No schema case or standalone probe ran first. The nearest pre-run baseline was
+thermal status 0 with AP/battery/skin at 28.5/29.1/29.5 degrees C; after install
+and before launch the app had no process, battery was 43%, and the device was
+off external power. Model loading passed in 18,046 ms.
+
+The simplified feasibility contract advanced the pipeline beyond the phase
+that blocked suite v11. The first 202-byte callback copied the natural request
+into `message`, exceeding the application-owned 80-character display-name
+limit, and was rejected as `invalid_feasibility_display_name`. The scoped
+repair returned a valid 140-byte achievable decision with a shorter display
+name, one-hour interval, and `wikipedia_on_this_day`; the application then
+derived the remaining envelope and advanced to algorithm generation.
+
+The initial algorithm callback was 734 bytes and failed `invalid_algorithm`.
+The raw evidence shows two concrete structural causes: non-tool steps omitted
+the required nullable `toolId` and `contractVersion` fields, while the tool step
+invented `month` and `day` as runtime-input identifiers instead of using the
+registered `local_time` input. Its one scoped repair produced no callback and
+timed out. The case ended after 243,874 ms as `pipeline_invalid`, with controlled
+final stage/code `algorithm`/`timed_out`, three total callbacks, and an observed
+load-plus-case duration of about 261,920 ms. This is material progress in model
+compatibility, but remains negative eligibility evidence; no catalog capability
+is enabled.
+
+At result collection the device was thermal status 3 with AP/battery/skin at
+59.4/41.4/44.3 degrees C, battery 37%, and app PSS/RSS/swap PSS at about
+4.24/3.84/0.41 GiB. The explicitly exported on-device raw sidecar was 42,918
+bytes with SHA-256
+`fb8eaa840eb3dd1038889e3ba4ae1bff267c7f2041bcc3efedeaea0cf0c00ff0`.
+The archived copy adds one terminal newline and is
+`artifacts/ararai/ararai-widget-diagnostic-v12-e4b-complete-pipeline-cold-raw.json`
+with SHA-256
+`94807fb7c6352fa9130444768869aaa132aaf6e46d9309bcccadfe878073897c`.
+The five-line sanitized report artifact is
+`artifacts/ararai/ararai-widget-diagnostic-v12-e4b-complete-pipeline-cold.log`
+with SHA-256
+`629143d16ea089f0fdd9580d08481881c5bdeee0455c8935737815856e3785f8`.
+After export opened the chooser and backgrounded the completed app, Android
+again recorded a low-memory exit, this time at 23:13:01 with 319 MiB RSS in the
+exit record. As in the suite-v11 raw run, that post-result lifecycle issue is
+separate from the already captured controlled pipeline outcome.
+
+A second suite-v12 cold complete-pipeline run used the current source build on
+the same unplugged SM-S901E and retained E4B artifact. The debug app version was
+`202609141845`, version code `29823765`, and APK SHA-256
+`f702d2bd927c82c46757ace8fed1d12de9615b01ce4fadf5faba11eee21a09d2`.
+The app was force-stopped and Logcat cleared before a cold activity launch; no
+schema case or standalone probe ran first. The nearest pre-run baseline was
+thermal status 0 with AP/battery/skin at 26.1/25.2/26.5 degrees C and battery at
+75%. Model loading passed in 19,640 ms.
+
+All three feasibility generations reached their 90-second watchdogs without a
+capture callback. The case ended after 287,312 ms as `pipeline_invalid`, with
+controlled final stage/code `feasibility`/`timed_out`, `captureCount=0`, and no
+later stage. Consequently, this run did not exercise semantic validation of the
+four-field artifact and neither confirms nor rejects the revised field contract.
+At collection time the process remained alive with about 4.23 GiB PSS, 3.83 GiB
+RSS, and 410 MiB swap PSS. AP/battery/skin were 58.1/41.2/44.7 degrees C, skin
+thermal status was 3, and battery was 66%. The six-line sanitized filtered
+Logcat artifact is
+`artifacts/ararai/ararai-widget-diagnostic-v12-e4b-complete-pipeline-cold-2.log`
+with SHA-256
+`4bf85d565312b7e0b51d6e9d3eb4fc3d1e3c719d594961dfd455147d2c9d46aa`.
+This is additional negative eligibility evidence for the exact model/APK/run;
+tasks 9.3, 9.4, and 12.4 remain open and no model catalog capability is enabled.
+
+A controlled same-build follow-up then separated feasibility transport from the
+complete pipeline. After the device returned to thermal status 0 and the app
+process was absent, one cold `feasibility_compact_natural` probe used 739 system
+bytes, 1,870 user bytes, 1,749 context bytes, the same 674-byte feasibility
+schema, and context SHA-256
+`229ee420f2c6796d3b924912ffac744937daaa019d5e242ad90c639487ac969e`.
+It passed: the capture callback arrived after 9,210 ms and the generation
+terminated after 10,177 ms, with no watchdog or cleanup overrun. The sanitized
+Logcat artifact is
+`artifacts/ararai/ararai-widget-diagnostic-v12-e4b-feasibility-compact-natural-cold-2.log`
+with SHA-256
+`16b9bb846e60370bfabdad27370e735902258f32b69d2f4cc1854af63056074d`.
+
+The process was force-stopped again and the device cooled to thermal status 0
+with AP/battery/skin at 30.4/29.7/30.8 degrees C before another cold
+`complete_pipeline_compact_natural` run. Model loading passed in 16,229 ms. The
+first feasibility callback contained 202 bytes and failed
+`invalid_feasibility_display_name`; its bounded repair produced the second
+callback, was accepted, and advanced to algorithm. Both the initial algorithm
+generation and its remaining bounded repair then timed out without a callback.
+The case ended after 463,277 ms with `captureCount=2` and controlled final
+stage/code `algorithm`/`timed_out`. At collection time the process was alive at
+about 4.24 GiB PSS, 3.84 GiB RSS, and 415 MiB swap PSS; AP/battery/skin were
+60.5/43.2/45.9 degrees C and skin thermal status was 3. The sanitized Logcat is
+`artifacts/ararai/ararai-widget-diagnostic-v12-e4b-complete-pipeline-cold-3.log`
+with SHA-256
+`2a54015ff0a23d835634ff38b80939dbcb28e14bb2c5eb3b1ff806855ef67b3a`.
+
+Together, these two fresh-process runs prove that the current feasibility schema
+and basic capture transport can respond promptly. They also reproduce
+run-to-run variability in the complete pipeline and leave algorithm generation
+as the current downstream blocker. This remains negative eligibility evidence;
+it does not justify enabling E4B authoring.
+
+The first suite-v11 cold complete-pipeline run used the same SM-S901E and E4B
+artifact SHA-256
+`0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0`.
+The debug app version was `202609131919` and the APK SHA-256 was
+`4d331b830d25ed88c819dc29c2e40e90376f4e28a246873291691cdae772b51d`.
+The app was force-stopped before launch, and no schema case or standalone probe
+ran before `complete_pipeline_compact_natural`. The unplugged device started at
+thermal status 0 with AP/battery/skin at 28.2/27.9/28.6 degrees C, battery 64%,
+and app PSS/RSS/swap PSS at about 210/304/0.2 MiB. Model loading passed in
+17,573 ms. The initial compact feasibility generation produced one 593-byte
+callback, which deterministic validation rejected as
+`invalid_feasibility_fields`. Both bounded feasibility repairs produced no
+callback and timed out. The case therefore ended after 252,193 ms as
+`pipeline_invalid`, with controlled final stage/code
+`feasibility`/`timed_out` and exactly one captured callback across three
+attempts. No later pipeline stage ran.
+
+At collection time the process was still alive but had reached thermal status
+3 with AP/battery/skin at 62.4/41.5/45.0 degrees C, battery 57%, and about
+4.06 GiB PSS, 3.67 GiB RSS, and 419 MiB swap PSS. The filtered sanitized Logcat
+artifact is
+`artifacts/ararai/ararai-widget-diagnostic-v11-e4b-complete-pipeline-cold.log`
+with SHA-256
+`8e0855abe6cc2ba400d5b88b04c6f8c6cc31b5c39d1ec3ee22f3fc8e9e0f2dd6`.
+This establishes that compact feasibility can reach the capture callback in a
+cold complete pipeline, but the returned artifact contract and timeout-prone
+repair path still prevent acceptance. It is negative eligibility evidence; no
+model catalog capability is enabled.
+
+A second suite-v11 cold run captured the exact feasibility exchange before
+changing that contract. It used debug app version `202609132235`, APK SHA-256
+`c135a489119d3d16d892f7bda4bd7657da4152e9d1daedfc965d0835bb6d578b`,
+and the same E4B artifact. The unplugged SM-S901E began at thermal status 0 with
+AP/battery/skin at 27.3/26.3/27.4 degrees C and battery 50%. Model loading took
+17,611 ms. The pipeline then made three byte-identical 593-byte feasibility
+callbacks in 46,143 ms; each had SHA-256
+`33072017c5e059f46c2cc302b9986e1e05746e1709628ffc230319fbef5d90df`
+and was rejected as `invalid_feasibility_fields`.
+
+The raw artifact established the exact mismatch: the model omitted the required
+`clarificationQuestion` field. Its otherwise achievable artifact also supplied
+a non-null `reason`, which would have violated the old conditional outcome
+invariant after fixing the field set. Both repairs repeated the exact same bytes
+instead of applying the correction. This is the baseline for the suite-v12
+four-field contract; the raw local evidence is
+`artifacts/ararai/ararai-widget-diagnostic-v11-e4b-complete-pipeline-cold-raw.json`
+with SHA-256
+`9ee9373683df46f7b54ac1f76cba0dee68c51b4c9060ab4ef0211f28597a3126`.
+The supplementary sanitized filtered Logcat SHA-256 is
+`d18a5114290e96b7d5e92cea8663aaab6391e0e21ee0bd1e048d59fa5459b92f`.
+After the completed result was exported and the chooser backgrounded the app,
+Android later recorded a low-memory process exit at about 316 MiB RSS. This
+post-result exit does not change the captured pipeline result, but remains a
+separate lifecycle/memory follow-up rather than being hidden.
+
+The first suite-v10 physical comparison ran on the same SM-S901E and E4B
+artifact SHA-256
+`0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0`.
+The debug app version was `202609131246` and the APK SHA-256 was
+`dc049ed32a56b801e69a1bf3d9b3c54f9a4f8a0e9c3280a19f7bb31fc3d259d5`.
+Every probe started in a new application process, off external power, with
+Android thermal status 0. The exact starting temperatures differed because of
+residual heat: AP/battery/skin were respectively 25.6/25.9/26.8 degrees C for
+full-natural, 33.9/33.3/33.7 for compact-natural, and 35.3/35.2/35.3 for
+compact-explicit.
+
+- `feasibility_full_natural` reduced to one isolated feasibility attempt and
+  passed its capture transport: model load took 16,763 ms, context was 5,104
+  UTF-8 bytes, estimated total input was 7,487 characters, the tool callback
+  arrived at 20,312 ms, and the probe returned at 22,582 ms.
+- `feasibility_compact_natural` also passed: model load took 16,261 ms, context
+  fell to 1,749 bytes and estimated input to 4,132 characters, the callback
+  arrived at 18,637 ms, and the probe returned at 21,623 ms.
+- `feasibility_compact_explicit` passed: model load took 16,706 ms, context was
+  1,862 bytes and estimated input 4,246 characters, the callback arrived at
+  11,985 ms, and the probe returned at 12,948 ms.
+
+All three captured exactly one feasibility tool call and reported no watchdog,
+cleanup overrun, or raw model data. Compacting the natural context removed
+65.7% of context bytes and 44.8% of estimated input characters but improved
+probe return latency by only 4.2%. The explicit control improved return latency
+by 40.1% relative to compact-natural despite a slightly larger input. The
+single cross-mode sample cannot establish prompt causality, and the unequal
+residual temperatures are recorded rather than hidden. Still, full-natural succeeding
+alone proves that the suite-v9 no-callback result is not a deterministic input-
+size failure: running five schema generations first, repeated attempts, thermal
+state, and generation variability remain confounders. These capture-only probes
+do not validate the semantic feasibility artifact and are not eligibility
+evidence; the suite-v9 complete-pipeline failure remains the current E4B gate.
+
+The sanitized filtered-Logcat SHA-256 values were
+`bd34615b0b5fdaf9032f9b74a103affef5ce75c754eb45a72754cfef8bada09e`
+for full-natural,
+`83942192df054baec62b7bfbf5c010d3d51cd6d551609e9df7ec2796cae27a76`
+for compact-natural, and
+`933eccf752c8baa20dade6664b19831f40c0eb9ec33436ac0ecc1405b4349ffb`
+for compact-explicit. The app was force-stopped after collection.
+
+Two follow-up `feasibility_full_natural` runs used the same APK, E4B artifact,
+5,104-byte context, 7,487-character estimated input, and context SHA-256. Both
+started in new processes, off external power, at thermal status 0:
+
+- Repetition 2 started at AP/battery/skin 35.8/35.8/35.7 degrees C. Model load
+  took 19,301 ms; one callback arrived at 36,330 ms and the probe passed at
+  44,473 ms. It ended at thermal status 2 and skin 41.9 degrees C.
+- Repetition 3 started after screen-off cooling at 31.6/31.9/32.0 degrees C.
+  Model load took 17,534 ms, but no generation event or callback arrived. The
+  90,000 ms watchdog fired and the method returned only at 119,186 ms, exposing
+  a 29,186 ms native cleanup overrun. It ended at thermal status 3 and skin
+  43.0 degrees C.
+
+The identical full-natural probe therefore passed two of three cold-process
+runs and timed out once. The failed run began cooler than the slower successful
+run, so starting thermal status/temperature does not uniquely predict the
+outcome; heat accumulated during the longer failure remains a cause/effect
+confounder. The evidence establishes two separate facts: full context is not a
+deterministic rejection, but E4B feasibility transport is not reliable for this
+workload; and a watchdog can incur substantial synchronous native cleanup after
+its logical deadline. The repetition-2 and repetition-3 filtered-Logcat
+SHA-256 values were respectively
+`375bccdf0e77af9c1af9cb976e69d921ac2947f5c2b6310a262040ad175260e4`
+and
+`9f76b4a09c4d79c3c00ac313da7daf62b50fc3f4e7f61747ef67123a11ca3af4`.
+The app was force-stopped after collection.
+
+The compact-natural probe was then repeated twice with the same controls to
+compare reliability rather than a single latency sample. Repetition 2 started
+at AP/battery/skin 34.7/31.6/32.2 degrees C, loaded the model in 17,057 ms,
+captured one callback at 14,141 ms, and passed at 15,194 ms. Repetition 3
+started at 30.6/31.4/31.7 degrees C, loaded in 18,674 ms, captured at 14,935
+ms, and passed at 17,507 ms. Including the initial 21,623 ms run,
+`feasibility_compact_natural` passed all three cold-process samples with a
+17,507 ms median and no watchdog or cleanup overrun. The compact repetition-2
+and repetition-3 filtered-Logcat SHA-256 values were respectively
+`21e38d0b8f8670197eb7acd86964b90d614629ccae53c85c9f99168d2b87ee3a`
+and
+`b230abb078973e056787d3e09a9251a00383b4b036ad6c8318160f29da636daf`.
+
+Across the matched three-sample sets, compact-natural was 3/3 while
+full-natural was 2/3. The compact median return was 60.6% below the
+full-natural median when the timed-out return is included, and 47.8% below the
+median of the two successful full-natural returns. This small sample is not a
+model-wide reliability claim, but it is sufficient engineering evidence to
+prefer the bounded compact feasibility context before attempting a cold
+complete pipeline. The app was force-stopped after the final sample.
+
 Consequently no checked-in model currently advertises the new authoring
 protocol. The prior Portuguese E4B creation/manual run does not satisfy the new
 gate, and the remaining PT/EN/edit/negative/background lifecycle matrix has not

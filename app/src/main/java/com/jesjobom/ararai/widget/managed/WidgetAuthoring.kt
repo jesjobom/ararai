@@ -136,6 +136,7 @@ internal object WidgetAuthoringContextBuilder {
         val widgetToolContracts = toolContracts.filter { ApplicationToolConsumer.Widget in it.consumers }
         val root = JsonObject().apply {
             addProperty("widgetApiVersion", WidgetRuntimePolicy.WIDGET_API_VERSION)
+            add("authoringTask", authoringTaskContext(isEdit = currentDefinition != null))
             add(
                 "supportedIntervalsHours",
                 JsonArray().also { values ->
@@ -168,6 +169,16 @@ internal object WidgetAuthoringContextBuilder {
         return WidgetAuthoringPrompt(userInstruction, StrictJson.canonical(root))
     }
 
+    private fun authoringTaskContext(isEdit: Boolean): JsonObject = JsonObject().apply {
+        addProperty("mode", if (isEdit) "edit" else "create")
+        addProperty(
+            "instructionSemantics",
+            "The user instruction describes the desired widget behavior and content. The current authoring UI " +
+                "already establishes this as a widget create or edit operation; do not require the instruction to " +
+                "repeat the operation or the word widget.",
+        )
+    }
+
     private fun programApiContext(): JsonObject = JsonObject().apply {
         addProperty("planEntrypoint", "function plan(runtime) -> array of tool calls")
         addProperty("renderEntrypoint", "function render(runtime, outcomes, state) -> one presentation node")
@@ -191,6 +202,13 @@ internal object WidgetAuthoringContextBuilder {
             "locale grants runtime.locale and runtime.language; local_time grants runtime.currentLocalDateTime() " +
                 "returning immutable {iso,year,month,day,hour,minute,second,timezone}; timezone grants " +
                 "runtime.timezone; seed grants runtime.seed and runtime.seededIndex(length).",
+        )
+        addProperty(
+            "randomSelection",
+            "When the user asks for a random, varied, shuffled, or selected item from a bounded list, including " +
+                "aleatório, variado, or sorteado, grant seed and use runtime.seededIndex(length). Math.random is " +
+                "unavailable. A fresh execution may select a different item; the same runtime snapshot must select " +
+                "the same index.",
         )
         addProperty(
             "linkProvenance",

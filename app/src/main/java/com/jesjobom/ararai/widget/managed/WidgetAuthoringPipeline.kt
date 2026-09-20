@@ -38,6 +38,7 @@ internal class ManagedWidgetAuthoringPipeline(
     private val draftBuilder: WidgetDraftBuilder,
     private val registry: ApplicationToolRegistry,
     private val totalTimeoutMillis: Long = WidgetAuthoringPipelinePolicy.TOTAL_TIMEOUT_MILLIS,
+    private val onAttemptFailure: (WidgetAuthoringAttemptFailure) -> Unit = {},
 ) {
     private var activeArtifacts: MutableList<Any> = mutableListOf()
 
@@ -269,7 +270,9 @@ internal class ManagedWidgetAuthoringPipeline(
     ): CaptureResult<T> {
         var repairCode: WidgetAuthoringStageFailureCode? = null
         var rejectedArtifact: String? = null
+        var attempt = 0
         while (budget.consumeGeneration(isRepair = repairCode != null)) {
+            attempt++
             if (repairCode != null) {
                 onProgress(
                     WidgetAuthoringProgress.Repairing(
@@ -291,6 +294,7 @@ internal class ManagedWidgetAuthoringPipeline(
                 is WidgetAuthoringRoundResult.Captured -> when (val validated = validate(round.rawArgumentsJson)) {
                     is StageValidation.Valid -> return CaptureResult.Value(validated.value)
                     is StageValidation.Invalid -> {
+                        recordAttemptFailure(stage, attempt, validated.code, round.rawArgumentsJson)
                         repairCode = validated.code
                         rejectedArtifact = round.rawArgumentsJson
                     }
@@ -298,19 +302,24 @@ internal class ManagedWidgetAuthoringPipeline(
                 WidgetAuthoringRoundResult.NoArtifact,
                 is WidgetAuthoringRoundResult.Failed,
                 -> {
+                    recordAttemptFailure(stage, attempt, WidgetAuthoringStageFailureCode.MissingArtifact)
                     repairCode = WidgetAuthoringStageFailureCode.MissingArtifact
                     rejectedArtifact = "{}"
                 }
                 WidgetAuthoringRoundResult.TimedOut -> {
+                    recordAttemptFailure(stage, attempt, WidgetAuthoringStageFailureCode.TimedOut)
                     repairCode = WidgetAuthoringStageFailureCode.TimedOut
                     rejectedArtifact = "{}"
                 }
-                WidgetAuthoringRoundResult.InputTooLarge -> return CaptureResult.Failure(
-                    WidgetAuthoringPipelineResult.StageFailed(
-                        stage,
-                        WidgetAuthoringStageFailureCode.ResourceLimit,
-                    ),
-                )
+                WidgetAuthoringRoundResult.InputTooLarge -> {
+                    recordAttemptFailure(stage, attempt, WidgetAuthoringStageFailureCode.ResourceLimit)
+                    return CaptureResult.Failure(
+                        WidgetAuthoringPipelineResult.StageFailed(
+                            stage,
+                            WidgetAuthoringStageFailureCode.ResourceLimit,
+                        ),
+                    )
+                }
             }
             if (budget.repairCount() >= WidgetAuthoringPipelinePolicy.MAX_REPAIRS) break
         }
@@ -318,6 +327,22 @@ internal class ManagedWidgetAuthoringPipeline(
             WidgetAuthoringPipelineResult.StageFailed(
                 stage,
                 repairCode ?: WidgetAuthoringStageFailureCode.ResourceLimit,
+            ),
+        )
+    }
+
+    private fun recordAttemptFailure(
+        stage: WidgetAuthoringStage,
+        attempt: Int,
+        code: WidgetAuthoringStageFailureCode,
+        rawArtifact: String? = null,
+    ) {
+        onAttemptFailure(
+            WidgetAuthoringAttemptFailure(
+                stage = stage,
+                attempt = attempt,
+                code = code,
+                argumentBytes = rawArtifact?.toByteArray(Charsets.UTF_8)?.size?.toLong(),
             ),
         )
     }
@@ -342,14 +367,83 @@ internal class ManagedWidgetAuthoringPipeline(
     }
 }
 
-private fun baseContext(prompt: WidgetAuthoringPrompt): String = StrictJson.canonical(
+private fun baseContext(prompt: WidgetAuthoringPrompt): String = diagnosticFeasibilityContext(prompt, compact = true)
+
+internal fun diagnosticFeasibilityContext(
+    prompt: WidgetAuthoringPrompt,
+    compact: Boolean,
+): String = if (!compact) {
+    fullFeasibilityContext(prompt)
+} else {
+    compactFeasibilityContext(prompt)
+}
+
+private fun fullFeasibilityContext(prompt: WidgetAuthoringPrompt): String = StrictJson.canonical(
     JsonObject().apply {
         addProperty("userInstruction", prompt.userInstruction)
         add("widgetApi", JsonParser.parseString(prompt.apiContextJson))
     },
 )
 
-private fun algorithmContext(
+private fun compactFeasibilityContext(prompt: WidgetAuthoringPrompt): String {
+    val api = JsonParser.parseString(prompt.apiContextJson).asJsonObject
+    val compactApi = JsonObject().apply {
+        listOf(
+            "widgetApiVersion",
+            "authoringTask",
+            "supportedIntervalsHours",
+            "supportedRuntimeValues",
+            "supportedPresentation",
+        ).forEach { name -> api.get(name)?.let { add(name, it.deepCopy()) } }
+        api.getAsJsonObject("programApi")
+            ?.get("randomSelection")
+            ?.let { add("randomSelection", it.deepCopy()) }
+        add(
+            "tools",
+            JsonArray().apply {
+                api.getAsJsonArray("tools")?.forEach { element ->
+                    val tool = element.asJsonObject
+                    add(
+                        JsonObject().apply {
+                            listOf("id", "version", "displayName", "networkRequired").forEach { name ->
+                                tool.get(name)?.let { add(name, it.deepCopy()) }
+                            }
+                            add("inputFields", tool.schemaFieldNames("inputSchema"))
+                            add("outputFields", tool.schemaFieldNames("outputSchema"))
+                        },
+                    )
+                }
+            },
+        )
+        api.get("wikipediaBehaviorGuidance")?.let { add("wikipediaBehaviorGuidance", it.deepCopy()) }
+        api.get("currentWidget")?.let { current ->
+            add(
+                "currentWidget",
+                if (current.isJsonObject) {
+                    current.asJsonObject.deepCopy().apply { remove("source") }
+                } else {
+                    current.deepCopy()
+                },
+            )
+        }
+    }
+    return StrictJson.canonical(
+        JsonObject().apply {
+            addProperty("userInstruction", prompt.userInstruction)
+            add("widgetApi", compactApi)
+        },
+    )
+}
+
+private fun JsonObject.schemaFieldNames(schemaName: String): JsonArray = JsonArray().apply {
+    getAsJsonObject(schemaName)
+        ?.getAsJsonObject("properties")
+        ?.keySet()
+        ?.sorted()
+        ?.forEach(::add)
+}
+
+internal fun algorithmContext(
     prompt: WidgetAuthoringPrompt,
     feasibility: WidgetFeasibilityArtifact,
 ): String = StrictJson.canonical(

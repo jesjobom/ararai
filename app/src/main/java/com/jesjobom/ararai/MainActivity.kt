@@ -1,6 +1,7 @@
 package com.jesjobom.ararai
 
 import android.Manifest
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -21,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.jesjobom.ararai.chat.DeferredNewChatSessionStore
@@ -49,6 +51,7 @@ import com.jesjobom.ararai.voice.reconcileVoiceTemporaryFiles
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     private val openModelManagementRequests = MutableStateFlow(0)
@@ -173,6 +176,7 @@ class MainActivity : ComponentActivity() {
                         },
                         managedWidgetServices = app.managedWidgetApplicationServices,
                         onShareWidgetToolCallingDiagnostic = ::shareWidgetToolCallingDiagnostic,
+                        onShareRawWidgetToolCallingDiagnostic = ::shareRawWidgetToolCallingDiagnostic,
                     )
                 }
             }
@@ -206,7 +210,34 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun shareRawWidgetToolCallingDiagnostic(report: String) {
+        check(BuildConfig.DEBUG) { "Raw widget diagnostics are debug-only" }
+        val directory = File(cacheDir, RAW_WIDGET_DIAGNOSTIC_DIRECTORY).apply {
+            mkdirs()
+            listFiles()?.forEach(File::delete)
+        }
+        val file = File(directory, RAW_WIDGET_DIAGNOSTIC_FILE).apply {
+            writeText(report, Charsets.UTF_8)
+        }
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.widget_tool_diagnostic_export_raw_title))
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = ClipData.newUri(contentResolver, RAW_WIDGET_DIAGNOSTIC_FILE, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(
+            Intent.createChooser(
+                shareIntent,
+                getString(R.string.widget_tool_diagnostic_export_raw_chooser),
+            ),
+        )
+    }
+
     companion object {
         const val EXTRA_OPEN_MODELS = "open_model_management"
+        private const val RAW_WIDGET_DIAGNOSTIC_DIRECTORY = "raw-widget-diagnostics"
+        private const val RAW_WIDGET_DIAGNOSTIC_FILE = "ararai-widget-diagnostic-raw.json"
     }
 }

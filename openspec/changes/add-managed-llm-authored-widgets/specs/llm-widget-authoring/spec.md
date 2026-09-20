@@ -16,6 +16,11 @@ generation, orchestration, presentation, validation, and deterministic
 assembly. Each stage SHALL receive only the bounded non-secret context and
 previously validated artifacts required for its objective.
 
+The bounded context SHALL state whether the dedicated flow is creating or
+editing a widget and SHALL define the user's instruction as the desired widget
+behavior/content. The application SHALL NOT require the user to repeat the
+current UI operation or the word "widget" in that instruction.
+
 #### Scenario: Propose a new widget
 
 - **WHEN** the user asks an eligible installed model to create a supported
@@ -25,6 +30,14 @@ previously validated artifacts required for its objective.
 - **AND** accepted JavaScript fragments remain model-generated
 - **AND** the application, not the model, assigns identity, revision, digest,
   effective grants, hard resource limits, assembly order, and consent.
+
+#### Scenario: Interpret behavior-only creation language
+
+- **WHEN** the create-widget flow receives an instruction such as "show a
+  historical event for today" without restating "create a widget"
+- **THEN** every stage treats it as a widget-creation request
+- **AND** does not request clarification merely because the operation or object
+  type was supplied by the UI context instead of repeated by the user.
 
 #### Scenario: Authoring model is unavailable
 
@@ -37,21 +50,35 @@ previously validated artifacts required for its objective.
 
 ### Requirement: Validate feasibility and a typed algorithm before code
 
-The first stage SHALL return one of `achievable`, `unachievable`, or
-`needs_clarification` together with bounded display/schedule intent, requested
-registered tool versions, runtime values, presentation capabilities, and a
-controlled explanation. For an achievable request, a later stage SHALL return a
-bounded typed acyclic algorithm whose steps and dependencies distinguish
-runtime inputs, independent planned tool calls, transformations, and the final
-presentation objective. The application SHALL validate both artifacts before
-requesting JavaScript.
+The first stage SHALL return exactly one `outcome`, one bounded
+outcome-dependent `message`, one bounded periodic interval or null, and the
+minimum registered tool IDs. The application SHALL derive protocol metadata,
+enablement, eligible registered tool versions, deterministic runtime grants,
+allowlisted presentation grants, and terminal normalization from checked-in
+policy. For an achievable request, a later stage SHALL return a bounded typed
+acyclic algorithm whose steps and dependencies distinguish runtime inputs,
+independent planned tool calls, transformations, and the final presentation
+objective. The application SHALL validate both artifacts before requesting
+JavaScript.
+
+The feasibility instruction SHALL state the four-field conditional contract
+for all three outcomes: `message` is the display name for `achievable`, the
+reason for `unachievable`, and one question for `needs_clarification`. It SHALL
+ask the model to select only the minimum required available tool IDs without
+treating not-yet-validated selections as frozen. A bounded repair SHALL
+translate its controlled failure code into an actionable checked-in correction
+without including arbitrary validator or exception text.
+The wire artifact SHALL NOT require separate `reason` or
+`clarificationQuestion` fields; the application SHALL derive both nullable
+values from `outcome` and `message`.
 
 #### Scenario: Accept a feasible capability plan
 
-- **WHEN** the model selects only registered `WIDGET`-eligible tool versions and
-  supported runtime/presentation capabilities for an achievable request
-- **THEN** the application freezes that validated capability envelope for every
-  later stage and repair
+- **WHEN** the model selects only registered `WIDGET`-eligible tool IDs for an
+  achievable request
+- **THEN** the application resolves eligible versions, derives bounded runtime
+  and presentation grants, and freezes that validated capability envelope for
+  every later stage and repair
 - **AND** later artifacts cannot broaden it.
 
 #### Scenario: Report an unavailable operation
@@ -68,6 +95,14 @@ requesting JavaScript.
 - **WHEN** the request is too ambiguous to freeze a safe capability envelope
 - **THEN** the model may return `needs_clarification` with one bounded question
 - **AND** the attempt ends so the user can revise the prompt explicitly.
+
+#### Scenario: Repair an inconsistent feasibility outcome
+
+- **WHEN** the feasibility artifact contains an invalid outcome-dependent
+  message, schedule, or tool ID selection
+- **THEN** the application identifies the controlled feasibility category
+- **AND** the repair repeats the four-field contract and keeps a supported
+  request on `achievable` before requesting one replacement artifact.
 
 #### Scenario: Reject unsupported adaptive execution
 
@@ -86,6 +121,21 @@ orchestrator and a `render` function. The application SHALL syntax-check and
 execute each fragment with synthetic normal/boundary fixtures, validate tool
 arguments and presentation output against current contracts, and accept no
 fragment that uses undeclared inputs or capabilities.
+
+The bounded program API context SHALL map natural requests for a random,
+varied, shuffled, or selected item from a bounded list, including equivalent
+supported user-language terms, to the `seed` runtime grant and
+`runtime.seededIndex(length)`. It SHALL state that `Math.random` is unavailable,
+that a fresh execution may select a different item, and that the same runtime
+snapshot must reproduce the same index.
+
+#### Scenario: Translate natural variation safely
+
+- **WHEN** the user asks for one random or varied item from a bounded tool
+  result without naming an implementation primitive
+- **THEN** an achievable artifact selects the `seed` runtime grant
+- **AND** generated code uses `runtime.seededIndex(length)` rather than
+  `Math.random` or another ambient source of nondeterminism.
 
 #### Scenario: Validate one generated tool-call function
 
@@ -131,6 +181,64 @@ capability envelope.
   repair stage
 - **AND** revalidates the replacement without exposing provider data, secrets,
   stack traces, or unrelated artifacts.
+
+#### Scenario: Localize a feasibility rejection
+
+- **WHEN** deterministic feasibility validation rejects an artifact
+- **THEN** the application classifies it as JSON/root, exact field set,
+  protocol, display name, enabled value, schedule, tool selection, runtime
+  grant, presentation grant, outcome contract, or resource limit
+- **AND** uses that controlled category in the bounded repair and sanitized
+  diagnostic, recording its attempt number and argument size while exporting
+  neither the rejected value nor arbitrary validator detail
+- **AND** a debug build may emit only the same controlled attempt metadata to a
+  dedicated Logcat tag for user-initiated local ADB collection.
+
+#### Scenario: Isolate feasibility timeout factors
+
+- **WHEN** the user selects a local feasibility diagnostic probe
+- **THEN** the application runs exactly one fresh-conversation feasibility
+  generation using either full context plus the natural request, compact
+  feasibility context plus the natural request, or compact context plus an
+  explicit implementation control
+- **AND** the report identifies the selected mode and includes only sanitized
+  input byte counts, estimated input characters, context hash, controlled
+  outcome/capture metadata, and monotonic first-event, capture, terminal,
+  watchdog, return, and cleanup-overrun timings
+- **AND** excludes the prompt, context text, generated arguments, raw model
+  output, source, exception text, and stack trace.
+
+#### Scenario: Isolate the production-like algorithm stage
+
+- **WHEN** the user selects the isolated natural algorithm diagnostic
+- **THEN** the application runs exactly one fresh-conversation algorithm
+  generation from an application-owned, normalized achievable feasibility
+  fixture using the production natural prompt, context, schema, and parser
+- **AND** invokes no provider and persists, schedules, or executes nothing
+- **AND** reports only sanitized input/lifecycle signals, controlled outcome,
+  and aggregate callback metadata while excluding prompt, context, generated
+  arguments, provider data, source, exception text, and stack trace.
+
+#### Scenario: Run the production-like pipeline from a cold process
+
+- **WHEN** the user selects the cold complete-pipeline diagnostic
+- **THEN** the application runs only the natural-request staged pipeline using
+  the same compact feasibility context as production
+- **AND** runs no schema characterization case or standalone feasibility probe
+  before it
+- **AND** applies the same validation, repair, deadline, sanitization, and
+  no-persistence rules as the complete matrix pipeline case.
+
+#### Scenario: Observe every complete-pipeline attempt without content
+
+- **WHEN** a complete diagnostic pipeline runs or repairs any stage
+- **THEN** its sanitized report records the stage, stage-local attempt, repair
+  flag, controlled outcome, and monotonic first-event, capture, terminal,
+  watchdog, return, and cleanup-overrun timings for that round
+- **AND** a round with no callback remains distinguishable from captured but
+  invalid output
+- **AND** no prompt, context, generated argument, source, provider result,
+  exception text, or stack trace enters the normal report or controlled Logcat.
 
 #### Scenario: Exhaust repair budget
 
@@ -278,8 +386,11 @@ choose, repair, or reinterpret behavior.
 Authoring prompts, intermediate artifacts, draft source, validation output,
 repair context, and model protocol SHALL remain local and app-private. The
 dedicated authoring exchanges MUST NOT be added to normal Chat history,
-execution logs, diagnostics, reports, analytics, backups, or exports, and tool
-credentials MUST NOT enter model context or stage fields.
+execution logs, sanitized diagnostics, analytics, or backups, and tool
+credentials MUST NOT enter model context or stage fields. The only export
+exception SHALL be an explicitly confirmed raw sidecar for a user-initiated
+diagnostic in a debuggable build; it MUST remain unavailable in release builds
+and MUST NOT create an automatic upload or telemetry path.
 
 #### Scenario: Finish an authoring attempt
 
@@ -287,3 +398,13 @@ credentials MUST NOT enter model context or stage fields.
 - **THEN** every ephemeral stage conversation and in-memory artifact is released
 - **AND** only a user-confirmed normalized program revision and consent record
   may become durable.
+
+#### Scenario: Explicitly export a raw local diagnostic
+
+- **WHEN** a user running a debuggable build explicitly confirms the raw-data
+  warning after a local diagnostic
+- **THEN** the application writes a replace-on-export cache file containing the
+  exact bounded stage inputs and captured tool-argument strings
+- **AND** shares it only through a temporary read grant while leaving the
+  normal report and Logcat sanitized
+- **AND** a release build exposes no equivalent control or raw capture.

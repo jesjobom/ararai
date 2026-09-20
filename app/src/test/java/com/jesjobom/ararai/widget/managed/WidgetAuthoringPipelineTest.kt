@@ -61,6 +61,10 @@ class WidgetAuthoringPipelineTest {
         assertEquals(listOf(CALL_SOURCE, PLAN_SOURCE, RENDER_SOURCE).joinToString("\n\n"), draft.program.source)
         assertEquals(1, modelEngine.loadedModels)
         assertEquals(5, modelEngine.requests.size)
+        val feasibilityPrompt = modelEngine.requests.first().plainChatPrompt
+        assertTrue(feasibilityPrompt.contains("\"outputFields\":[\"events\",\"kind\"]"))
+        assertFalse(feasibilityPrompt.contains("\"canonicalUrl\""))
+        assertTrue(modelEngine.requests[1].plainChatPrompt.contains("\"canonicalUrl\""))
         modelEngine.requests.forEach { request ->
             assertEquals(null, request.chatSessionId)
             assertEquals(1, request.ephemeralTools.size)
@@ -126,13 +130,15 @@ class WidgetAuthoringPipelineTest {
         )
         val javascript = DeterministicPipelineJavaScriptEngine()
         val registry = registry()
+        val progress = mutableListOf<WidgetAuthoringProgress>()
+        val failures = mutableListOf<WidgetAuthoringAttemptFailure>()
         val pipeline = ManagedWidgetAuthoringPipeline(
             WidgetAuthoringPipelineModelController(modelEngine),
             WidgetAuthoringPipelineValidator(registry, javascript),
             WidgetDraftBuilder(registry, JavaScriptWidgetDraftPlanner(javascript)),
             registry,
+            onAttemptFailure = failures::add,
         )
-        val progress = mutableListOf<WidgetAuthoringProgress>()
 
         val result = pipeline.generate(MODEL, INFERENCE, PROMPT, RUNTIME, progress::add)
 
@@ -146,8 +152,20 @@ class WidgetAuthoringPipelineTest {
                 ),
             ),
         )
-        assertTrue(modelEngine.requests[1].plainChatPrompt.contains("InvalidSchema"))
+        assertTrue(modelEngine.requests[1].plainChatPrompt.contains("invalid_feasibility_fields"))
+        assertTrue(modelEngine.requests[1].plainChatPrompt.contains("exactly outcome, message"))
         assertFalse(modelEngine.requests[1].plainChatPrompt.contains("password="))
+        assertEquals(
+            listOf(
+                WidgetAuthoringAttemptFailure(
+                    stage = WidgetAuthoringStage.Feasibility,
+                    attempt = 1,
+                    code = WidgetAuthoringStageFailureCode.InvalidFeasibilityFields,
+                    argumentBytes = 2,
+                ),
+            ),
+            failures,
+        )
     }
 
     @Test
@@ -167,7 +185,7 @@ class WidgetAuthoringPipelineTest {
         assertEquals(
             WidgetAuthoringPipelineResult.StageFailed(
                 WidgetAuthoringStage.Feasibility,
-                WidgetAuthoringStageFailureCode.InvalidSchema,
+                WidgetAuthoringStageFailureCode.InvalidFeasibilityFields,
             ),
             result,
         )
@@ -296,60 +314,24 @@ class WidgetAuthoringPipelineTest {
         )
 
         private fun feasibility(): String = JsonObject().apply {
-            addProperty("protocolVersion", 1)
             addProperty("outcome", "achievable")
-            addProperty("displayName", "Today in history")
-            addProperty("enabled", true)
+            addProperty("message", "Today in history")
             addProperty("periodicIntervalHours", 24)
-            add(
-                "tools",
-                JsonArray().apply {
-                    add(
-                        JsonObject().apply {
-                            addProperty("id", "wikipedia_on_this_day")
-                            addProperty("version", 1)
-                            addProperty("purpose", "Load current-date historical events")
-                        },
-                    )
-                },
-            )
-            add(
-                "runtime",
-                JsonArray().apply {
-                    add("locale")
-                    add("local_time")
-                    add("seed")
-                },
-            )
-            add("presentation", JsonArray().apply { add("text") })
-            add("reason", JsonNull.INSTANCE)
-            add("clarificationQuestion", JsonNull.INSTANCE)
+            add("toolIds", JsonArray().apply { add("wikipedia_on_this_day") })
         }.toString()
 
         private fun unachievable(): String = JsonObject().apply {
-            addProperty("protocolVersion", 1)
             addProperty("outcome", "unachievable")
-            addProperty("displayName", "Unsupported")
-            addProperty("enabled", false)
+            addProperty("message", "No registered operation")
             add("periodicIntervalHours", JsonNull.INSTANCE)
-            add("tools", JsonArray())
-            add("runtime", JsonArray())
-            add("presentation", JsonArray())
-            addProperty("reason", "No registered operation")
-            add("clarificationQuestion", JsonNull.INSTANCE)
+            add("toolIds", JsonArray())
         }.toString()
 
         private fun clarification(): String = JsonObject().apply {
-            addProperty("protocolVersion", 1)
             addProperty("outcome", "needs_clarification")
-            addProperty("displayName", "Evento histórico")
-            addProperty("enabled", false)
+            addProperty("message", "Qual idioma deve ser usado?")
             add("periodicIntervalHours", JsonNull.INSTANCE)
-            add("tools", JsonArray())
-            add("runtime", JsonArray())
-            add("presentation", JsonArray())
-            add("reason", JsonNull.INSTANCE)
-            addProperty("clarificationQuestion", "Qual idioma deve ser usado?")
+            add("toolIds", JsonArray())
         }.toString()
 
         private fun algorithm(): String = JsonObject().apply {

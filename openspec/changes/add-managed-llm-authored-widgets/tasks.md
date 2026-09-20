@@ -256,9 +256,59 @@
 - [x] 11.10 Replace the one-shot-only diagnostic with sanitized per-stage schema
   characterization plus a complete synthetic pipeline run; retain historical
   suite-v2 evidence; report controlled complete-pipeline failure stage/code and
-  per-tool callback count/byte aggregates; and verify reports exclude prompts,
-  algorithms, generated fragments/source, arguments, provider content,
-  arbitrary exceptions, secrets, and stack traces.
+  per-tool callback count/byte aggregates; localize feasibility failures to
+  controlled JSON/root, field-set, protocol, display-name, enabled, schedule,
+  tool, runtime, presentation, or outcome categories shared with bounded repair;
+  report the controlled failure sequence per attempt and emit the same sanitized
+  metadata to a debug-only Logcat tag; and verify both paths exclude prompts,
+  rejected values, algorithms, generated fragments/source, arguments, provider
+  content, arbitrary exceptions, secrets, and stack traces.
+- [x] 11.11 Make the feasibility prompt self-contained about conditional
+  outcome fields, distinguish initial capability selection from later frozen
+  authority, translate controlled repair codes into actionable checked-in
+  guidance, and use an unambiguous current-date historical-event prompt for the
+  complete physical diagnostic; verify the prompt and repair behavior without
+  exposing generated artifacts in diagnostics.
+- [x] 11.12 Replace the ambiguous random-event diagnostic request with one
+  explicit deterministic current-date widget contract, express feasibility as
+  a choose-first outcome decision table, prioritize the supported achievable
+  branch in outcome repair, and version the physical diagnostic as suite v8;
+  verify exact prompt, repair, and sanitized report behavior.
+- [x] 11.13 Move operation and controlled-variation semantics from the user
+  instruction into bounded application context: declare create/edit mode,
+  accept behavior-only instructions, map natural random/varied selection to
+  the `seed` grant and `runtime.seededIndex(length)`, keep `Math.random`
+  unavailable, restore a natural Portuguese physical prompt, and version the
+  changed diagnostic as suite v9; verify context, prompt, and report version.
+- [x] 11.14 Add independent suite-v10 feasibility probes for full-context plus
+  natural prompt, compact-context plus natural prompt, and compact-context plus
+  explicit control prompt; run exactly one generation per selected probe and
+  report only sanitized input sizes/context hash plus first-event, capture,
+  terminal, watchdog, return, and cleanup-overrun timings. Expose each probe
+  separately in the authoring UI so physical A/B runs can start in distinct
+  cold application processes without first heating the device with the schema
+  matrix.
+- [x] 11.15 Promote the physically characterized compact feasibility context to
+  the production pipeline while retaining the full context for later stages;
+  add a suite-v11 cold complete-pipeline diagnostic that runs no schema matrix
+  or feasibility probe first, and verify its request sequence and sanitized
+  reporting independently.
+- [x] 11.16 Add an explicitly confirmed, debug-build-only raw diagnostic
+  sidecar that preserves exact stage instructions, context, schemas, and tool
+  argument bytes in a replace-on-export cache file; keep release builds and the
+  normal report/log path raw-free, and verify opt-in capture plus default
+  absence and sanitized-report non-contamination.
+- [x] 11.17 Use the suite-v11 raw baseline to replace the model-owned ten-field
+  feasibility envelope with a suite-v12 four-field decision (`outcome`,
+  `message`, `periodicIntervalHours`, and `toolIds`); derive protocol metadata,
+  enablement, registered versions, runtime/presentation grants, and terminal
+  normalization in the application; verify strict parsing, controlled repair,
+  terminal normalization, exact raw opt-in, and sanitized default reporting.
+- [x] 11.18 Add a suite-v13 isolated production-like algorithm probe backed by
+  an application-normalized achievable feasibility fixture, and record one
+  sanitized lifecycle entry for every complete-pipeline stage attempt so native
+  stalls, missing callbacks, transport/parser failures, invalid artifacts, and
+  cleanup overruns can be distinguished without exposing model or user content.
 
 ## 12. Revalidate the revised change and release gate
 

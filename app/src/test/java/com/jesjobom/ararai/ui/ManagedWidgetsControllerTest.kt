@@ -135,6 +135,27 @@ class ManagedWidgetsControllerTest {
         assertTrue(scheduler.cancelled.contains(duplicate.id))
     }
 
+    @Test
+    fun `physical diagnostic request uses natural widget behavior language`() {
+        assertEquals(
+            "Mostre um evento aleatório da Wikipédia para o dia e o mês de hoje. " +
+                "Atualize o evento a cada hora.",
+            TOOL_CALLING_DIAGNOSTIC_PROMPT,
+        )
+        assertFalse(TOOL_CALLING_DIAGNOSTIC_PROMPT.contains("widget"))
+        assertFalse(TOOL_CALLING_DIAGNOSTIC_PROMPT.contains("wikipedia_on_this_day"))
+        assertFalse(TOOL_CALLING_DIAGNOSTIC_PROMPT.contains("runtime."))
+    }
+
+    @Test
+    fun `explicit feasibility control prompt fixes implementation without requiring widget wording`() {
+        assertFalse(TOOL_CALLING_DIAGNOSTIC_EXPLICIT_PROMPT.contains("widget"))
+        assertTrue(TOOL_CALLING_DIAGNOSTIC_EXPLICIT_PROMPT.contains("wikipedia_on_this_day@1"))
+        assertTrue(TOOL_CALLING_DIAGNOSTIC_EXPLICIT_PROMPT.contains("runtime.currentLocalDateTime()"))
+        assertTrue(TOOL_CALLING_DIAGNOSTIC_EXPLICIT_PROMPT.contains("runtime.seededIndex"))
+        assertTrue(TOOL_CALLING_DIAGNOSTIC_EXPLICIT_PROMPT.contains("a cada hora"))
+    }
+
     private fun candidate(name: String, enabled: Boolean = false) = ConfirmedWidgetRevision(
         displayName = name,
         enabled = enabled,

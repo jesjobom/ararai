@@ -6,7 +6,6 @@ import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.google.gson.JsonArray
-import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import com.jesjobom.ararai.engine.GenerationEvent
 import com.jesjobom.ararai.engine.LocalLlmEngine
@@ -225,34 +224,10 @@ class ManagedWidgetEndToEndTest {
         override suspend fun unload() = Unit
 
         private fun feasibility(edit: Int): String = JsonObject().apply {
-            addProperty("protocolVersion", 1)
             addProperty("outcome", "achievable")
-            addProperty("displayName", if (edit == 0) "Today in history" else "A historical event today")
-            addProperty("enabled", true)
+            addProperty("message", if (edit == 0) "Today in history" else "A historical event today")
             addProperty("periodicIntervalHours", 24)
-            add(
-                "tools",
-                JsonArray().apply {
-                    add(
-                        JsonObject().apply {
-                            addProperty("id", "wikipedia_on_this_day")
-                            addProperty("version", 1)
-                            addProperty("purpose", "Load events for the current date")
-                        },
-                    )
-                },
-            )
-            add(
-                "runtime",
-                JsonArray().apply {
-                    add("locale")
-                    add("local_time")
-                    add("seed")
-                },
-            )
-            add("presentation", JsonArray().apply { add("text") })
-            add("reason", JsonNull.INSTANCE)
-            add("clarificationQuestion", JsonNull.INSTANCE)
+            add("toolIds", JsonArray().apply { add("wikipedia_on_this_day") })
         }.toString()
 
         private fun algorithm(): String = JsonObject().apply {
