@@ -8,7 +8,9 @@ import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.engine.EphemeralLocalLlmTool
 import com.jesjobom.ararai.engine.GenerationEvent
 import com.jesjobom.ararai.engine.GenerationFailureKind
+import com.jesjobom.ararai.engine.ImmediateLocalLlmRecoveryGate
 import com.jesjobom.ararai.engine.LocalLlmEngine
+import com.jesjobom.ararai.engine.LocalLlmRecoveryGate
 import com.jesjobom.ararai.engine.PromptChatMessage
 import com.jesjobom.ararai.engine.PromptChatRole
 import com.jesjobom.ararai.engine.PromptRequest
@@ -81,6 +83,7 @@ internal enum class WidgetToolCallingDiagnosticMode(
     FeasibilityCompactNatural("feasibility_compact_natural", 1),
     FeasibilityCompactExplicit("feasibility_compact_explicit", 1),
     AlgorithmNatural("algorithm_natural", 1),
+    AlgorithmReloadNatural("algorithm_reload_natural", 1),
     CompletePipelineCompactNatural("complete_pipeline_compact_natural", 1),
 }
 
@@ -491,6 +494,7 @@ internal class WidgetToolCallingDiagnosticRunner(
     private val maxContextTokens: Int = MAX_WIDGET_AUTHORING_CONTEXT_TOKENS,
     private val maxTemperature: Float = MAX_WIDGET_AUTHORING_TEMPERATURE,
     private val caseTimeoutMillis: Long = WIDGET_AUTHORING_TIMEOUT_MILLIS,
+    private val recoveryGate: LocalLlmRecoveryGate = ImmediateLocalLlmRecoveryGate,
 ) {
     init {
         require(maxContextTokens > 0)
@@ -542,6 +546,16 @@ internal class WidgetToolCallingDiagnosticRunner(
                 WidgetToolCallingDiagnosticMode.AlgorithmNatural -> {
                     listOf(runAlgorithmProbeCase(productionPrompt, rawTrace))
                 }
+                WidgetToolCallingDiagnosticMode.AlgorithmReloadNatural -> {
+                    listOf(
+                        runAlgorithmReloadProbeCase(
+                            diagnosticModel,
+                            diagnosticInference,
+                            productionPrompt,
+                            rawTrace,
+                        ),
+                    )
+                }
                 WidgetToolCallingDiagnosticMode.CompletePipelineCompactNatural -> {
                     listOf(runCompletePipelineCase(diagnosticModel, diagnosticInference, productionPrompt, rawTrace))
                 }
@@ -586,6 +600,7 @@ internal class WidgetToolCallingDiagnosticRunner(
     private suspend fun runAlgorithmProbeCase(
         productionPrompt: WidgetAuthoringPrompt,
         rawTrace: DiagnosticRawTraceCollector,
+        id: String = WidgetToolCallingDiagnosticMode.AlgorithmNatural.wireName,
     ): WidgetToolCallingDiagnosticCaseResult {
         val feasibility = algorithmProbeFeasibility()
         val round = WidgetAuthoringRoundRequest(
@@ -596,7 +611,7 @@ internal class WidgetToolCallingDiagnosticRunner(
             contextJson = algorithmContext(productionPrompt, feasibility),
         )
         return runStageProbeCase(
-            WidgetToolCallingDiagnosticMode.AlgorithmNatural.wireName,
+            id,
             round,
             rawTrace,
         ) { raw ->
@@ -604,6 +619,45 @@ internal class WidgetToolCallingDiagnosticRunner(
                 is WidgetAlgorithmParseResult.Valid -> null
                 is WidgetAlgorithmParseResult.Invalid -> parsed.code
             }
+        }
+    }
+
+    private suspend fun runAlgorithmReloadProbeCase(
+        model: LocalModel,
+        inference: InferenceConfig,
+        productionPrompt: WidgetAuthoringPrompt,
+        rawTrace: DiagnosticRawTraceCollector,
+    ): WidgetToolCallingDiagnosticCaseResult {
+        val started = monotonicMillis()
+        return try {
+            if (!engine.reloadWhenReady(model, inference, recoveryGate::awaitReady)) {
+                return WidgetToolCallingDiagnosticCaseResult(
+                    id = WidgetToolCallingDiagnosticMode.AlgorithmReloadNatural.wireName,
+                    passed = false,
+                    outcome = DIAGNOSTIC_CASE_TIMEOUT,
+                    durationMillis = monotonicMillis() - started,
+                    schemaSha256 = sha256(WidgetAuthoringStageSchemas.algorithm),
+                    captures = emptyList(),
+                )
+            }
+            runAlgorithmProbeCase(
+                productionPrompt = productionPrompt,
+                rawTrace = rawTrace,
+                id = WidgetToolCallingDiagnosticMode.AlgorithmReloadNatural.wireName,
+            ).let { result ->
+                result.copy(durationMillis = monotonicMillis() - started)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            WidgetToolCallingDiagnosticCaseResult(
+                id = WidgetToolCallingDiagnosticMode.AlgorithmReloadNatural.wireName,
+                passed = false,
+                outcome = DIAGNOSTIC_GENERATION_FAILED,
+                durationMillis = monotonicMillis() - started,
+                schemaSha256 = sha256(WidgetAuthoringStageSchemas.algorithm),
+                captures = emptyList(),
+            )
         }
     }
 
@@ -772,6 +826,7 @@ internal class WidgetToolCallingDiagnosticRunner(
                 onRawCapture = rawTrace::recordCapture,
                 onRoundLifecycle = roundLifecycles::record,
                 requireDeclaredProtocol = false,
+                recoveryGate = recoveryGate,
             ),
             validator = WidgetAuthoringPipelineValidator(registry, javascriptEngine),
             draftBuilder = WidgetDraftBuilder(
@@ -903,7 +958,7 @@ internal class WidgetToolCallingDiagnosticRunner(
             id = "stage_algorithm_schema",
             toolName = SUBMIT_WIDGET_ALGORITHM_TOOL,
             toolDescriptionJson = WidgetAuthoringStageSchemas.algorithm,
-            systemInstruction = "Call $SUBMIT_WIDGET_ALGORITHM_TOOL exactly once with protocolVersion 1, one tool_call step whose id is lookup, objective is Lookup, empty dependsOn/runtimeInputs, toolId wikipedia_pages, contractVersion 1, and presentationObjective Display result. Do not answer in plain text.",
+            systemInstruction = "Call $SUBMIT_WIDGET_ALGORITHM_TOOL exactly once with protocolVersion 1, one tool_call step whose id is lookup, objective is Lookup, empty dependsOn, toolId wikipedia_pages, and presentationObjective Display result. Do not answer in plain text.",
             userInstruction = "Submit the algorithm diagnostic artifact.",
         ),
         DiagnosticCase(
@@ -1139,7 +1194,7 @@ internal const val DIAGNOSTIC_LOAD_INELIGIBLE = "ineligible_model"
 internal const val DIAGNOSTIC_PIPELINE_INVALID = "pipeline_invalid"
 internal const val DIAGNOSTIC_PIPELINE_TERMINAL = "pipeline_terminal"
 
-private const val DIAGNOSTIC_SUITE_VERSION = 13
+private const val DIAGNOSTIC_SUITE_VERSION = 15
 private const val RAW_DIAGNOSTIC_FORMAT_VERSION = 1
 private const val DIAGNOSTIC_CASE_COUNT = 6
 private const val UNSET_MILLIS = -1L

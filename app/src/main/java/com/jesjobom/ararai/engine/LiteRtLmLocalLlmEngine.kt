@@ -71,6 +71,7 @@ class LiteRtLmLocalLlmEngine(
     private var loadedAuthoringToolNames: Set<String> = emptySet()
     private var loadedUseGpu: Boolean = false
     private var loadedProfile: LiteRtLmWorkloadProfile? = null
+    private val runtimeTelemetry = bridge.runtimeTelemetry
 
     override suspend fun load(
         model: LocalModel,
@@ -113,32 +114,72 @@ class LiteRtLmLocalLlmEngine(
                     }
                     isLoaded
                 }
-            if (alreadyLoaded) return@withLock
+            if (alreadyLoaded) {
+                runtimeTelemetry.record(
+                    event = "engine_load_reused",
+                    resourceId = synchronized(lock) { loadedSession?.let { System.identityHashCode(it) } },
+                    outcome = "success",
+                )
+                return@withLock
+            }
 
-            unloadLocked()
+            replaceSessionLocked(model, config, profile)
+        }
+    }
 
-            // Native loading is not cooperatively cancellable. The ownership transfer must be
-            // non-cancellable too: returning to a cancelled caller before publishing [session]
-            // would orphan the native engine and allow the next screen entry to load another.
-            val session = bridge.load(
-                modelPath = model.filePath,
-                config = config,
-                useGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred,
-                inputCapabilities = model.inputCapabilities,
-                toolNames = model.toolCapabilities.allToolNames,
-                profile = profile,
-            )
+    override suspend fun reload(
+        model: LocalModel,
+        config: InferenceConfig,
+    ) = withContext(dispatcher + NonCancellable) {
+        transitionMutex.withLock {
+            check(model.runtime == ModelRuntime.LiteRtLm) {
+                "Unsupported local model runtime: ${model.runtime.displayName}"
+            }
+            runtimeTelemetry.record(event = "engine_reload_started", elapsedMillis = 0)
+            try {
+                replaceSessionLocked(model, config, LiteRtLmWorkloadProfile.TextOnly)
+                runtimeTelemetry.record(
+                    event = "engine_reload_finished",
+                    resourceId = synchronized(lock) { loadedSession?.let(System::identityHashCode) },
+                    outcome = "success",
+                )
+            } catch (error: Throwable) {
+                runtimeTelemetry.record(event = "engine_reload_finished", outcome = "failed")
+                throw error
+            }
+        }
+    }
 
-            synchronized(lock) {
-                loadedSession = session
-                loadedModelId = model.id
-                loadedModelPath = model.filePath
-                loadedConfig = config
-                loadedInputCapabilities = model.inputCapabilities
-                loadedToolNames = model.toolCapabilities.toolNames
-                loadedAuthoringToolNames = model.toolCapabilities.allowedAuthoringToolNames
-                loadedUseGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred
-                loadedProfile = profile
+    override suspend fun reloadWhenReady(
+        model: LocalModel,
+        config: InferenceConfig,
+        awaitReady: suspend () -> Boolean,
+    ): Boolean = withContext(dispatcher) {
+        transitionMutex.withLock {
+            check(model.runtime == ModelRuntime.LiteRtLm) {
+                "Unsupported local model runtime: ${model.runtime.displayName}"
+            }
+            runtimeTelemetry.record(event = "engine_recovery_started", elapsedMillis = 0)
+            try {
+                withContext(NonCancellable) { unloadLocked() }
+                runtimeTelemetry.record(event = "engine_recovery_unloaded", outcome = "success")
+                if (!awaitReady()) {
+                    runtimeTelemetry.record(event = "engine_recovery_finished", outcome = "timed_out")
+                    return@withLock false
+                }
+                runtimeTelemetry.record(event = "engine_recovery_reload_started", elapsedMillis = 0)
+                withContext(NonCancellable) {
+                    replaceSessionLocked(model, config, LiteRtLmWorkloadProfile.TextOnly)
+                }
+                runtimeTelemetry.record(
+                    event = "engine_recovery_finished",
+                    resourceId = synchronized(lock) { loadedSession?.let(System::identityHashCode) },
+                    outcome = "success",
+                )
+                true
+            } catch (error: Throwable) {
+                runtimeTelemetry.record(event = "engine_recovery_finished", outcome = "failed")
+                throw error
             }
         }
     }
@@ -229,6 +270,43 @@ class LiteRtLmLocalLlmEngine(
                 session.close()
             }
         }
+    }
+
+    private suspend fun replaceSessionLocked(
+        model: LocalModel,
+        config: InferenceConfig,
+        profile: LiteRtLmWorkloadProfile,
+    ) {
+        unloadLocked()
+
+        // Native loading is not cooperatively cancellable. The ownership transfer must be
+        // non-cancellable too: returning to a cancelled caller before publishing [session]
+        // would orphan the native engine and allow the next screen entry to load another.
+        val session = bridge.load(
+            modelPath = model.filePath,
+            config = config,
+            useGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred,
+            inputCapabilities = model.inputCapabilities,
+            toolNames = model.toolCapabilities.allToolNames,
+            profile = profile,
+        )
+
+        synchronized(lock) {
+            loadedSession = session
+            loadedModelId = model.id
+            loadedModelPath = model.filePath
+            loadedConfig = config
+            loadedInputCapabilities = model.inputCapabilities
+            loadedToolNames = model.toolCapabilities.toolNames
+            loadedAuthoringToolNames = model.toolCapabilities.allowedAuthoringToolNames
+            loadedUseGpu = model.acceleration == ModelAccelerationPolicy.GpuPreferred
+            loadedProfile = profile
+        }
+        runtimeTelemetry.record(
+            event = "engine_load_published",
+            resourceId = System.identityHashCode(session),
+            outcome = "success",
+        )
     }
 
     private data class LoadedState(
@@ -336,6 +414,15 @@ private fun expectedGenerationFailure(message: String) = GenerationEvent.Failed(
     kind = GenerationFailureKind.Expected,
 )
 
+private fun generationOutcome(
+    completed: Boolean,
+    errored: Boolean,
+): String = when {
+    completed -> "completed"
+    errored -> "failed"
+    else -> "cancelled"
+}
+
 internal fun Throwable.toGenerationFailure(): GenerationEvent.Failed {
     val failureMessage = message ?: "LiteRT-LM generation failed"
     return GenerationEvent.Failed(
@@ -353,6 +440,9 @@ private const val TOOL_CALL_PARSE_MARKER = "Failed to parse tool calls"
 
 @Suppress("LongParameterList")
 interface LiteRtLmBridge {
+    val runtimeTelemetry: LiteRtLmRuntimeTelemetry
+        get() = LiteRtLmRuntimeTelemetry.disabled()
+
     suspend fun load(
         modelPath: String,
         config: InferenceConfig,
@@ -412,6 +502,7 @@ class AndroidLiteRtLmBridge(
     private val webSearchDisplayNameProvider: () -> String = {
         webSearchKnowledgeToolResolver.resolve()?.displayName ?: "Web search"
     },
+    override val runtimeTelemetry: LiteRtLmRuntimeTelemetry = LiteRtLmRuntimeTelemetry.disabled(),
 ) : LiteRtLmBridge {
     private val toolDispatcher = applicationToolDispatcher ?: modelApplicationToolDispatcher(
         wikipediaTool = wikipediaKnowledgeTool,
@@ -428,6 +519,7 @@ class AndroidLiteRtLmBridge(
         profile: LiteRtLmWorkloadProfile,
     ): LiteRtLmSession {
         val startedAt = System.nanoTime()
+        runtimeTelemetry.record(event = "engine_initialize_started", elapsedMillis = 0)
         ExperimentalFlags.enableBenchmark = true
         ExperimentalFlags.enableSpeculativeDecoding = true
         val backend = if (useGpu) Backend.GPU() else Backend.CPU()
@@ -449,13 +541,26 @@ class AndroidLiteRtLmBridge(
                 "Engine initialized: id=${System.identityHashCode(engine)}, " +
                     "profile=$profile, elapsed=${startedAt.elapsedMillis()} ms",
             )
+            runtimeTelemetry.record(
+                event = "engine_initialized",
+                resourceId = System.identityHashCode(engine),
+                elapsedMillis = startedAt.elapsedMillis(),
+                outcome = "success",
+            )
             AndroidLiteRtLmSession(
                 engine,
                 toolDispatcher,
                 webSearchDisplayNameProvider,
                 toolNames,
+                runtimeTelemetry,
             )
         } catch (error: Throwable) {
+            runtimeTelemetry.record(
+                event = "engine_initialize_finished",
+                resourceId = System.identityHashCode(engine),
+                elapsedMillis = startedAt.elapsedMillis(),
+                outcome = "failed",
+            )
             engine.close()
             throw error
         }
@@ -474,11 +579,20 @@ private class AndroidLiteRtLmSession(
     private val toolDispatcher: ApplicationToolDispatcher,
     private val webSearchDisplayNameProvider: () -> String,
     private val supportedToolNames: Set<String>,
+    private val runtimeTelemetry: LiteRtLmRuntimeTelemetry,
 ) : LiteRtLmSession {
     private val conversations =
         RetainedResourceOwner<Conversation, RetainedConversationState>(
-            cancelResource = Conversation::cancelProcess,
-            closeResource = Conversation::close,
+            cancelResource = { conversation ->
+                runtimeTelemetry.recordResourceOperation("conversation_cancel", conversation) {
+                    conversation.cancelProcess()
+                }
+            },
+            closeResource = { conversation ->
+                runtimeTelemetry.recordResourceOperation("conversation_close", conversation) {
+                    conversation.close()
+                }
+            },
         )
 
     override fun generate(
@@ -486,6 +600,8 @@ private class AndroidLiteRtLmSession(
         config: InferenceConfig,
     ): Flow<LiteRtLmChunk> = callbackFlow {
         val generationStartedAt = System.nanoTime()
+        val requestId = runtimeTelemetry.beginRequest()
+        val requestFinished = AtomicBoolean(false)
         val samplerConfig =
             SamplerConfig(
                 topK = DEFAULT_TOP_K,
@@ -503,29 +619,19 @@ private class AndroidLiteRtLmSession(
                 advertisedToolNames = request.normalizedAdvertisedToolNames(),
             )
         val historyBeforeCurrent = request.historyBeforeCurrent()
-        val retained = conversations.retained()
-        val canReuse =
-            retained != null &&
-                canReuseLiteRtLmConversation(
-                    retainedKey = retained.state.key,
-                    retainedTranscript = retained.state.transcript,
-                    requestKey = key,
-                    requestHistory = historyBeforeCurrent,
-                )
-        val created =
-            if (canReuse) {
-                ProductionConversation(
-                    conversation = retained.resource,
-                    wikipediaTool = retained.state.wikipediaTool,
-                    structuredWikipediaTools = retained.state.structuredWikipediaTools,
-                    webSearchTool = retained.state.webSearchTool,
-                    calculatorTool = retained.state.calculatorTool,
-                )
-            } else {
-                retained?.resource?.let { conversations.invalidate(it, cancelFirst = false) }
-                createProductionConversation(request, historyBeforeCurrent, samplerConfig)
-            }
+        val selectionInput = ProductionConversationSelectionInput(
+            request = request,
+            historyBeforeCurrent = historyBeforeCurrent,
+            samplerConfig = samplerConfig,
+            key = key,
+            requestId = requestId,
+            generationStartedAt = generationStartedAt,
+        )
+        val selected = selectProductionConversationOrFinish(selectionInput, requestFinished)
+        val created = selected.value
+        val canReuse = selected.reused
         val conversation = created.conversation
+        val conversationId = System.identityHashCode(conversation)
         created.wikipediaTool?.beginTurn { event ->
             trySend(
                 LiteRtLmChunk(
@@ -577,8 +683,16 @@ private class AndroidLiteRtLmSession(
             LOG_TAG,
             "Conversation ready: reused=$canReuse, elapsed=${generationStartedAt.elapsedMillis()} ms",
         )
+        runtimeTelemetry.record(
+            event = "conversation_ready",
+            requestId = requestId,
+            resourceId = conversationId,
+            elapsedMillis = generationStartedAt.elapsedMillis(),
+        )
         val reusable = key.sessionId != null
         val completed = AtomicBoolean(false)
+        val errored = AtomicBoolean(false)
+        val firstCallbackObserved = AtomicBoolean(false)
 
         try {
             conversations.activate(conversation)
@@ -587,8 +701,14 @@ private class AndroidLiteRtLmSession(
             val callback =
                 object : MessageCallback {
                     override fun onMessage(message: Message) {
-                        if (previousText.isEmpty() && previousReasoning.isEmpty()) {
+                        if (firstCallbackObserved.compareAndSet(false, true)) {
                             Log.d(LOG_TAG, "First model callback: ${generationStartedAt.elapsedMillis()} ms")
+                            runtimeTelemetry.record(
+                                event = "first_model_callback",
+                                requestId = requestId,
+                                resourceId = conversationId,
+                                elapsedMillis = generationStartedAt.elapsedMillis(),
+                            )
                         }
                         val currentText = message.text()
                         val currentReasoning = message.reasoning()
@@ -602,6 +722,13 @@ private class AndroidLiteRtLmSession(
                     }
 
                     override fun onDone() {
+                        runtimeTelemetry.record(
+                            event = "model_done",
+                            requestId = requestId,
+                            resourceId = conversationId,
+                            elapsedMillis = generationStartedAt.elapsedMillis(),
+                            outcome = "success",
+                        )
                         runCatching { conversation.getBenchmarkInfo() }
                             .onFailure { error ->
                                 Log.w("ArarAI.LiteRtLm", "Unable to read LiteRT-LM benchmark metrics", error)
@@ -645,67 +772,133 @@ private class AndroidLiteRtLmSession(
                     }
 
                     override fun onError(throwable: Throwable) {
+                        errored.set(true)
+                        runtimeTelemetry.record(
+                            event = "model_error",
+                            requestId = requestId,
+                            resourceId = conversationId,
+                            elapsedMillis = generationStartedAt.elapsedMillis(),
+                            outcome = "failed",
+                        )
                         close(throwable)
                     }
                 }
 
             conversation.sendMessageAsync(request.toCurrentLiteRtContents(), callback)
             Log.d(LOG_TAG, "Audio request submitted: ${generationStartedAt.elapsedMillis()} ms")
+            runtimeTelemetry.record(
+                event = "request_submitted",
+                requestId = requestId,
+                resourceId = conversationId,
+                elapsedMillis = generationStartedAt.elapsedMillis(),
+            )
         } catch (error: Throwable) {
+            errored.set(true)
+            runtimeTelemetry.record(
+                event = "request_setup_failed",
+                requestId = requestId,
+                resourceId = conversationId,
+                elapsedMillis = generationStartedAt.elapsedMillis(),
+                outcome = "failed",
+            )
             close(error)
         }
 
         awaitClose {
-            if (!completed.get()) {
-                conversations.invalidate(conversation, cancelFirst = true)
-            } else if (!reusable) {
-                conversations.invalidate(conversation, cancelFirst = false)
+            val outcome = generationOutcome(completed.get(), errored.get())
+            runtimeTelemetry.record(
+                event = "generation_cleanup_started",
+                requestId = requestId,
+                resourceId = conversationId,
+                elapsedMillis = generationStartedAt.elapsedMillis(),
+                outcome = outcome,
+            )
+            try {
+                if (!completed.get()) {
+                    conversations.invalidate(conversation, cancelFirst = true)
+                } else if (!reusable) {
+                    conversations.invalidate(conversation, cancelFirst = false)
+                }
+            } finally {
+                finishRuntimeRequestOnce(requestFinished, requestId, generationStartedAt, outcome)
             }
         }
+    }
+
+    private fun selectProductionConversationOrFinish(
+        input: ProductionConversationSelectionInput,
+        requestFinished: AtomicBoolean,
+    ): SelectedProductionConversation = try {
+        selectProductionConversation(input)
+    } catch (error: Throwable) {
+        finishRuntimeRequestOnce(requestFinished, input.requestId, input.generationStartedAt, "failed")
+        throw error
+    }
+
+    private fun selectProductionConversation(
+        input: ProductionConversationSelectionInput,
+    ): SelectedProductionConversation {
+        val retained = conversations.retained()
+        val canReuse = retained != null && canReuseLiteRtLmConversation(
+            retainedKey = retained.state.key,
+            retainedTranscript = retained.state.transcript,
+            requestKey = input.key,
+            requestHistory = input.historyBeforeCurrent,
+        )
+        if (canReuse) {
+            val reusableConversation = checkNotNull(retained)
+            runtimeTelemetry.record(
+                event = "conversation_reused",
+                requestId = input.requestId,
+                resourceId = System.identityHashCode(reusableConversation.resource),
+                elapsedMillis = input.generationStartedAt.elapsedMillis(),
+            )
+            return SelectedProductionConversation(reusableConversation.toProductionConversation(), reused = true)
+        }
+        retained?.resource?.let { conversations.invalidate(it, cancelFirst = false) }
+        return SelectedProductionConversation(
+            createProductionConversation(
+                input.request,
+                input.historyBeforeCurrent,
+                input.samplerConfig,
+                input.requestId,
+            ),
+            reused = false,
+        )
+    }
+
+    private fun finishRuntimeRequestOnce(
+        requestFinished: AtomicBoolean,
+        requestId: Long,
+        generationStartedAt: Long,
+        outcome: String,
+    ) {
+        if (!requestFinished.compareAndSet(false, true)) return
+        runtimeTelemetry.finishRequest(
+            requestId = requestId,
+            elapsedMillis = generationStartedAt.elapsedMillis(),
+            outcome = outcome,
+        )
     }
 
     private fun createProductionConversation(
         request: PromptRequest,
         historyBeforeCurrent: List<PromptChatMessage>,
         samplerConfig: SamplerConfig,
+        requestId: Long,
     ): ProductionConversation {
-        val requested = request.normalizedAdvertisedToolNames()
-        requireSupportedTools(requested)
-        val wikipediaTool =
-            if (WIKIPEDIA_SEARCH_TOOL_NAME in requested) {
-                WikipediaOpenApiTool(toolDispatcher, supportedToolNames)
-            } else {
-                null
-            }
-        val structuredWikipediaTools = createStructuredWikipediaTools(requested)
-        val webSearchTool =
-            if (WEB_SEARCH_TOOL_NAME in requested) {
-                WebSearchOpenApiTool(
-                    dispatcher = toolDispatcher,
-                    verifiedModelToolIds = supportedToolNames,
-                    displayName = webSearchDisplayNameProvider(),
-                )
-            } else {
-                null
-            }
-        val calculatorTool =
-            if (CALCULATOR_TOOL_NAME in requested) {
-                CalculatorOpenApiTool(toolDispatcher, supportedToolNames)
-            } else {
-                null
-            }
-        val ephemeralTools = request.ephemeralTools.map(::EphemeralOpenApiTool)
-        val configuredTools =
-            listOfNotNull(
-                wikipediaTool?.let(::tool),
-                webSearchTool?.let(::tool),
-                calculatorTool?.let(::tool),
-            ) + structuredWikipediaTools.map(::tool) + ephemeralTools.map(::tool)
-        if (configuredTools.isNotEmpty()) {
+        val startedAt = System.nanoTime()
+        runtimeTelemetry.record(
+            event = "conversation_create_started",
+            requestId = requestId,
+            elapsedMillis = 0,
+        )
+        val tools = createProductionConversationTools(request)
+        if (tools.configured.isNotEmpty()) {
             ExperimentalFlags.enableConversationConstrainedDecoding = true
         }
         return try {
-            ProductionConversation(
+            val productionConversation = ProductionConversation(
                 conversation =
                 engine.createConversation(
                     ConversationConfig(
@@ -713,19 +906,67 @@ private class AndroidLiteRtLmSession(
                         initialMessages = historyBeforeCurrent.toLiteRtMessages(),
                         samplerConfig = samplerConfig,
                         extraContext = mapOf(ENABLE_THINKING_CONTEXT_KEY to request.reasoningEnabled),
-                        tools = configuredTools,
+                        tools = tools.configured,
                     ),
                 ),
-                wikipediaTool = wikipediaTool,
-                structuredWikipediaTools = structuredWikipediaTools,
-                webSearchTool = webSearchTool,
-                calculatorTool = calculatorTool,
+                wikipediaTool = tools.wikipedia,
+                structuredWikipediaTools = tools.structuredWikipedia,
+                webSearchTool = tools.webSearch,
+                calculatorTool = tools.calculator,
             )
+            runtimeTelemetry.record(
+                event = "conversation_create_finished",
+                requestId = requestId,
+                resourceId = System.identityHashCode(productionConversation.conversation),
+                elapsedMillis = startedAt.elapsedMillis(),
+                outcome = "success",
+            )
+            productionConversation
+        } catch (error: Throwable) {
+            runtimeTelemetry.record(
+                event = "conversation_create_finished",
+                requestId = requestId,
+                elapsedMillis = startedAt.elapsedMillis(),
+                outcome = "failed",
+            )
+            throw error
         } finally {
-            if (configuredTools.isNotEmpty()) {
+            if (tools.configured.isNotEmpty()) {
                 ExperimentalFlags.enableConversationConstrainedDecoding = false
             }
         }
+    }
+
+    private fun createProductionConversationTools(request: PromptRequest): ProductionConversationTools {
+        val requested = request.normalizedAdvertisedToolNames()
+        requireSupportedTools(requested)
+        val wikipedia = if (WIKIPEDIA_SEARCH_TOOL_NAME in requested) {
+            WikipediaOpenApiTool(toolDispatcher, supportedToolNames)
+        } else {
+            null
+        }
+        val structuredWikipedia = createStructuredWikipediaTools(requested)
+        val webSearch = if (WEB_SEARCH_TOOL_NAME in requested) {
+            WebSearchOpenApiTool(
+                dispatcher = toolDispatcher,
+                verifiedModelToolIds = supportedToolNames,
+                displayName = webSearchDisplayNameProvider(),
+            )
+        } else {
+            null
+        }
+        val calculator = if (CALCULATOR_TOOL_NAME in requested) {
+            CalculatorOpenApiTool(toolDispatcher, supportedToolNames)
+        } else {
+            null
+        }
+        return ProductionConversationTools(
+            wikipedia = wikipedia,
+            structuredWikipedia = structuredWikipedia,
+            webSearch = webSearch,
+            calculator = calculator,
+            ephemeral = request.ephemeralTools.map(::EphemeralOpenApiTool),
+        )
     }
 
     private fun requireSupportedTools(requested: Set<String>) {
@@ -734,6 +975,31 @@ private class AndroidLiteRtLmSession(
         }
     }
 
+    private fun RetainedResource<
+        Conversation,
+        RetainedConversationState,
+        >.toProductionConversation() = ProductionConversation(
+        conversation = resource,
+        wikipediaTool = state.wikipediaTool,
+        structuredWikipediaTools = state.structuredWikipediaTools,
+        webSearchTool = state.webSearchTool,
+        calculatorTool = state.calculatorTool,
+    )
+
+    private data class ProductionConversationSelectionInput(
+        val request: PromptRequest,
+        val historyBeforeCurrent: List<PromptChatMessage>,
+        val samplerConfig: SamplerConfig,
+        val key: LiteRtLmConversationKey,
+        val requestId: Long,
+        val generationStartedAt: Long,
+    )
+
+    private data class SelectedProductionConversation(
+        val value: ProductionConversation,
+        val reused: Boolean,
+    )
+
     private data class ProductionConversation(
         val conversation: Conversation,
         val wikipediaTool: WikipediaOpenApiTool?,
@@ -741,6 +1007,20 @@ private class AndroidLiteRtLmSession(
         val webSearchTool: WebSearchOpenApiTool?,
         val calculatorTool: CalculatorOpenApiTool?,
     )
+
+    private data class ProductionConversationTools(
+        val wikipedia: WikipediaOpenApiTool?,
+        val structuredWikipedia: List<WikipediaStructuredOpenApiTool>,
+        val webSearch: WebSearchOpenApiTool?,
+        val calculator: CalculatorOpenApiTool?,
+        val ephemeral: List<EphemeralOpenApiTool>,
+    ) {
+        val configured = listOfNotNull(
+            wikipedia?.let(::tool),
+            webSearch?.let(::tool),
+            calculator?.let(::tool),
+        ) + structuredWikipedia.map(::tool) + ephemeral.map(::tool)
+    }
 
     private fun createStructuredWikipediaTools(requested: Set<String>): List<WikipediaStructuredOpenApiTool> {
         val budget = WikipediaModelToolBudget()
@@ -769,13 +1049,16 @@ private class AndroidLiteRtLmSession(
     }
 
     override fun cancel() {
+        runtimeTelemetry.record(event = "session_cancel_requested")
         conversations.cancelActive()
     }
 
     override fun close() {
         Log.d(LOG_TAG, "Engine closing: id=${System.identityHashCode(engine)}")
-        conversations.closeAll()
-        engine.close()
+        runtimeTelemetry.recordResourceOperation("engine_close", engine) {
+            conversations.closeAll()
+            engine.close()
+        }
     }
 
     private fun Message.text(): String = contents.contents

@@ -59,8 +59,19 @@ class WidgetAuthoringPipelineTest {
         val draft = (result as WidgetAuthoringPipelineResult.DraftReady).draft
         assertEquals(listOf("events_call"), draft.plannedCalls.map { it.alias })
         assertEquals(listOf(CALL_SOURCE, PLAN_SOURCE, RENDER_SOURCE).joinToString("\n\n"), draft.program.source)
-        assertEquals(1, modelEngine.loadedModels)
+        assertEquals(5, modelEngine.loadedModels)
+        assertEquals(4, modelEngine.unloadedModels)
         assertEquals(5, modelEngine.requests.size)
+        assertEquals(
+            listOf(
+                "load",
+                "generate:$SUBMIT_WIDGET_FEASIBILITY_TOOL",
+                "unload",
+                "load",
+                "generate:$SUBMIT_WIDGET_ALGORITHM_TOOL",
+            ),
+            modelEngine.operations.take(5),
+        )
         val feasibilityPrompt = modelEngine.requests.first().plainChatPrompt
         assertTrue(feasibilityPrompt.contains("\"outputFields\":[\"events\",\"kind\"]"))
         assertFalse(feasibilityPrompt.contains("\"canonicalUrl\""))
@@ -71,6 +82,7 @@ class WidgetAuthoringPipelineTest {
             assertEquals(request.advertisedToolNames.single(), request.ephemeralTools.single().name)
         }
         assertTrue(progress.contains(WidgetAuthoringProgress.ValidatingAssembly))
+        assertEquals(4, progress.count { it == WidgetAuthoringProgress.WaitingForDeviceRecovery })
         assertEquals(WidgetAuthoringProgress.DraftReady, progress.last())
         assertFalse(modelEngine.requests.any { it.advertisedToolNames.contains("wikipedia_on_this_day") })
     }
@@ -144,6 +156,8 @@ class WidgetAuthoringPipelineTest {
 
         assertTrue(result is WidgetAuthoringPipelineResult.DraftReady)
         assertEquals(6, modelEngine.requests.size)
+        assertEquals(6, modelEngine.loadedModels)
+        assertEquals(5, modelEngine.unloadedModels)
         assertTrue(
             progress.contains(
                 WidgetAuthoringProgress.Repairing(
@@ -195,6 +209,29 @@ class WidgetAuthoringPipelineTest {
     }
 
     @Test
+    fun `recovery timeout stops before the next stage while leaving the model unloaded`() = runTest {
+        val modelEngine = QueueStageEngine(mutableListOf(feasibility()))
+        val javascript = DeterministicPipelineJavaScriptEngine()
+        val registry = registry()
+        val progress = mutableListOf<WidgetAuthoringProgress>()
+        val pipeline = ManagedWidgetAuthoringPipeline(
+            WidgetAuthoringPipelineModelController(modelEngine, recoveryGate = { false }),
+            WidgetAuthoringPipelineValidator(registry, javascript),
+            WidgetDraftBuilder(registry, JavaScriptWidgetDraftPlanner(javascript)),
+            registry,
+        )
+
+        val result = pipeline.generate(MODEL, INFERENCE, PROMPT, RUNTIME, progress::add)
+
+        assertEquals(WidgetAuthoringPipelineResult.TimedOut, result)
+        assertEquals(1, modelEngine.loadedModels)
+        assertEquals(1, modelEngine.unloadedModels)
+        assertEquals(1, modelEngine.requests.size)
+        assertTrue(progress.contains(WidgetAuthoringProgress.WaitingForDeviceRecovery))
+        assertFalse(progress.contains(WidgetAuthoringProgress.ReloadingModel))
+    }
+
+    @Test
     fun `historical one-shot marker does not make the model eligible`() = runTest {
         val modelEngine = QueueStageEngine(mutableListOf(feasibility()))
         val javascript = DeterministicPipelineJavaScriptEngine()
@@ -218,21 +255,28 @@ class WidgetAuthoringPipelineTest {
 
     private class QueueStageEngine(private val artifacts: MutableList<String>) : LocalLlmEngine {
         var loadedModels = 0
+        var unloadedModels = 0
         val requests = mutableListOf<PromptRequest>()
+        val operations = mutableListOf<String>()
 
         override suspend fun load(model: LocalModel, config: InferenceConfig) {
             loadedModels++
+            operations += "load"
             assertEquals(MAX_WIDGET_AUTHORING_CONTEXT_TOKENS, config.contextTokens)
             assertEquals(MAX_WIDGET_AUTHORING_TEMPERATURE, config.temperature)
         }
 
         override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
             requests += request
+            operations += "generate:${request.advertisedToolNames.single()}"
             request.ephemeralTools.single().execute(artifacts.removeAt(0))
             emit(GenerationEvent.Completed)
         }
 
-        override suspend fun unload() = Unit
+        override suspend fun unload() {
+            unloadedModels++
+            operations += "unload"
+        }
     }
 
     private class DeterministicPipelineJavaScriptEngine : WidgetJavaScriptEngine {

@@ -57,7 +57,7 @@ class WidgetToolCallingDiagnosticTest {
         assertTrue(engine.requests.all { it.ephemeralTools.single().name in EXPECTED_STAGE_TOOLS })
 
         val encoded = report.toCanonicalJson()
-        assertEquals(13, JsonParser.parseString(encoded).asJsonObject.get("suiteVersion").asInt)
+        assertEquals(15, JsonParser.parseString(encoded).asJsonObject.get("suiteVersion").asInt)
         assertTrue(encoded.contains("\"containsRawModelOutput\":false"))
         assertTrue(encoded.contains("\"failureStage\":null"))
         assertTrue(encoded.contains("\"failureCode\":null"))
@@ -173,6 +173,26 @@ class WidgetToolCallingDiagnosticTest {
         assertEquals(WidgetAuthoringStage.Algorithm, invalid.failureStage)
         assertEquals(WidgetAuthoringStageFailureCode.InvalidAlgorithm, invalid.failureCode)
         assertEquals(2L, invalid.attemptFailures.single().argumentBytes)
+    }
+
+    @Test
+    fun `recovery algorithm probe unloads waits and reloads once before isolated generation`() = runTest {
+        val engine = DiagnosticFakeEngine(DiagnosticMode.Pass)
+
+        val report = runner(engine).run(
+            model(),
+            INFERENCE,
+            prompt("private reload algorithm prompt marker"),
+            environment(),
+            WidgetToolCallingDiagnosticMode.AlgorithmReloadNatural,
+        )
+
+        assertTrue(report.toCanonicalJson(), report.overallPassed)
+        assertEquals("algorithm_reload_natural", report.mode.wireName)
+        assertEquals(2, engine.loadCount)
+        assertEquals(1, engine.unloadCount)
+        assertEquals(SUBMIT_WIDGET_ALGORITHM_TOOL, engine.requests.single().ephemeralTools.single().name)
+        assertEquals("algorithm_reload_natural", report.cases.single().id)
     }
 
     @Test
@@ -513,10 +533,13 @@ private enum class DiagnosticMode {
 
 private class DiagnosticFakeEngine(private val mode: DiagnosticMode) : LocalLlmEngine {
     var loadedInference: InferenceConfig? = null
+    var loadCount = 0
+    var unloadCount = 0
     val requests = mutableListOf<PromptRequest>()
 
     override suspend fun load(model: LocalModel, config: InferenceConfig) {
         if (mode == DiagnosticMode.LoadFailure) error(RAW_EXCEPTION_MARKER)
+        loadCount += 1
         loadedInference = config
     }
 
@@ -558,7 +581,9 @@ private class DiagnosticFakeEngine(private val mode: DiagnosticMode) : LocalLlmE
         }
     }
 
-    override suspend fun unload() = Unit
+    override suspend fun unload() {
+        unloadCount += 1
+    }
 
     private fun pipelineArtifact(toolName: String): String = when (toolName) {
         SUBMIT_WIDGET_FEASIBILITY_TOOL -> feasibilityArtifact()

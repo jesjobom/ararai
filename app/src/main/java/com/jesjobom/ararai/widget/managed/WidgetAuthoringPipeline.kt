@@ -82,20 +82,24 @@ internal class ManagedWidgetAuthoringPipeline(
         when (modelController.prepare(model, inference)) {
             WidgetAuthoringModelPreparationResult.Ineligible -> return WidgetAuthoringPipelineResult.ModelUnavailable
             WidgetAuthoringModelPreparationResult.LoadFailed -> return WidgetAuthoringPipelineResult.ModelLoadFailed
+            WidgetAuthoringModelPreparationResult.RecoveryTimedOut -> return WidgetAuthoringPipelineResult.TimedOut
             WidgetAuthoringModelPreparationResult.Ready -> Unit
         }
         val budget = WidgetAuthoringAttemptBudget()
+        val generationRecovery = WidgetAuthoringGenerationRecovery(modelController, model, inference)
         val availableTools = widgetContracts().keys
 
         onProgress(WidgetAuthoringProgress.AnalyzingFeasibility)
         val feasibility = captureValidated(
             model = model,
             stage = WidgetAuthoringStage.Feasibility,
+            stageProgress = WidgetAuthoringProgress.AnalyzingFeasibility,
             toolName = SUBMIT_WIDGET_FEASIBILITY_TOOL,
             schema = WidgetAuthoringStageSchemas.feasibility,
             objective = "Decide feasibility and select the minimum fixed capability envelope for the user's widget.",
             baseContext = baseContext(prompt),
             budget = budget,
+            generationRecovery = generationRecovery,
             onProgress = onProgress,
         ) { raw ->
             when (val parsed = WidgetFeasibilityParser.parse(raw, availableTools)) {
@@ -120,11 +124,13 @@ internal class ManagedWidgetAuthoringPipeline(
         val algorithm = captureValidated(
             model = model,
             stage = WidgetAuthoringStage.Algorithm,
+            stageProgress = WidgetAuthoringProgress.DesigningAlgorithm,
             toolName = SUBMIT_WIDGET_ALGORITHM_TOOL,
             schema = WidgetAuthoringStageSchemas.algorithm,
             objective = "Design an ordered typed algorithm inside the frozen capability envelope. Tool calls may not depend on live tool results.",
             baseContext = algorithmContext(prompt, feasibility),
             budget = budget,
+            generationRecovery = generationRecovery,
             onProgress = onProgress,
         ) { raw ->
             when (val parsed = WidgetAlgorithmParser.parse(raw, feasibility)) {
@@ -141,11 +147,13 @@ internal class ManagedWidgetAuthoringPipeline(
             val fragment = captureValidated(
                 model = model,
                 stage = WidgetAuthoringStage.CallFunction,
+                stageProgress = WidgetAuthoringProgress.GeneratingCall(index + 1, algorithm.toolCallSteps.size),
                 toolName = SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
                 schema = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_CALL_FUNCTION_TOOL),
                 objective = "Generate exactly function $functionName(runtime). It must return alias '${step.id}', fixed tool '${step.tool?.id}' version ${step.tool?.version}, and contract-valid arguments. Use runtime.currentLocalDateTime() for current date/time.",
                 baseContext = callContext(prompt, feasibility, algorithm, step),
                 budget = budget,
+                generationRecovery = generationRecovery,
                 onProgress = onProgress,
             ) { raw ->
                 when (
@@ -176,11 +184,13 @@ internal class ManagedWidgetAuthoringPipeline(
         val planFunction = captureValidated(
             model = model,
             stage = WidgetAuthoringStage.PlanFunction,
+            stageProgress = WidgetAuthoringProgress.GeneratingPlan,
             toolName = SUBMIT_WIDGET_PLAN_FUNCTION_TOOL,
             schema = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_PLAN_FUNCTION_TOOL),
             objective = "Generate exactly function plan(runtime). Return one ordered array that calls each frozen call-function signature exactly once; do not reproduce or rewrite those functions.",
             baseContext = planContext(prompt, feasibility, algorithm, callFunctions),
             budget = budget,
+            generationRecovery = generationRecovery,
             onProgress = onProgress,
         ) { raw ->
             when (
@@ -210,11 +220,13 @@ internal class ManagedWidgetAuthoringPipeline(
         val renderFunction = captureValidated(
             model = model,
             stage = WidgetAuthoringStage.RenderFunction,
+            stageProgress = WidgetAuthoringProgress.GeneratingPresentation,
             toolName = SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
             schema = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_RENDER_FUNCTION_TOOL),
             objective = "Generate exactly function render(runtime, outcomes, state). Return one allowed presentation for success, empty, and failure outcomes with link provenance when a link is shown.",
             baseContext = renderContext(prompt, feasibility, algorithm),
             budget = budget,
+            generationRecovery = generationRecovery,
             onProgress = onProgress,
         ) { raw ->
             when (
@@ -260,11 +272,13 @@ internal class ManagedWidgetAuthoringPipeline(
     private suspend fun <T> captureValidated(
         model: LocalModel,
         stage: WidgetAuthoringStage,
+        stageProgress: WidgetAuthoringProgress,
         toolName: String,
         schema: String,
         objective: String,
         baseContext: String,
         budget: WidgetAuthoringAttemptBudget,
+        generationRecovery: WidgetAuthoringGenerationRecovery,
         onProgress: (WidgetAuthoringProgress) -> Unit,
         validate: suspend (String) -> StageValidation<T>,
     ): CaptureResult<T> {
@@ -273,14 +287,15 @@ internal class ManagedWidgetAuthoringPipeline(
         var attempt = 0
         while (budget.consumeGeneration(isRepair = repairCode != null)) {
             attempt++
-            if (repairCode != null) {
-                onProgress(
-                    WidgetAuthoringProgress.Repairing(
-                        stage,
-                        budget.repairCount(),
-                    ),
-                )
+            val roundProgress = if (repairCode == null) {
+                stageProgress
+            } else {
+                WidgetAuthoringProgress.Repairing(stage, budget.repairCount())
             }
+            generationRecovery.prepare(onProgress)?.let {
+                return CaptureResult.Failure(it)
+            }
+            onProgress(roundProgress)
             val request = WidgetAuthoringRoundRequest(
                 stage = stage,
                 toolName = toolName,
@@ -364,6 +379,34 @@ internal class ManagedWidgetAuthoringPipeline(
     private inline fun <T> CaptureResult<T>.valueOrReturn(onFailure: (WidgetAuthoringPipelineResult) -> Nothing): T = when (this) {
         is CaptureResult.Value -> value
         is CaptureResult.Failure -> onFailure(result)
+    }
+}
+
+private class WidgetAuthoringGenerationRecovery(
+    private val modelController: WidgetAuthoringPipelineModelController,
+    private val model: LocalModel,
+    private val inference: InferenceConfig,
+) {
+    private var generationStarted = false
+
+    suspend fun prepare(
+        onProgress: (WidgetAuthoringProgress) -> Unit,
+    ): WidgetAuthoringPipelineResult? {
+        if (!generationStarted) {
+            generationStarted = true
+            return null
+        }
+        onProgress(WidgetAuthoringProgress.WaitingForDeviceRecovery)
+        return when (
+            modelController.recoverForNextGeneration(model, inference) {
+                onProgress(WidgetAuthoringProgress.ReloadingModel)
+            }
+        ) {
+            WidgetAuthoringModelPreparationResult.Ready -> null
+            WidgetAuthoringModelPreparationResult.Ineligible -> WidgetAuthoringPipelineResult.ModelUnavailable
+            WidgetAuthoringModelPreparationResult.LoadFailed -> WidgetAuthoringPipelineResult.ModelLoadFailed
+            WidgetAuthoringModelPreparationResult.RecoveryTimedOut -> WidgetAuthoringPipelineResult.TimedOut
+        }
     }
 }
 
@@ -588,7 +631,6 @@ private fun WidgetAlgorithmStep.toJson(): JsonObject = JsonObject().apply {
     add("dependsOn", JsonArray().apply { dependencies.forEach(::add) })
     add("toolId", tool?.id?.let(::JsonPrimitive) ?: JsonNull.INSTANCE)
     add("contractVersion", tool?.version?.let(::JsonPrimitive) ?: JsonNull.INSTANCE)
-    add("runtimeInputs", JsonArray().apply { runtimeInputs.map { it.wireName }.sorted().forEach(::add) })
 }
 
 private fun WidgetDraftFailureCode.toPipelineFailure(): WidgetAuthoringStageFailureCode = when (this) {

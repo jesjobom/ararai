@@ -462,6 +462,8 @@
     <string name="widget_authoring_needs_clarification">São necessárias mais informações: %1$s</string>
     <string name="widget_authoring_stage_failed">A etapa %1$s falhou na validação controlada (%2$s). Nada foi salvo nem executado.</string>
     <string name="widget_authoring_stage_feasibility">Analisando viabilidade e selecionando ferramentas…</string>
+    <string name="widget_authoring_stage_device_recovery">Modelo descarregado. Aguardando temperatura e memória do aparelho estabilizarem…</string>
+    <string name="widget_authoring_stage_model_reload">Recarregando o modelo local para a próxima geração…</string>
     <string name="widget_authoring_stage_algorithm">Definindo o algoritmo…</string>
     <string name="widget_authoring_stage_call">Gerando chamada de ferramenta %1$d de %2$d…</string>
     <string name="widget_authoring_stage_plan">Gerando a orquestração…</string>
@@ -481,9 +483,11 @@
     <string name="widget_tool_diagnostic_probe_compact">Probe · contexto compacto + prompt natural</string>
     <string name="widget_tool_diagnostic_probe_explicit">Probe · contexto compacto + prompt explícito</string>
     <string name="widget_tool_diagnostic_probe_algorithm">Probe · algoritmo semelhante à produção</string>
+    <string name="widget_tool_diagnostic_probe_algorithm_reload">Probe · descarregar + esfriar + algoritmo</string>
     <string name="widget_tool_diagnostic_pipeline_cold">Executar pipeline completo frio</string>
     <string name="widget_tool_diagnostic_probe_running">Executando um probe de viabilidade. Mantenha o ArarAI aberto até o relatório ficar pronto.</string>
     <string name="widget_tool_diagnostic_algorithm_running">Executando um probe de algoritmo semelhante à produção. Mantenha o ArarAI aberto até o relatório ficar pronto.</string>
+    <string name="widget_tool_diagnostic_algorithm_reload_running">Descarregando o modelo, aguardando temperatura e memória estabilizarem e executando um probe de algoritmo semelhante à produção. Mantenha o ArarAI aberto até o relatório ficar pronto.</string>
     <string name="widget_tool_diagnostic_pipeline_running">Executando o pipeline completo semelhante à produção desde uma partida fria. Mantenha o ArarAI aberto até o relatório ficar pronto.</string>
     <string name="widget_tool_diagnostic_running">Executando até cinco casos. Mantenha o ArarAI aberto até o relatório ficar pronto. A matriz para após um timeout.</string>
     <string name="widget_tool_diagnostic_internal_failure">Não foi possível criar o relatório sanitizado do diagnóstico.</string>

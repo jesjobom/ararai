@@ -113,6 +113,85 @@ class WidgetAuthoringPipelineContractsTest {
     }
 
     @Test
+    fun `algorithm ignores tool metadata on steps that cannot invoke tools`() {
+        val artifact = algorithm().apply {
+            getAsJsonArray("steps").first().asJsonObject.apply {
+                addProperty("toolId", TOOL.id)
+                addProperty("contractVersion", TOOL.version)
+            }
+            getAsJsonArray("steps").add(
+                JsonObject().apply {
+                    addProperty("id", "render_event")
+                    addProperty("kind", "transform")
+                    addProperty("objective", "Render the selected event")
+                    add("dependsOn", JsonArray().apply { add("events_call") })
+                    add("toolId", JsonNull.INSTANCE)
+                    addProperty("contractVersion", TOOL.version)
+                    add("runtimeInputs", JsonArray())
+                },
+            )
+        }
+
+        val parsed = WidgetAlgorithmParser.parse(artifact.toString(), validFeasibility())
+
+        assertTrue(parsed is WidgetAlgorithmParseResult.Valid)
+        val steps = (parsed as WidgetAlgorithmParseResult.Valid).artifact.steps
+        assertEquals(null, steps.single { it.id == "current_date" }.tool)
+        assertEquals(null, steps.single { it.id == "render_event" }.tool)
+        assertEquals(TOOL, steps.single { it.id == "events_call" }.tool)
+    }
+
+    @Test
+    fun `algorithm derives runtime authority and ignores legacy model runtime labels`() {
+        val artifact = algorithm().apply {
+            getAsJsonArray("steps").first().asJsonObject.apply {
+                remove("toolId")
+                remove("contractVersion")
+            }
+            getAsJsonArray("steps").last().asJsonObject.add(
+                "runtimeInputs",
+                JsonArray().apply {
+                    add("month")
+                    add("day")
+                    add("locale")
+                },
+            )
+        }
+
+        val parsed = WidgetAlgorithmParser.parse(artifact.toString(), validFeasibility())
+
+        assertTrue(parsed is WidgetAlgorithmParseResult.Valid)
+        assertEquals(false, WidgetAuthoringStageSchemas.algorithm.contains("runtimeInputs"))
+    }
+
+    @Test
+    fun `algorithm derives tool version from the frozen envelope`() {
+        val artifact = algorithm().apply {
+            getAsJsonArray("steps").last().asJsonObject.apply {
+                remove("contractVersion")
+            }
+        }
+
+        val parsed = WidgetAlgorithmParser.parse(artifact.toString(), validFeasibility())
+
+        assertTrue(parsed is WidgetAlgorithmParseResult.Valid)
+        assertEquals(TOOL, (parsed as WidgetAlgorithmParseResult.Valid).artifact.toolCallSteps.single().tool)
+        assertEquals(false, WidgetAuthoringStageSchemas.algorithm.contains("contractVersion"))
+    }
+
+    @Test
+    fun `algorithm still rejects unknown fields on steps without tools`() {
+        val artifact = algorithm().apply {
+            getAsJsonArray("steps").first().asJsonObject.addProperty("endpoint", "https://example.com")
+        }
+
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(artifact.toString(), validFeasibility()),
+        )
+    }
+
+    @Test
     fun `algorithm rejects duplicate cyclic invented and live-result-dependent steps`() {
         val duplicate = algorithm().apply {
             getAsJsonArray("steps").add(getAsJsonArray("steps").last().deepCopy())

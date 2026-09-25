@@ -207,7 +207,6 @@ internal data class WidgetAlgorithmStep(
     val objective: String,
     val dependencies: List<String>,
     val tool: WidgetToolCapability?,
-    val runtimeInputs: Set<WidgetRuntimeValue>,
 )
 
 internal data class WidgetAlgorithmArtifact(
@@ -236,16 +235,17 @@ internal object WidgetAlgorithmParser {
         ).requiredObject()
         root.requireFields("protocolVersion", "steps", "presentationObjective")
         require(root.requiredInt("protocolVersion") == WIDGET_AUTHORING_PROTOCOL_VERSION)
-        val steps = root.requiredArray("steps").map { element -> parseStep(element.requiredObject()) }
+        val selectedTools = envelope.tools.map { it.capability }.toSet()
+        val steps = root.requiredArray("steps").map { element ->
+            parseStep(element.requiredObject(), selectedTools)
+        }
         require(steps.isNotEmpty() && steps.size <= WidgetAuthoringPipelinePolicy.MAX_ALGORITHM_STEPS)
         require(steps.map { it.id }.toSet().size == steps.size)
         validateDependencies(steps)
-        val selectedTools = envelope.tools.map { it.capability }.toSet()
         val calls = steps.filter { it.kind == WidgetAlgorithmStepKind.ToolCall }
         require(calls.size <= WidgetAuthoringPipelinePolicy.MAX_TOOLS)
         require(calls.all { it.tool in selectedTools })
         require(calls.map { it.tool }.toSet() == selectedTools)
-        require(steps.flatMap { it.runtimeInputs }.all { it in envelope.runtimeValues })
         rejectLiveResultDependentCalls(steps)
         WidgetAlgorithmParseResult.Valid(
             WidgetAlgorithmArtifact(steps, root.requiredString("presentationObjective").boundedText()),
@@ -254,19 +254,24 @@ internal object WidgetAlgorithmParser {
         WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm)
     }
 
-    private fun parseStep(step: JsonObject): WidgetAlgorithmStep {
-        step.requireFields("id", "kind", "objective", "dependsOn", "toolId", "contractVersion", "runtimeInputs")
+    private fun parseStep(
+        step: JsonObject,
+        selectedTools: Set<WidgetToolCapability>,
+    ): WidgetAlgorithmStep {
+        require(
+            step.keySet().all {
+                it in setOf("id", "kind", "objective", "dependsOn", "toolId", "contractVersion", "runtimeInputs")
+            },
+        )
         val id = step.requiredString("id")
         require(ALGORITHM_STEP_ID_PATTERN.matches(id))
         val kind = WidgetAlgorithmStepKind.entries.single { it.wireName == step.requiredString("kind") }
         val dependencies = step.requiredArray("dependsOn").map { it.asString }
         require(dependencies.toSet().size == dependencies.size)
-        val toolId = step.strictNullableString("toolId", 64)
-        val contractVersion = step.strictNullableInt("contractVersion")
         val tool = if (kind == WidgetAlgorithmStepKind.ToolCall) {
-            WidgetToolCapability(requireNotNull(toolId), requireNotNull(contractVersion))
+            val toolId = requireNotNull(step.strictNullableString("toolId", 64))
+            selectedTools.single { it.id == toolId }
         } else {
-            require(toolId == null && contractVersion == null)
             null
         }
         return WidgetAlgorithmStep(
@@ -275,8 +280,6 @@ internal object WidgetAlgorithmParser {
             objective = step.requiredString("objective").boundedText(),
             dependencies = dependencies,
             tool = tool,
-            runtimeInputs = step.requiredArray("runtimeInputs")
-                .strictEnumSet(WidgetRuntimeValue.entries) { it.wireName },
         )
     }
 
@@ -419,6 +422,8 @@ internal data class WidgetAuthoringAttemptFailure(
 
 internal sealed interface WidgetAuthoringProgress {
     data object AnalyzingFeasibility : WidgetAuthoringProgress
+    data object WaitingForDeviceRecovery : WidgetAuthoringProgress
+    data object ReloadingModel : WidgetAuthoringProgress
     data object DesigningAlgorithm : WidgetAuthoringProgress
     data class GeneratingCall(val index: Int, val count: Int) : WidgetAuthoringProgress
     data object GeneratingPlan : WidgetAuthoringProgress
@@ -458,7 +463,7 @@ internal data class WidgetAuthoringAttemptBudget(
 internal object WidgetAuthoringStageSchemas {
     val feasibility: String = """{"name":"$SUBMIT_WIDGET_FEASIBILITY_TOOL","description":"Submit one small feasibility decision. The application derives protocol metadata, tool versions, runtime grants, presentation grants, enablement, and terminal normalization.","parameters":{"type":"object","additionalProperties":false,"properties":{"outcome":{"type":"string","enum":["achievable","unachievable","needs_clarification"]},"message":{"type":"string","minLength":1,"maxLength":512},"periodicIntervalHours":{"type":["integer","null"],"enum":[null,1,6,12,24]},"toolIds":{"type":"array","maxItems":4,"uniqueItems":true,"items":{"type":"string"}}},"required":["outcome","message","periodicIntervalHours","toolIds"]}}"""
 
-    val algorithm: String = """{"name":"$SUBMIT_WIDGET_ALGORITHM_TOOL","description":"Submit one bounded typed algorithm. This captures data only.","parameters":{"type":"object","additionalProperties":false,"properties":{"protocolVersion":{"type":"integer","const":1},"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"kind":{"type":"string","enum":["runtime_input","transform","tool_call"]},"objective":{"type":"string","minLength":1,"maxLength":512},"dependsOn":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"toolId":{"type":["string","null"]},"contractVersion":{"type":["integer","null"]},"runtimeInputs":{"type":"array","uniqueItems":true,"items":{"type":"string","enum":["locale","timezone","local_time","seed"]}}},"required":["id","kind","objective","dependsOn","toolId","contractVersion","runtimeInputs"]}},"presentationObjective":{"type":"string","minLength":1,"maxLength":512}},"required":["protocolVersion","steps","presentationObjective"]}}"""
+    val algorithm: String = """{"name":"$SUBMIT_WIDGET_ALGORITHM_TOOL","description":"Submit one bounded typed algorithm. Runtime authority and tool versions are application-derived. This captures data only.","parameters":{"type":"object","additionalProperties":false,"properties":{"protocolVersion":{"type":"integer","const":1},"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"kind":{"type":"string","enum":["runtime_input","transform","tool_call"]},"objective":{"type":"string","minLength":1,"maxLength":512},"dependsOn":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"toolId":{"type":["string","null"],"description":"Required only when kind is tool_call; otherwise omit."}},"required":["id","kind","objective","dependsOn"]}},"presentationObjective":{"type":"string","minLength":1,"maxLength":512}},"required":["protocolVersion","steps","presentationObjective"]}}"""
 
     fun sourceFragment(toolName: String): String = """{"name":"$toolName","description":"Submit one bounded JavaScript function artifact. This captures source only and executes nothing.","parameters":{"type":"object","additionalProperties":false,"properties":{"protocolVersion":{"type":"integer","const":1},"artifactId":{"type":"string"},"functionName":{"type":"string"},"inputNames":{"type":"array","items":{"type":"string"}},"source":{"type":"string","minLength":1,"maxLength":6144}},"required":["protocolVersion","artifactId","functionName","inputNames","source"]}}"""
 }
@@ -479,10 +484,6 @@ private fun JsonObject.strictNullableLong(name: String): Long? {
     require(value.isJsonPrimitive && value.asJsonPrimitive.isNumber)
     return value.asBigDecimal.longValueExact()
 }
-
-private fun JsonObject.strictNullableInt(name: String): Int? = strictNullableLong(name)?.also {
-    require(it in Int.MIN_VALUE..Int.MAX_VALUE)
-}?.toInt()
 
 private fun JsonObject.strictNullableString(name: String, maximum: Int): String? {
     val value = get(name) ?: error("Missing nullable string")

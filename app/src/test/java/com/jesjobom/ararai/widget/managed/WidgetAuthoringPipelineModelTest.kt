@@ -39,6 +39,42 @@ class WidgetAuthoringPipelineModelTest {
     }
 
     @Test
+    fun `generation boundary unloads waits and reloads with the fixed authoring configuration`() = runTest {
+        val engine = RecordingStageEngine(wait = false)
+        var recoveryCalls = 0
+        val controller = WidgetAuthoringPipelineModelController(
+            engine,
+            recoveryGate = {
+                recoveryCalls++
+                true
+            },
+        )
+
+        assertEquals(WidgetAuthoringModelPreparationResult.Ready, controller.prepare(MODEL, INFERENCE))
+        assertEquals(WidgetAuthoringModelPreparationResult.Ready, controller.recoverForNextGeneration(MODEL, INFERENCE))
+
+        assertEquals(2, engine.loadCalls)
+        assertEquals(1, engine.unloadCalls)
+        assertEquals(1, recoveryCalls)
+        assertEquals(MAX_WIDGET_AUTHORING_CONTEXT_TOKENS, engine.loadedConfig?.contextTokens)
+        assertEquals(WidgetAuthoringPipelinePolicy.OUTPUT_RESERVE_TOKENS, engine.loadedConfig?.promptReserveTokens)
+        assertEquals(MAX_WIDGET_AUTHORING_TEMPERATURE, engine.loadedConfig?.temperature)
+    }
+
+    @Test
+    fun `generation boundary remains unloaded when recovery times out`() = runTest {
+        val engine = RecordingStageEngine(wait = false)
+        val controller = WidgetAuthoringPipelineModelController(engine, recoveryGate = { false })
+        controller.prepare(MODEL, INFERENCE)
+
+        val result = controller.recoverForNextGeneration(MODEL, INFERENCE)
+
+        assertEquals(WidgetAuthoringModelPreparationResult.RecoveryTimedOut, result)
+        assertEquals(1, engine.loadCalls)
+        assertEquals(1, engine.unloadCalls)
+    }
+
+    @Test
     fun `stage refuses an input that cannot fit beside the reserved output`() = runTest {
         val engine = RecordingStageEngine(wait = false)
         val controller = WidgetAuthoringPipelineModelController(engine, maxContextTokens = 1_600)
@@ -172,10 +208,13 @@ class WidgetAuthoringPipelineModelTest {
 
     private class RecordingStageEngine(private val wait: Boolean) : LocalLlmEngine {
         var loadedConfig: InferenceConfig? = null
+        var loadCalls = 0
+        var unloadCalls = 0
         var released = false
         val requests = mutableListOf<PromptRequest>()
 
         override suspend fun load(model: LocalModel, config: InferenceConfig) {
+            loadCalls++
             loadedConfig = config
         }
 
@@ -197,7 +236,9 @@ class WidgetAuthoringPipelineModelTest {
             }
         }
 
-        override suspend fun unload() = Unit
+        override suspend fun unload() {
+            unloadCalls++
+        }
     }
 
     companion object {

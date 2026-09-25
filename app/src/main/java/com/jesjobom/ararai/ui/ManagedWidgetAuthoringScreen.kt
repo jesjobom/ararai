@@ -380,6 +380,12 @@ private fun ToolCallingDiagnosticCard(
                         onRun = onRun,
                     )
                     DiagnosticRunButton(
+                        label = R.string.widget_tool_diagnostic_probe_algorithm_reload,
+                        mode = WidgetToolCallingDiagnosticMode.AlgorithmReloadNatural,
+                        enabled = modelAvailable,
+                        onRun = onRun,
+                    )
+                    DiagnosticRunButton(
                         label = R.string.widget_tool_diagnostic_pipeline_cold,
                         mode = WidgetToolCallingDiagnosticMode.CompletePipelineCompactNatural,
                         enabled = modelAvailable,
@@ -403,6 +409,8 @@ private fun ToolCallingDiagnosticCard(
                                     R.string.widget_tool_diagnostic_pipeline_running
                                 WidgetToolCallingDiagnosticMode.AlgorithmNatural ->
                                     R.string.widget_tool_diagnostic_algorithm_running
+                                WidgetToolCallingDiagnosticMode.AlgorithmReloadNatural ->
+                                    R.string.widget_tool_diagnostic_algorithm_reload_running
                                 else -> R.string.widget_tool_diagnostic_probe_running
                             },
                         ),
@@ -690,6 +698,8 @@ private fun WidgetAuthoringErrorMessage(error: WidgetAuthoringError) {
 @Composable
 private fun WidgetAuthoringProgress.label(): String = when (this) {
     WidgetAuthoringProgress.AnalyzingFeasibility -> stringResource(R.string.widget_authoring_stage_feasibility)
+    WidgetAuthoringProgress.WaitingForDeviceRecovery -> stringResource(R.string.widget_authoring_stage_device_recovery)
+    WidgetAuthoringProgress.ReloadingModel -> stringResource(R.string.widget_authoring_stage_model_reload)
     WidgetAuthoringProgress.DesigningAlgorithm -> stringResource(R.string.widget_authoring_stage_algorithm)
     is WidgetAuthoringProgress.GeneratingCall -> stringResource(R.string.widget_authoring_stage_call, index, count)
     WidgetAuthoringProgress.GeneratingPlan -> stringResource(R.string.widget_authoring_stage_plan)

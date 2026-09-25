@@ -179,6 +179,14 @@ The base pipeline is:
    arguments may depend on immutable runtime/state inputs but not on live
    provider results because confirmed v1 execution retains the existing
    plan-all, dispatch, then render boundary.
+
+   Runtime authority is not represented by model-authored per-step fields.
+   The application derives it once from the validated feasibility envelope and
+   supplies that runtime API to later code stages. The algorithm schema omits
+   `runtimeInputs`; the parser accepts and discards that field only as legacy
+   wire compatibility. The model selects only a frozen tool ID for a tool-call
+   step; the application resolves its exact frozen version. Legacy
+   `contractVersion` values are ignored, and non-tool steps omit tool metadata.
 3. **Tool-call functions.** Generate one bounded named JavaScript function per
    planned call. A function receives only the versioned runtime stdlib snapshot
    and explicitly declared inputs and returns one semantic call object for its
@@ -210,7 +218,10 @@ are:
 - `WidgetAlgorithmArtifact`: protocol version and ordered steps with unique ID,
   kind, objective, dependency IDs, and fixed tool/version for tool-call steps;
   dependencies must be acyclic and cannot bind a live provider result into a
-  later call;
+  later call. The shared wire step shape carries nullable tool metadata for all
+  kinds, but only `tool_call` consumes it as authority. Runtime-input and
+  transform steps normalize those values away because they cannot invoke a
+  tool; unknown fields and every real tool identity/version remain strict;
 - `WidgetSourceFragmentArtifact`: protocol version, application-assigned
   artifact/function identity, declared input names, and one bounded function
   source. The stage prompt fixes the signature, responsibility, tool/version,
@@ -256,6 +267,28 @@ explicitly declares them; the complete stage input plus bounded output reserve
 must fit before generation starts. Physical evidence from the one-shot flow
 showed that 2,048 tokens caused reproducible no-call failures while 4,096
 restored the E4B structured transport.
+
+Every model generation after the first feasibility attempt is an explicit
+native-lifecycle recovery boundary, including repairs. The application closes
+the selected LiteRT-LM model, leaves the engine unloaded while a bounded
+cancelable gate samples temperature and memory pressure, and reloads the same
+fixed authoring configuration and text-only workload only after the gate is
+stable. The Android gate requires three consecutive five-second samples with
+thermal status `NONE`, battery temperature at or below 32 C, process PSS at or
+below 1 GiB, at least 20 percent system memory available, and no system
+low-memory signal. Unknown platform signals do not block the remaining known
+signals. A boundary times out after three minutes and leaves the model unloaded.
+
+Unload, wait, and replacement publication are serialized with other engine
+ownership changes. Native unload/load ownership transfer completes
+non-cancellably, while the cooling wait remains cancellable so navigation does
+not keep a hidden authoring attempt alive. The UI and sanitized runtime
+telemetry expose unload/wait/reload as distinct phases. Terminal `unachievable`
+and `needs_clarification` decisions return without paying another recovery
+cost. This diagnostic-first policy intentionally trades substantial latency for
+a controlled test of the cumulative memory, swap, conversation-creation, and
+thermal degradation observed physically; model eligibility remains disabled
+until the complete pipeline succeeds under this policy.
 
 The deterministic runtime standard library presents fresh execution-time
 values through an immutable API such as `runtime.currentLocalDateTime()` and
@@ -338,6 +371,27 @@ watchdog, return, and cleanup overrun. Together these signals distinguish a
 native generation stall, no callback, transport/parser rejection, and captured
 but structurally invalid output without placing raw content in the normal report
 or Logcat.
+
+Debug LiteRT-LM sessions additionally emit sanitized native lifecycle telemetry
+under the existing runtime Logcat tag. Process-local request/resource IDs
+correlate engine initialization or reuse, conversation create/reuse, request
+submission, first callback, terminal callback, cancellation, close, and final
+cleanup. Every event records the current active-generation count and, when
+available, process thread count, RSS, swap, and Android thermal status. An
+explicit warning event is emitted when more than one native generation is
+active. This telemetry contains no model ID/path, prompt, generated content,
+tool arguments, exception messages, provider data, or stack trace, and is not
+persisted or uploaded. It distinguishes model reload from conversation churn,
+concurrent consumers, resource pressure, and blocking native cleanup without
+changing authoring behavior.
+
+Discarded native conversation wrappers are tracked by weak object identity.
+This retains exactly-once cancel/close semantics while a wrapper is reachable,
+without turning duplicate-disposal protection into a process-lifetime strong
+reference registry. Debug lifecycle snapshots include total/native PSS,
+native/Java heap, available system memory, and low-memory state in addition to
+RSS, swap, threads, and thermal status, so close-time release can be compared
+without recording model or user content.
 
 For diagnosing model/schema mismatches that controlled codes cannot identify,
 debug builds may retain an in-memory raw trace only for the user-initiated

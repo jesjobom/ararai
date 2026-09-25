@@ -100,8 +100,10 @@ import com.jesjobom.ararai.chat.conversationTurnSettings
 import com.jesjobom.ararai.engine.AndroidLiteRtLmBridge
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.LiteRtLmLocalLlmEngine
+import com.jesjobom.ararai.engine.LiteRtLmRuntimeTelemetry
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.WebSearchKnowledgeToolResolver
+import com.jesjobom.ararai.engine.androidLocalLlmRecoveryGate
 import com.jesjobom.ararai.knowledge.FallbackKnowledgeTool
 import com.jesjobom.ararai.knowledge.InMemoryWebSearchPreferences
 import com.jesjobom.ararai.knowledge.ToolSmokeTestResult
@@ -262,9 +264,22 @@ internal fun ArarAiApp(
     val applicationToolDispatcher = remember(applicationToolRegistry) {
         ApplicationToolDispatcher(applicationToolRegistry)
     }
+    val liteRtLmRuntimeTelemetry = remember(appContext) {
+        LiteRtLmRuntimeTelemetry.android(
+            context = appContext,
+            enabled = com.jesjobom.ararai.BuildConfig.DEBUG,
+        )
+    }
+    val localLlmRecoveryGate = remember(appContext) {
+        androidLocalLlmRecoveryGate(
+            context = appContext,
+            telemetryEnabled = com.jesjobom.ararai.BuildConfig.DEBUG,
+        )
+    }
     val effectiveLocalLlmEngineFactory = remember(
         localLlmEngineFactory,
         applicationToolDispatcher,
+        liteRtLmRuntimeTelemetry,
         liteRtLmCacheDir,
         wikipediaTool,
         webSearchResolver,
@@ -283,6 +298,7 @@ internal fun ArarAiApp(
                         webSearchPreferences.settings.value.preferredProvider?.displayName
                             ?: "Web search"
                     },
+                    runtimeTelemetry = liteRtLmRuntimeTelemetry,
                 ),
             )
         }
@@ -363,8 +379,10 @@ internal fun ArarAiApp(
     val chatViewModel = controllers.chat
     val benchmarkViewModel = controllers.benchmark
     val voiceChatViewModel = controllers.voiceChat
-    val managedWidgetsController = remember(managedWidgetServices, controllers.runtime.engine) {
-        managedWidgetServices?.let { ManagedWidgetsController(it, controllers.runtime.engine) }
+    val managedWidgetsController = remember(managedWidgetServices, controllers.runtime.engine, localLlmRecoveryGate) {
+        managedWidgetServices?.let {
+            ManagedWidgetsController(it, controllers.runtime.engine, recoveryGate = localLlmRecoveryGate)
+        }
     }
     val diagnosticErrorState by diagnosticErrorReportCoordinator
         ?.state

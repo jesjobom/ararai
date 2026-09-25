@@ -184,12 +184,70 @@ probe. Force-stop and thermally normalize the device before selecting it. A
 pass characterizes the cold end-to-end path but does not replace the complete
 matrix required for model eligibility.
 
+Suite v14 adds `algorithm_reload_natural`, a debug-only isolated probe that
+loads the selected model, performs the same atomic unload/reload used at the
+production feasibility-to-algorithm boundary, and then runs exactly one natural
+production-like algorithm generation from the normalized feasibility fixture.
+It distinguishes reload lifecycle correctness from feasibility variability and
+from the algorithm callback itself without granting model eligibility.
+
+Suite v15 changes that probe and the complete pipeline to use the bounded
+generation-recovery policy. After the first generation, the app unloads the
+model and leaves it unloaded until three consecutive five-second samples show
+thermal status `NONE`, battery temperature no higher than 32 degrees C, process
+PSS no higher than 1 GiB, at least 20 percent system memory available, and no
+Android low-memory signal. The wait is cancelable and times out after three
+minutes; timeout leaves the engine unloaded and ends the attempt. A successful
+gate reloads the fixed authoring profile before the next stage or repair. The
+`algorithm_reload_natural` wire name remains stable, but in suite v15 it means
+`unload + recovery gate + reload + algorithm` rather than immediate reload.
+
+### 2026-09-25 suite-v15 recovery-barrier validation
+
+- Tester: JIA DEV, automated over ADB.
+- Device: Samsung Galaxy S22 (`SM-S901E`), Android 16 / API 36, arm64-v8a.
+- Artifact: debug app version `v202609250850`, SHA-256
+  `9b0887a6f57b6dcaac6573aa52ce01bc09ccbf5452d53c738ef83fdcb6a9dc82`.
+- Cold isolated `algorithm_reload_natural`: **pass** in 93,378 ms. Initial
+  model load took 18,619 ms. The engine closed in 1,557 ms, PSS fell from
+  about 4.11 GiB to 252 MiB, and three ready samples completed the recovery
+  gate in 10.1 seconds at 24.8 degrees C with PSS between 203 and 254 MiB.
+  Reload took 19,012 ms, the algorithm conversation was created in 3,191 ms,
+  and the model produced a valid terminal callback after 54,328 ms.
+- Cold `complete_pipeline_compact_natural`: **controlled failure** in 253,128
+  ms. The first feasibility callback was rejected only for
+  `invalid_feasibility_display_name`; its repair produced a captured callback.
+  Before the next generation, the engine closed and PSS fell from about 4.26
+  GiB to about 200 MiB. Battery temperature initially rose to 34.9 degrees C
+  after unload and reached only 32.8 degrees C before the three-minute gate
+  timeout. The gate emitted `engine_recovery_finished outcome=timed_out`, did
+  not reload the model, and left the engine unloaded.
+- Interpretation: unload/recovery/reload sequencing and memory release are
+  physically validated. The barrier prevents a new generation while its
+  thermal policy is unsatisfied. The current 32-degree/three-minute policy can
+  terminate a screen-on multi-stage authoring run even after memory has
+  recovered, so this is negative end-to-end eligibility evidence rather than a
+  successful complete-pipeline qualification.
+
 Every complete-pipeline report also includes one sanitized lifecycle record per
 stage attempt: stage, stage-local attempt, repair flag, controlled outcome,
 first generation event, tool capture, terminal event, watchdog, method return,
 and post-watchdog cleanup overrun. A timeout with no callback is therefore
 distinguishable from invalid captured output. These records contain no prompt,
 context, generated argument, exception text, provider result, or source.
+
+Debug builds now add sanitized native runtime events under the
+`ArarAI.LiteRtLm` Logcat tag. Lines beginning with `runtime event=` include a
+process-local request/resource ID, active-generation count, event duration or
+outcome, thread count, RSS KiB, swap KiB, and Android thermal status when
+available. The event sequence covers engine initialization/reuse, conversation
+creation/reuse, request submission, first/terminal model callback, cancellation,
+close, and final cleanup. `concurrent_generation_detected` means more than one
+native generation was active at once. These lines exclude model identifiers and
+paths, prompts, generated content, tool arguments, exception messages, provider
+data, and stack traces. Correlate them by monotonic order with the sanitized
+per-stage `ArarAI.WidgetDiagnostic` lifecycle lines; do not infer stage identity
+from a runtime request ID alone.
 
 For a physical A/B comparison, force-stop ArarAI and let the device return to a
 recorded thermal baseline before each probe. Launch the app, select exactly one
@@ -384,6 +442,234 @@ The application still derives protocol metadata, enablement, eligible tool
 versions, deterministic runtime grants, allowlisted presentation grants, and
 terminal normalization. The suite-v10 through suite-v12 physical evidence below
 remains immutable for each exact APK and context pair.
+
+The first physical suite-v13 `algorithm_natural` probe used the SM-S901E,
+debug app version `202609200141`, APK SHA-256
+`c550a70afb22a99e9bfa816b428ab2922af94e961a2e3ff86fd084a91f9cf966`,
+and E4B artifact SHA-256
+`0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0`.
+Model load passed in 17,665 ms. The isolated generation produced one 540-byte
+callback at 15,450 ms, reached its terminal event at 16,397 ms, and returned at
+16,398 ms without watchdog or cleanup overrun. The production parser rejected
+the captured artifact as `algorithm`/`invalid_algorithm`. Sanitized evidence is
+`artifacts/ararai/ararai-widget-diagnostic-v13-e4b-algorithm-natural-cold-1.json`
+with SHA-256
+`587c8e1c6179ba113e66fa75d337e963ea9a9764f364a881e03fe4754cd3d65b`.
+
+Two later debug-only raw exports on the same APK/model pair further
+characterized the instability. One round captured no callback; its local raw
+artifact is
+`artifacts/ararai/ararai-widget-diagnostic-v13-e4b-algorithm-natural-raw-no-callback.json`
+with SHA-256
+`43bcc0f2f7527508017e6cb128fbf6c1c2cb9c2e6eb38e639c1fc5ddf239d2f6`.
+The next round captured an otherwise coherent two-step algorithm. Its
+`tool_call` selected the frozen `wikipedia_on_this_day@1` capability correctly,
+but the following `transform` repeated `contractVersion: 1` despite having a
+null tool ID. Because a transform cannot invoke a tool, that value conveys no
+authority and should be normalized away rather than invalidating the artifact.
+The local raw artifact is
+`artifacts/ararai/ararai-widget-diagnostic-v13-e4b-algorithm-natural-raw-transform-contract-version.json`
+with SHA-256
+`a4e4f9c956092bc515ef8bf5524f73a55b5729b6fe41e6a1f80a962282f476e2`.
+These runs remain negative model-eligibility evidence until the revised parser
+and full physical gate pass.
+
+The revised parser was then installed incrementally on the same SM-S901E with
+debug app version `202609212333` (version code `29834133`) and APK SHA-256
+`d16115322b10445715c1527b5746b2a8ff902298abc458594eba25fc164653ac`;
+the existing approximately 6.0 GiB app data directory and E4B artifact were
+preserved. The device began the cold `algorithm_natural` probe at 57% battery
+and 27.3 degrees C. Model loading passed in 16,866 ms and the isolated algorithm
+stage passed in 16,558 ms. This closes the parser regression demonstrated by
+the raw transform metadata above. It is positive evidence for the isolated
+algorithm stage only; the complete physical pipeline remains the model
+eligibility gate before enabling the catalog capability.
+
+The subsequent cold `complete_pipeline_compact_natural` gate on the same
+app/model pair did not pass. It started at 38% battery and 26.6 degrees C;
+model loading passed in 16,946 ms, then the pipeline ended after 238,582 ms as
+`pipeline_invalid` at `algorithm`/`timed_out`. Feasibility first returned the
+full user instruction as its 202-byte display name, was rejected as
+`invalid_feasibility_display_name`, and repaired successfully. The first
+algorithm callback was 734 bytes and used derived labels `month` and `day` as
+runtime inputs on the Wikipedia tool step instead of the granted `local_time`
+runtime capability, so it remained `invalid_algorithm`; its repair emitted no
+callback. The 90,000 ms watchdog returned only after 177,407 ms, recording an
+87,407 ms cleanup overrun. At collection the device was at 29% battery, 39.4
+degrees C, thermal status 3, and approximately 4.24 GiB PSS. The debug-only raw
+export SHA-256 was
+`0c382fa2b9e8dda157c123408a01b60a490f8997952200ba2e45fd2dd6ca1c44`.
+This confirms that non-tool metadata normalization fixed the isolated artifact
+but does not address derived runtime aliases or the native cancellation delay.
+The follow-up implementation removes `runtimeInputs` from the model-facing
+algorithm schema and normalized artifact, accepts and discards the field only
+for legacy wire compatibility, and derives runtime authority exclusively from
+the frozen feasibility envelope. Physical revalidation is intentionally
+pending; this change has not yet been installed or rerun on the device.
+
+The first physical complete-pipeline rerun after that simplification used debug
+app version `202609220849` (version code `29834689`) and APK SHA-256
+`5092f4bc034c1b3bcbef401bde8c5f26dcdb3ec6bbc1d50e672a28fa401da262`.
+The model correctly stopped emitting `runtimeInputs`, but both the initial and
+repair algorithm callbacks omitted `contractVersion` from the otherwise
+registered `wikipedia_on_this_day` tool call and were rejected as
+`invalid_algorithm`. The debug-only raw export SHA-256 was
+`70f0be289ae47de69a724fe89d31b6e1e952101c02837c6c6611f5b2ab9d496e`.
+The follow-up implementation therefore removes tool version from the model
+contract and resolves it by tool ID from the frozen feasibility envelope.
+Physical revalidation used debug app version `202609220912` (version code
+`29834712`) and APK SHA-256
+`96a85115f0f146097f5b87752c72ca8223fd5c877c8839a8e98654eb881ebfe1` on
+the same SM-S901E with its approximately 6.0 GiB app data directory and E4B
+artifact preserved. The isolated `algorithm_natural` probe passed: model load
+completed in 18,669 ms, the callback was captured at 25,616 ms, the first
+generation event arrived at 28,896 ms, and the stage returned normally after
+31,056 ms without watchdog or cleanup overrun. This is positive physical
+evidence that omitting model-authored `contractVersion` and resolving the exact
+registered version from the frozen envelope works in the production parser.
+
+The following cold `complete_pipeline_compact_natural` gate still failed after
+347,035 ms as `pipeline_invalid` at `algorithm`/`timed_out`. Feasibility first
+returned the full 202-byte instruction as its display name, was rejected as
+`invalid_feasibility_display_name`, and repaired successfully. Both algorithm
+attempts then produced no callback and no first generation event. Their 90,000
+ms watchdogs returned after 129,650 ms and 138,682 ms, with cleanup overruns of
+39,650 ms and 48,682 ms respectively. Unlike the prior failure, no algorithm
+artifact reached the parser, so this run neither identifies another schema
+incompatibility nor contradicts the successful isolated version-derivation
+probe. It confirms that complete-pipeline E4B eligibility remains blocked by
+native generation/cancellation reliability; production widget activation must
+remain disabled.
+
+The debug-only runtime-observability follow-up used app version
+`202609222208` (version code `29835488`) and APK SHA-256
+`80a4acaae2ae337df1cd0f528de78dc068fdb91febe6181e19b112afe2508e8e`.
+Before installation, the focused engine/authoring tests, the complete debug
+unit-test suite, Spotless, Detekt, Android lint, and debug assembly all passed.
+The APK was installed over the existing app so its model data remained intact.
+The isolated `algorithm_natural` probe passed again: model load took 17,718 ms
+and the case completed in 21,609 ms.
+
+The subsequent process-cold `complete_pipeline_compact_natural` run failed
+after 318,546 ms as `pipeline_invalid`. Feasibility first repeated the full
+instruction as the display name, then repaired successfully. Both algorithm
+attempts produced no captured arguments and timed out. Runtime telemetry showed
+one engine initialization (19,315 ms) followed by reuse, a maximum of one
+active generation, and no `concurrent_generation_detected` event. This rules
+out an engine reload and overlapping authoring generations in this run.
+
+The telemetry instead showed progressive native slowdown and memory/thermal
+pressure. Conversation creation increased from 2,619 ms for initial
+feasibility to 8,628 ms for its repair, then 24,779 ms and 26,862 ms for the
+algorithm attempts. The first algorithm attempt was submitted after 25,651 ms,
+then reached the 90-second watchdog with no model callback. Native cancellation
+returned in 77 ms, but the eventual model error arrived at 119,019 ms and
+conversation close required 31,201 ms. The repair behaved similarly:
+submission at 27,992 ms, no callback, 79 ms cancellation, model error at
+123,830 ms, and 35,375 ms close. During the run the process-reported swap grew
+to approximately 554 MiB, thermal status rose from 0 to 4, and battery
+temperature reached 43.5 degrees C. The evidence does not prove whether thermal
+throttling, memory pressure, or a native LiteRT-LM lifecycle defect is the
+primary cause, but it narrows the failure to cumulative sequential native
+generation/resource behavior rather than application-level engine reload or
+parallel requests. The 40,999-byte debug-only raw report SHA-256 was
+`7d952198034575187ebb4964f3e2a915b7e763e2daca0f6ae06265f55d47b80e`.
+Production widget activation remains disabled.
+
+The lifecycle-retention follow-up used debug app version `202609232357`
+(version code `29837037`) and APK SHA-256
+`a27e05fd42a194e3b89c79572e482bf0563c237cf22a2b0c46ac5bbae1192cdf`.
+The discarded-resource registry now uses weak identity references rather than
+retaining every closed native conversation wrapper for the process lifetime.
+Runtime checkpoints were expanded with total/native PSS, native/Java heap,
+available system memory, and Android's low-memory indication. Before device
+installation, the focused engine tests, full debug unit suite, Spotless,
+Detekt, Android lint, debug assembly, and `git diff --check` passed.
+
+The process-cold isolated `algorithm_natural` probe passed in 19,489 ms after a
+14,793 ms model load. Its conversation close completed in 374 ms rather than
+the previous 31--35 seconds. Native heap fell immediately from 973,404 KiB to
+852,019 KiB (121,385 KiB), while total PSS fell by 6,021 KiB. This confirms
+that `Conversation.close()` releases a repeatable native allocation and that
+the application no longer keeps the discarded wrapper strongly reachable.
+
+The cold complete pipeline still failed in the algorithm stage. Initial
+feasibility completed and closed in 2,723 ms, reducing native heap from
+974,058 KiB to 852,721 KiB and total PSS by 69,992 KiB. The next conversation
+still required 26,569 ms to create, produced no callback, and timed out; close
+took 10,833 ms and reduced native heap by 121,283 KiB. Its repair likewise
+required 25,783 ms to create, produced no callback, timed out, and closed in
+2,384 ms with a 121,392 KiB native-heap reduction. Thermal status rose from 1
+to 3 and swap reached approximately 523 MiB. Roughly 83 seconds after the
+failed pipeline had completed, Android killed the foreground process with
+`ApplicationExitInfo` reason `LOW_MEMORY`; this was a system SIGKILL, not an
+application exception. The change therefore removes one real leak and greatly
+improves close latency, but does not eliminate LiteRT-LM's cumulative memory,
+swap, conversation-creation, and no-callback degradation. Production widget
+activation remains disabled.
+
+The next implementation adds an explicit model-lifecycle boundary between an
+accepted `achievable` feasibility result and algorithm generation. The runtime
+atomically unloads and reloads LiteRT-LM with the unchanged 4,096-token,
+temperature-0.2 text-only authoring policy, then publishes the replacement
+session before the algorithm request can start. The pipeline exposes a distinct
+reload progress state, records sanitized `engine_reload_started` and
+`engine_reload_finished` lifecycle events, and returns a controlled model-load
+failure if the replacement cannot be published. Terminal `unachievable` and
+`needs_clarification` outcomes do not reload the model.
+
+Local validation passed the focused reload/pipeline regressions, the complete
+debug unit suite, Spotless, Detekt, Android lint, debug assembly, strict
+OpenSpec validation, and `git diff --check`. The resulting debug APK is version
+`202609242133` (version code `29838333`) with SHA-256
+`87570dc9b5fa257d078d623c4281e332171fb49d1c01d33b5a51c5f775367a09`.
+Per the requested validation boundary, this build was not installed or run on
+the physical device. Task 11.26 retains that physical comparison, and no model
+catalog capability or production widget activation is enabled.
+
+Physical validation first installed that build over the previous debug app on
+the SM-S901E while preserving model data. The cold complete pipeline began at
+thermal status 0 with AP/battery/skin at 28.3/27.7/28.6 degrees C, app PSS
+232,666 KiB, and swap PSS 169 KiB. Model loading completed in 17,423 ms. The
+initial feasibility callback was rejected as
+`invalid_feasibility_display_name`; both repairs then timed out without a
+callback. The controlled result was `pipeline_invalid` at
+`feasibility`/`timed_out` after 240,020 ms with one captured callback. Because
+feasibility never became achievable, this run correctly emitted no
+`engine_reload_started` event and did not exercise the new boundary. At result
+collection thermal status was 3, AP/battery/skin had reached approximately
+62.1/40.7/44.1 degrees C, app PSS was 4,256,369 KiB, and swap PSS was
+436,871 KiB.
+
+To isolate the boundary without repeating feasibility repairs, suite v14 added
+`algorithm_reload_natural`. The focused test, Spotless, Detekt, Android lint,
+and debug assembly passed before installation. The resulting debug app version
+was `202609242150` (version code `29838350`) with APK SHA-256
+`72770c346437fa3a9b8ae4f808a99d6920e2b2cd50a1ab1342747f09c346db5e`.
+The force-stopped probe began at thermal status 0 with AP/battery/skin at
+38.0/34.3/34.4 degrees C, app PSS 238,472 KiB, and swap PSS 265 KiB.
+
+The initial engine load completed in 18,173 ms. The atomic reload then closed
+that engine in 1,276 ms, reducing PSS from 4,119,813 KiB to 277,793 KiB and
+native heap from 391,116 KiB to 14,901 KiB. The replacement engine initialized
+in 16,107 ms and `engine_reload_finished` reported success about 18,241 ms after
+reload start. The algorithm conversation was created in 5,762 ms with exactly
+one active generation, materially faster than the 18--29 second accumulated
+conversation creation observed in the failed complete pipeline.
+
+The fresh-engine algorithm still produced no model callback before its
+90-second watchdog. The case ended after 112,459 ms as
+`algorithm_reload_natural`/`case_timeout`, with no tool capture and a 3,971 ms
+cleanup overrun. Cancellation completed in 249 ms; conversation close completed
+in 2,310 ms and reduced native heap by 121,486 KiB. Thermal status rose to 3;
+final AP/battery/skin were 58.2/41.0/43.6 degrees C, app PSS was 4,212,260 KiB,
+and swap PSS was 385,622 KiB. This proves that the new unload/reload boundary
+works, serializes ownership, and releases the previous native model allocation,
+but it does not resolve the E4B algorithm no-callback failure. The blocker is
+therefore not explained solely by retained conversations or a stale engine;
+the single fresh algorithm workload still reaches severe memory/swap/thermal
+pressure. This remains negative eligibility evidence, and production widget
+activation stays disabled.
 
 The first suite-v12 cold complete-pipeline run used the SM-S901E and the E4B
 artifact SHA-256

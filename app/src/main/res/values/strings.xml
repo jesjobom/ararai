@@ -462,6 +462,8 @@
     <string name="widget_authoring_needs_clarification">More information is needed: %1$s</string>
     <string name="widget_authoring_stage_failed">The %1$s stage failed controlled validation (%2$s). Nothing was saved or executed.</string>
     <string name="widget_authoring_stage_feasibility">Analyzing feasibility and selecting tools…</string>
+    <string name="widget_authoring_stage_device_recovery">Model unloaded. Waiting for device temperature and memory to stabilize…</string>
+    <string name="widget_authoring_stage_model_reload">Reloading the local model for the next generation…</string>
     <string name="widget_authoring_stage_algorithm">Designing the algorithm…</string>
     <string name="widget_authoring_stage_call">Generating tool call %1$d of %2$d…</string>
     <string name="widget_authoring_stage_plan">Generating orchestration…</string>
@@ -481,9 +483,11 @@
     <string name="widget_tool_diagnostic_probe_compact">Probe · compact context + natural prompt</string>
     <string name="widget_tool_diagnostic_probe_explicit">Probe · compact context + explicit prompt</string>
     <string name="widget_tool_diagnostic_probe_algorithm">Probe · production-like algorithm</string>
+    <string name="widget_tool_diagnostic_probe_algorithm_reload">Probe · unload + cool down + algorithm</string>
     <string name="widget_tool_diagnostic_pipeline_cold">Run cold complete pipeline</string>
     <string name="widget_tool_diagnostic_probe_running">Running one feasibility probe. Keep ArarAI open until the report is ready.</string>
     <string name="widget_tool_diagnostic_algorithm_running">Running one production-like algorithm probe. Keep ArarAI open until the report is ready.</string>
+    <string name="widget_tool_diagnostic_algorithm_reload_running">Unloading the model, waiting for temperature and memory to stabilize, then running one production-like algorithm probe. Keep ArarAI open until the report is ready.</string>
     <string name="widget_tool_diagnostic_pipeline_running">Running the complete production-like pipeline from a cold start. Keep ArarAI open until the report is ready.</string>
     <string name="widget_tool_diagnostic_running">Running up to five cases. Keep ArarAI open until the report is ready. The matrix stops after a timeout.</string>
     <string name="widget_tool_diagnostic_internal_failure">The sanitized diagnostic report could not be created.</string>

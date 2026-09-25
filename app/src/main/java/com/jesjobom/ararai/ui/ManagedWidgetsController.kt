@@ -4,7 +4,9 @@ package com.jesjobom.ararai.ui
 
 import android.util.Log
 import com.jesjobom.ararai.BuildConfig
+import com.jesjobom.ararai.engine.ImmediateLocalLlmRecoveryGate
 import com.jesjobom.ararai.engine.LocalLlmEngine
+import com.jesjobom.ararai.engine.LocalLlmRecoveryGate
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.widget.managed.ConfirmedWidgetRevision
@@ -96,19 +98,21 @@ internal class ManagedWidgetsController(
     localLlmEngine: LocalLlmEngine,
     widgetJavaScriptEngine: WidgetJavaScriptEngine = QuickJsWidgetJavaScriptEngine(),
     private val runtimeContextProvider: () -> WidgetRuntimeContext = ::currentManagedWidgetRuntimeContext,
+    recoveryGate: LocalLlmRecoveryGate = ImmediateLocalLlmRecoveryGate,
 ) {
     private val toolCallingDiagnostic = WidgetToolCallingDiagnosticRunner(
         engine = localLlmEngine,
         registry = services.toolRegistry,
         javascriptEngine = widgetJavaScriptEngine,
         runtimeContextProvider = runtimeContextProvider,
+        recoveryGate = recoveryGate,
     )
     private val draftBuilder = WidgetDraftBuilder(
         registry = services.toolRegistry,
         planner = com.jesjobom.ararai.widget.managed.JavaScriptWidgetDraftPlanner(widgetJavaScriptEngine),
     )
     private val authoring = ManagedWidgetAuthoringPipeline(
-        modelController = WidgetAuthoringPipelineModelController(localLlmEngine),
+        modelController = WidgetAuthoringPipelineModelController(localLlmEngine, recoveryGate = recoveryGate),
         validator = WidgetAuthoringPipelineValidator(services.toolRegistry, widgetJavaScriptEngine),
         draftBuilder = draftBuilder,
         registry = services.toolRegistry,

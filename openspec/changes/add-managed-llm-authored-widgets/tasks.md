@@ -309,6 +309,50 @@
   sanitized lifecycle entry for every complete-pipeline stage attempt so native
   stalls, missing callbacks, transport/parser failures, invalid artifacts, and
   cleanup overruns can be distinguished without exposing model or user content.
+- [x] 11.19 Use the suite-v13 raw E4B evidence to normalize `toolId` and
+  `contractVersion` away from non-tool algorithm steps while retaining strict
+  unknown-field, tool-call identity/version, frozen-envelope, dependency, and
+  resource validation; add regression coverage and rerun the relevant gates.
+- [x] 11.20 Remove model-authored per-step `runtimeInputs` from the algorithm
+  schema and normalized artifact; derive runtime authority only from the frozen
+  feasibility envelope, discard legacy wire values such as `month` and `day`,
+  allow non-tool steps to omit tool metadata, and retain strict validation for
+  actual tool calls and unknown fields.
+- [x] 11.21 Remove model-authored `contractVersion` from algorithm capture,
+  resolve each selected tool ID to the exact version frozen by feasibility,
+  discard legacy wire versions, retain strict invented-tool/unknown-field
+  rejection, and cover the physical missing-version artifact with regression
+  tests.
+- [x] 11.22 Add debug-only sanitized LiteRT-LM lifecycle telemetry for engine
+  initialization/reuse, conversation create/reuse, submission, first/terminal
+  callback, cancel, close, and cleanup; correlate process-local request/resource
+  IDs, detect concurrent generations, and sample threads, RSS, swap, and thermal
+  status without recording model/user/generated content.
+- [x] 11.23 Run the focused engine/authoring gates and one physical cold pipeline
+  to verify the new runtime telemetry after the explicitly requested no-test
+  implementation pause.
+- [x] 11.24 Replace the strong process-lifetime discarded-conversation registry
+  with weak identity tracking, add PSS/native-PSS/native-heap/Java-heap/system
+  memory checkpoints around native lifecycle operations, cover identity
+  semantics locally, and run focused/full local gates plus isolated and complete
+  physical validation on the SM-S901E. Record the remaining algorithm timeouts
+  and Android low-memory termination without enabling production widgets.
+- [x] 11.25 Add an atomic LiteRT-LM model reload after an achievable feasibility
+  decision and before algorithm generation, preserve the fixed authoring
+  inference policy, expose bounded reload progress/telemetry, avoid reloads for
+  terminal feasibility outcomes, and cover the transition with local runtime
+  and pipeline regressions.
+- [x] 11.26 Validate the feasibility-to-algorithm model reload on the SM-S901E,
+  comparing reload, algorithm callback, conversation cleanup, memory, swap, and
+  thermal evidence with task 11.24 before changing any production eligibility.
+  Record the successful atomic reload and the remaining isolated algorithm
+  no-callback timeout as negative eligibility evidence.
+- [x] 11.27 Replace the single algorithm-boundary reload with a serialized,
+  cancelable unload/recovery/reload barrier before every subsequent generation,
+  including repairs; require bounded stable Android thermal, battery, process
+  PSS, available-memory, and low-memory signals, expose progress and sanitized
+  telemetry, add local regressions and suite-v15 diagnostics, then validate the
+  isolated algorithm probe and complete pipeline on the SM-S901E.
 
 ## 12. Revalidate the revised change and release gate
 

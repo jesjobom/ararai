@@ -61,6 +61,30 @@ independent planned tool calls, transformations, and the final presentation
 objective. The application SHALL validate both artifacts before requesting
 JavaScript.
 
+Tool identity SHALL be authoritative only for a `tool_call` step. The
+application SHALL resolve that ID to the exact registered version already
+frozen by feasibility and SHALL NOT ask the model to repeat a contract version.
+It SHALL accept and discard legacy `contractVersion` wire values without
+granting authority, while continuing to reject unknown fields, invented tool
+IDs, and capability expansion on actual tool calls.
+
+Per-step runtime grants SHALL NOT be a model decision. The application SHALL
+derive runtime authority exclusively from the validated feasibility envelope
+and registered contracts, SHALL omit `runtimeInputs` from the algorithm capture
+schema and normalized artifact, and MAY accept and discard that field from
+legacy wire artifacts without granting any capability. Tool metadata SHALL be
+required only for `tool_call` steps; its omission from other step kinds SHALL
+not invalidate the algorithm.
+
+#### Scenario: Derive the frozen tool version
+
+- **WHEN** an algorithm selects a tool ID that exists in the frozen feasibility
+  envelope and omits `contractVersion`
+- **THEN** the application resolves the exact frozen capability and version
+  for the normalized tool-call step
+- **AND** a legacy wire version, whether absent, matching, or inconsistent,
+  cannot alter that application-owned selection.
+
 The feasibility instruction SHALL state the four-field conditional contract
 for all three outcomes: `message` is the display name for `achievable`, the
 reason for `unachievable`, and one question for `needs_clarification`. It SHALL
@@ -81,6 +105,15 @@ values from `outcome` and `message`.
   every later stage and repair
 - **AND** later artifacts cannot broaden it.
 
+#### Scenario: Normalize legacy runtime labels
+
+- **WHEN** an otherwise valid algorithm includes a legacy `runtimeInputs`
+  field with derived labels such as `month` or `day`
+- **THEN** the application discards the entire field and continues using only
+  runtime grants derived from the frozen feasibility envelope
+- **AND** the normalized algorithm passed to later stages contains no
+  model-authored per-step runtime grants.
+
 #### Scenario: Report an unavailable operation
 
 - **WHEN** the request requires an operation for which no registered eligible
@@ -96,6 +129,51 @@ values from `outcome` and `message`.
 - **THEN** the model may return `needs_clarification` with one bounded question
 - **AND** the attempt ends so the user can revise the prompt explicitly.
 
+### Requirement: Recover the device between model generations
+
+After the first feasibility generation and before every subsequent model
+generation, including a repair, the application SHALL unload the selected local
+model, await a bounded stable temperature-and-memory gate, and reload the model
+with the fixed authoring inference configuration. Unload, wait, and replacement
+publication SHALL be serialized with model lifecycle transitions. Native
+ownership transfer SHALL remain non-cancellable, the wait SHALL remain
+cancellable, and the UI plus sanitized lifecycle telemetry SHALL expose the
+recovery and reload phases. The application SHALL NOT recover again for
+terminal `unachievable` or `needs_clarification` outcomes.
+
+#### Scenario: Start each later generation from a recovered model session
+
+- **WHEN** a valid artifact or rejected attempt requires another model generation
+- **THEN** the application closes the current model session and waits while the
+  model remains unloaded
+- **AND** it publishes a freshly loaded text-only session using the same fixed
+  authoring configuration only after the recovery gate is stable
+- **AND** the next stage or repair starts only after that reload succeeds.
+
+#### Scenario: Avoid a reload for a terminal feasibility outcome
+
+- **WHEN** feasibility is validated as `unachievable` or
+  `needs_clarification`
+- **THEN** the attempt returns the controlled outcome without reloading the
+  model or requesting an algorithm.
+
+#### Scenario: Stop safely when recovery does not stabilize
+
+- **WHEN** the bounded recovery gate does not observe stable temperature and
+  memory conditions before its deadline
+- **THEN** the authoring attempt ends with a controlled timeout while the model
+  remains unloaded
+- **AND** no later model request, provider call, persistence, or capability
+  expansion occurs.
+
+#### Scenario: Fail safely when the replacement session cannot load
+
+- **WHEN** the feasibility-to-algorithm reload fails before a replacement model
+  session is published
+- **THEN** the authoring attempt ends with the controlled model-load failure
+- **AND** no algorithm request, provider call, persistence, or capability
+  expansion occurs.
+
 #### Scenario: Repair an inconsistent feasibility outcome
 
 - **WHEN** the feasibility artifact contains an invalid outcome-dependent
@@ -110,6 +188,15 @@ values from `outcome` and `message`.
   depend on an earlier live provider result
 - **THEN** the application rejects it as unsupported by the v1 plan-all runtime
 - **AND** does not approximate, reorder, or silently remove the dependency.
+
+#### Scenario: Normalize irrelevant non-tool metadata
+
+- **WHEN** a `runtime_input` or `transform` step carries a non-null `toolId` or
+  `contractVersion` value in the shared bounded step shape
+- **THEN** the application discards those non-authoritative values and retains
+  the step with no tool capability
+- **AND** still validates the exact field set and every real `tool_call`
+  identity/version against the frozen envelope.
 
 ### Requirement: Generate and validate dynamic JavaScript by responsibility
 
@@ -292,12 +379,23 @@ index/count when applicable, validation activity, and repair attempt/count. It
 SHALL permit cancellation throughout generation and validation without
 presenting intermediate source as a confirmable draft.
 
+Debug runtime diagnostics SHALL emit sanitized process-local lifecycle events
+that distinguish engine initialization/reuse, conversation creation/reuse,
+request submission, first/terminal callback, cancellation, close, cleanup, and
+overlapping active generations. The events SHALL include bounded timing plus
+available thread-count, RSS, swap, total/native PSS, native/Java heap, available
+system memory, low-memory state, and thermal-status signals, and SHALL NOT
+include model paths or identifiers, prompts, generated content, tool arguments,
+exception messages, provider data, or stack traces. Disposed conversation
+tracking SHALL preserve identity-based idempotence without keeping discarded
+native wrappers strongly reachable.
+
 #### Scenario: Show multi-round progress
 
 - **WHEN** an authoring attempt advances between stages
-- **THEN** the UI updates among feasibility, tool selection, algorithm design,
-  call generation N/M, orchestration, presentation, validation, repair, and
-  draft-ready states
+- **THEN** the UI updates among feasibility, device recovery, model reload,
+  tool selection, algorithm design, call generation N/M, orchestration,
+  presentation, validation, repair, and draft-ready states
 - **AND** does not imply that an intermediate artifact is saved or executable.
 
 #### Scenario: Cancel during a later stage
@@ -307,6 +405,22 @@ presenting intermediate source as a confirmable draft.
 - **THEN** active work and ephemeral conversations are released, late callbacks
   are discarded, and all intermediate artifacts are cleared
 - **AND** no widget or revision is changed.
+
+#### Scenario: Diagnose a native stage stall
+
+- **WHEN** a debug authoring round times out before its first generation event
+- **THEN** local runtime telemetry identifies whether the engine was reloaded,
+  a conversation was created or reused, another generation overlapped, and
+  where cancel/close/cleanup time was spent
+- **AND** reports only process-local identifiers and sanitized resource signals.
+
+#### Scenario: Observe ephemeral conversation release
+
+- **WHEN** an ephemeral debug conversation is cancelled or closed
+- **THEN** telemetry captures sanitized process-memory checkpoints before and
+  after the operation so native heap and PSS release can be compared
+- **AND** the discarded wrapper remains eligible for garbage collection after
+  identity-based duplicate-disposal protection is no longer needed.
 
 ### Requirement: Explicit confirmation and least privilege
 

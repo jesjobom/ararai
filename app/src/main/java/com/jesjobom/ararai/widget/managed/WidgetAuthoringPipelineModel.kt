@@ -6,7 +6,9 @@ import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.engine.EphemeralLocalLlmTool
 import com.jesjobom.ararai.engine.GenerationEvent
 import com.jesjobom.ararai.engine.GenerationFailureKind
+import com.jesjobom.ararai.engine.ImmediateLocalLlmRecoveryGate
 import com.jesjobom.ararai.engine.LocalLlmEngine
+import com.jesjobom.ararai.engine.LocalLlmRecoveryGate
 import com.jesjobom.ararai.engine.PromptChatMessage
 import com.jesjobom.ararai.engine.PromptChatRole
 import com.jesjobom.ararai.engine.PromptRequest
@@ -43,6 +45,7 @@ internal sealed interface WidgetAuthoringModelPreparationResult {
     data object Ready : WidgetAuthoringModelPreparationResult
     data object Ineligible : WidgetAuthoringModelPreparationResult
     data object LoadFailed : WidgetAuthoringModelPreparationResult
+    data object RecoveryTimedOut : WidgetAuthoringModelPreparationResult
 }
 
 internal sealed interface WidgetAuthoringRoundResult {
@@ -97,6 +100,7 @@ internal class WidgetAuthoringPipelineModelController(
     private val onRawCapture: (toolName: String, argumentsJson: String) -> Unit = { _, _ -> },
     private val onRoundLifecycle: (WidgetAuthoringRoundLifecycle) -> Unit = {},
     private val requireDeclaredProtocol: Boolean = true,
+    private val recoveryGate: LocalLlmRecoveryGate = ImmediateLocalLlmRecoveryGate,
 ) {
     private var preparedModelId: String? = null
 
@@ -107,14 +111,7 @@ internal class WidgetAuthoringPipelineModelController(
         if (requireDeclaredProtocol && !model.toolCapabilities.supportsAuthoringProtocol(WIDGET_AUTHORING_PIPELINE_V1)) {
             return WidgetAuthoringModelPreparationResult.Ineligible
         }
-        val authoringInference = inference.copy(
-            contextTokens = maxContextTokens,
-            promptReserveTokens = maxOf(
-                inference.promptReserveTokens,
-                WidgetAuthoringPipelinePolicy.OUTPUT_RESERVE_TOKENS,
-            ),
-            temperature = inference.temperature.coerceAtMost(MAX_WIDGET_AUTHORING_TEMPERATURE),
-        )
+        val authoringInference = authoringInference(inference)
         return try {
             engine.load(model, authoringInference)
             preparedModelId = model.id
@@ -123,6 +120,27 @@ internal class WidgetAuthoringPipelineModelController(
             throw cancelled
         } catch (_: RuntimeException) {
             preparedModelId = null
+            WidgetAuthoringModelPreparationResult.LoadFailed
+        }
+    }
+
+    suspend fun recoverForNextGeneration(
+        model: LocalModel,
+        inference: InferenceConfig,
+        onReloading: () -> Unit = {},
+    ): WidgetAuthoringModelPreparationResult {
+        check(preparedModelId == model.id) { "Authoring model must be prepared before recovery" }
+        preparedModelId = null
+        return try {
+            val ready = engine.reloadWhenReady(model, authoringInference(inference)) {
+                recoveryGate.awaitReady().also { if (it) onReloading() }
+            }
+            if (!ready) return WidgetAuthoringModelPreparationResult.RecoveryTimedOut
+            preparedModelId = model.id
+            WidgetAuthoringModelPreparationResult.Ready
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
             WidgetAuthoringModelPreparationResult.LoadFailed
         }
     }
@@ -182,6 +200,15 @@ internal class WidgetAuthoringPipelineModelController(
 
     private fun maximumStageInputChars(): Int = (maxContextTokens - WidgetAuthoringPipelinePolicy.OUTPUT_RESERVE_TOKENS)
         .coerceAtLeast(0) * WidgetAuthoringPipelinePolicy.ESTIMATED_INPUT_CHARS_PER_TOKEN
+
+    private fun authoringInference(inference: InferenceConfig): InferenceConfig = inference.copy(
+        contextTokens = maxContextTokens,
+        promptReserveTokens = maxOf(
+            inference.promptReserveTokens,
+            WidgetAuthoringPipelinePolicy.OUTPUT_RESERVE_TOKENS,
+        ),
+        temperature = inference.temperature.coerceAtMost(MAX_WIDGET_AUTHORING_TEMPERATURE),
+    )
 
     fun clear() {
         preparedModelId = null

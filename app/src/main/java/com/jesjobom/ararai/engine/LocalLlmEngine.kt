@@ -31,6 +31,25 @@ interface LocalLlmEngine {
 
     fun generate(request: PromptRequest): Flow<GenerationEvent>
 
+    suspend fun reload(
+        model: LocalModel,
+        config: InferenceConfig,
+    ) {
+        unload()
+        load(model, config)
+    }
+
+    suspend fun reloadWhenReady(
+        model: LocalModel,
+        config: InferenceConfig,
+        awaitReady: suspend () -> Boolean,
+    ): Boolean {
+        unload()
+        if (!awaitReady()) return false
+        load(model, config)
+        return true
+    }
+
     suspend fun unload()
 }
 
