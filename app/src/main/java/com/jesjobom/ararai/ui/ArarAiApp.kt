@@ -155,6 +155,7 @@ import com.jesjobom.ararai.voice.SequentialVoiceSpeechQueue
 import com.jesjobom.ararai.voice.VoiceChatPreferences
 import com.jesjobom.ararai.voice.VoiceChatViewModel
 import com.jesjobom.ararai.widget.managed.ManagedWidgetApplicationServices
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
@@ -224,6 +225,7 @@ internal fun ArarAiApp(
     managedWidgetServices: ManagedWidgetApplicationServices? = null,
     onShareWidgetToolCallingDiagnostic: (String) -> Unit = {},
     onShareRawWidgetToolCallingDiagnostic: (String) -> Unit = {},
+    widgetAuthoringJobs: WidgetAuthoringJobController<ManagedWidgetDraftUiState>? = null,
 ) {
     val resourceContext = androidx.compose.ui.platform.LocalContext.current
     val appContext = resourceContext.applicationContext
@@ -271,10 +273,11 @@ internal fun ArarAiApp(
         )
     }
     val localLlmRecoveryGate = remember(appContext) {
-        androidLocalLlmRecoveryGate(
-            context = appContext,
-            telemetryEnabled = com.jesjobom.ararai.BuildConfig.DEBUG,
-        )
+        (appContext as? com.jesjobom.ararai.ArarAiApplication)?.localLlmRecoveryGate
+            ?: androidLocalLlmRecoveryGate(
+                context = appContext,
+                telemetryEnabled = com.jesjobom.ararai.BuildConfig.DEBUG,
+            )
     }
     val effectiveLocalLlmEngineFactory = remember(
         localLlmEngineFactory,
@@ -381,7 +384,8 @@ internal fun ArarAiApp(
     val voiceChatViewModel = controllers.voiceChat
     val managedWidgetsController = remember(managedWidgetServices, controllers.runtime.engine, localLlmRecoveryGate) {
         managedWidgetServices?.let {
-            ManagedWidgetsController(it, controllers.runtime.engine, recoveryGate = localLlmRecoveryGate)
+            (appContext as? com.jesjobom.ararai.ArarAiApplication)?.managedWidgetsController
+                ?: ManagedWidgetsController(it, controllers.runtime.engine, recoveryGate = localLlmRecoveryGate)
         }
     }
     val diagnosticErrorState by diagnosticErrorReportCoordinator
@@ -610,6 +614,7 @@ internal fun ArarAiApp(
                     inference = available?.inference ?: available?.model?.let { modelConfig.requireInference() },
                     modelArtifactSha256 = modelConfig.sha256,
                     widgetId = selectedWidgetId,
+                    jobController = widgetAuthoringJobs,
                     onBack = {
                         destination = if (selectedWidgetId == null) {
                             AppDestination.Widgets

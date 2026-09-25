@@ -27,6 +27,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +48,11 @@ import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.WIDGET_AUTHORING_PIPELINE_V1
 import com.jesjobom.ararai.validation.widgetToolCallingDiagnosticEnvironment
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringDeferralReason
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobController
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobFailureReason
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobRequest
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobState
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringProgress
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringStage
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringStageFailureCode
@@ -67,7 +74,34 @@ private sealed interface WidgetAuthoringError {
         val code: WidgetAuthoringStageFailureCode,
     ) : WidgetAuthoringError
     data object GenerationTimedOut : WidgetAuthoringError
+    data object BusyWithActiveJob : WidgetAuthoringError
+    data object DeferralExhausted : WidgetAuthoringError
+    data object Unexpected : WidgetAuthoringError
 }
+
+private fun WidgetAuthoringJobFailureReason.toAuthoringError(detail: String?): WidgetAuthoringError =
+    when (this) {
+        WidgetAuthoringJobFailureReason.DeferredBudgetExhausted -> WidgetAuthoringError.DeferralExhausted
+        WidgetAuthoringJobFailureReason.ModelUnavailable -> WidgetAuthoringError.ModelUnavailable
+        WidgetAuthoringJobFailureReason.ModelLoadFailed -> WidgetAuthoringError.ModelLoadFailed
+        WidgetAuthoringJobFailureReason.MissingWidget -> WidgetAuthoringError.MissingWidget
+        WidgetAuthoringJobFailureReason.Unachievable -> WidgetAuthoringError.Unachievable(detail.orEmpty())
+        WidgetAuthoringJobFailureReason.NeedsClarification ->
+            WidgetAuthoringError.NeedsClarification(detail.orEmpty())
+        WidgetAuthoringJobFailureReason.StageFailed -> {
+            val separator = detail?.indexOf('|') ?: -1
+            if (detail != null && separator > 0) {
+                WidgetAuthoringError.StageFailed(
+                    stage = WidgetAuthoringStage.valueOf(detail.substring(0, separator)),
+                    code = WidgetAuthoringStageFailureCode.valueOf(detail.substring(separator + 1)),
+                )
+            } else {
+                WidgetAuthoringError.Unexpected
+            }
+        }
+        WidgetAuthoringJobFailureReason.GenerationTimedOut -> WidgetAuthoringError.GenerationTimedOut
+        WidgetAuthoringJobFailureReason.Unexpected -> WidgetAuthoringError.Unexpected
+    }
 
 private sealed interface ToolCallingDiagnosticState {
     data object Idle : ToolCallingDiagnosticState
@@ -83,6 +117,7 @@ internal fun ManagedWidgetAuthoringRoute(
     inference: InferenceConfig?,
     modelArtifactSha256: String?,
     widgetId: String?,
+    jobController: WidgetAuthoringJobController<ManagedWidgetDraftUiState>?,
     onBack: () -> Unit,
     onConfirmed: (String) -> Unit,
     onOpenToolSettings: () -> Unit,
@@ -93,8 +128,7 @@ internal fun ManagedWidgetAuthoringRoute(
     var draft by remember(widgetId) { mutableStateOf<ManagedWidgetDraftUiState?>(null) }
     var error by remember(widgetId) { mutableStateOf<WidgetAuthoringError?>(null) }
     var confirmationError by remember(widgetId) { mutableStateOf(false) }
-    var running by remember(widgetId) { mutableStateOf(false) }
-    var progress by remember(widgetId) { mutableStateOf<WidgetAuthoringProgress?>(null) }
+    var confirming by remember(widgetId) { mutableStateOf(false) }
     var diagnosticState: ToolCallingDiagnosticState by remember(widgetId) {
         mutableStateOf(ToolCallingDiagnosticState.Idle)
     }
@@ -102,17 +136,34 @@ internal fun ManagedWidgetAuthoringRoute(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val view = LocalView.current
+    val jobState = jobController?.state?.collectAsState()?.value
+    val generationActive = jobState.let { current ->
+        current is WidgetAuthoringJobState.Queued ||
+            current is WidgetAuthoringJobState.Running ||
+            current is WidgetAuthoringJobState.Deferred
+    }
+    val generationProgress = (jobState as? WidgetAuthoringJobState.Running)?.progress
+    val generationDeferral = (jobState as? WidgetAuthoringJobState.Deferred)?.reason
     val diagnosticRunning = diagnosticState is ToolCallingDiagnosticState.Running
-    val busy = running || diagnosticRunning
+    val busy = confirming || diagnosticRunning || generationActive
+    LaunchedEffect(jobState) {
+        when (val state = jobState) {
+            is WidgetAuthoringJobState.Succeeded<*> ->
+                @Suppress("UNCHECKED_CAST")
+                draft = state.value as ManagedWidgetDraftUiState
+            is WidgetAuthoringJobState.Failed ->
+                error = state.reason.toAuthoringError(state.detail)
+            else -> Unit
+        }
+    }
     fun cancelAndBack() {
         job?.cancel()
-        controller.declineDraft()
+        if (!generationActive) controller.declineDraft()
         onBack()
     }
     DisposableEffect(controller, widgetId) {
         onDispose {
             job?.cancel()
-            controller.declineDraft()
         }
     }
     DisposableEffect(view, diagnosticRunning) {
@@ -122,42 +173,19 @@ internal fun ManagedWidgetAuthoringRoute(
         }
     }
     fun generate() {
+        val jobs = jobController ?: return
+        val selectedModel = model ?: return
+        val selectedInference = inference ?: return
         if (busy || instruction.isBlank()) return
         error = null
         confirmationError = false
         draft = null
-        progress = WidgetAuthoringProgress.AnalyzingFeasibility
-        running = true
-        job = scope.launch {
-            try {
-                when (
-                    val result = controller.generateDraft(
-                        model,
-                        inference,
-                        instruction,
-                        widgetId,
-                    ) { current -> progress = current }
-                ) {
-                    is ManagedWidgetDraftGenerationResult.Ready -> draft = result.value
-                    ManagedWidgetDraftGenerationResult.ModelUnavailable -> error = WidgetAuthoringError.ModelUnavailable
-                    ManagedWidgetDraftGenerationResult.ModelLoadFailed -> error = WidgetAuthoringError.ModelLoadFailed
-                    ManagedWidgetDraftGenerationResult.MissingWidget -> error = WidgetAuthoringError.MissingWidget
-                    is ManagedWidgetDraftGenerationResult.Unachievable -> {
-                        error = WidgetAuthoringError.Unachievable(result.reason)
-                    }
-                    is ManagedWidgetDraftGenerationResult.NeedsClarification -> {
-                        error = WidgetAuthoringError.NeedsClarification(result.question)
-                    }
-                    is ManagedWidgetDraftGenerationResult.StageFailed -> {
-                        error = WidgetAuthoringError.StageFailed(result.stage, result.code)
-                    }
-                    ManagedWidgetDraftGenerationResult.GenerationTimedOut -> {
-                        error = WidgetAuthoringError.GenerationTimedOut
-                    }
-                }
-            } finally {
-                running = false
-            }
+        when (
+            jobs.submit(WidgetAuthoringJobRequest(selectedModel, selectedInference, instruction, widgetId))
+        ) {
+            is WidgetAuthoringJobController.SubmitResult.Accepted -> Unit
+            is WidgetAuthoringJobController.SubmitResult.BusyWithActiveJob ->
+                error = WidgetAuthoringError.BusyWithActiveJob
         }
     }
     fun runToolCallingDiagnostic(mode: WidgetToolCallingDiagnosticMode) {
@@ -186,8 +214,8 @@ internal fun ManagedWidgetAuthoringRoute(
     }
     fun confirm(mode: WidgetConfirmationMode) {
         val selectedDraft = draft ?: return
-        if (running) return
-        running = true
+        if (busy) return
+        confirming = true
         job = scope.launch {
             try {
                 when (val result = controller.confirm(selectedDraft, mode)) {
@@ -196,7 +224,7 @@ internal fun ManagedWidgetAuthoringRoute(
                     WidgetConfirmationResult.Failed -> confirmationError = true
                 }
             } finally {
-                running = false
+                confirming = false
             }
         }
     }
@@ -210,8 +238,11 @@ internal fun ManagedWidgetAuthoringRoute(
         draft = draft,
         error = error,
         confirmationError = confirmationError,
-        running = running,
-        progress = progress,
+        generating = generationActive,
+        progress = generationProgress,
+        deferralReason = generationDeferral,
+        confirming = confirming,
+        onCancelGeneration = { jobController?.cancel() },
         diagnosticState = diagnosticState,
         onInstructionChange = { instruction = it },
         onGenerate = ::generate,
@@ -244,8 +275,11 @@ private fun ManagedWidgetAuthoringScreen(
     draft: ManagedWidgetDraftUiState?,
     error: WidgetAuthoringError?,
     confirmationError: Boolean,
-    running: Boolean,
+    generating: Boolean,
     progress: WidgetAuthoringProgress?,
+    deferralReason: WidgetAuthoringDeferralReason?,
+    confirming: Boolean,
+    onCancelGeneration: () -> Unit,
     diagnosticState: ToolCallingDiagnosticState,
     onInstructionChange: (String) -> Unit,
     onGenerate: () -> Unit,
@@ -260,7 +294,7 @@ private fun ManagedWidgetAuthoringScreen(
     onBack: () -> Unit,
 ) {
     val diagnosticRunning = diagnosticState is ToolCallingDiagnosticState.Running
-    val busy = running || diagnosticRunning
+    val busy = generating || diagnosticRunning || confirming
     ArarAiScaffold(
         title = stringResource(
             if (widgetId == null) R.string.widget_authoring_create_title else R.string.widget_authoring_edit_title,
@@ -294,10 +328,24 @@ private fun ManagedWidgetAuthoringScreen(
                 Icon(Icons.Filled.AutoAwesome, contentDescription = null)
                 Text(stringResource(R.string.widget_authoring_generate))
             }
-            if (running) {
+            if (generating) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                     CircularProgressIndicator()
                     Text(progress?.label() ?: stringResource(R.string.widget_authoring_generating))
+                    deferralReason?.let { reason ->
+                        Text(
+                            stringResource(
+                                if (reason == WidgetAuthoringDeferralReason.ThermalState) {
+                                    R.string.widget_authoring_deferred_thermal
+                                } else {
+                                    R.string.widget_authoring_deferred_memory
+                                },
+                            ),
+                        )
+                    }
+                    OutlinedButton(onClick = onCancelGeneration) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
                 }
             }
             error?.let { WidgetAuthoringErrorMessage(it) }
@@ -691,6 +739,9 @@ private fun WidgetAuthoringErrorMessage(error: WidgetAuthoringError) {
             error.code.name,
         )
         WidgetAuthoringError.GenerationTimedOut -> stringResource(R.string.widget_authoring_timeout)
+        WidgetAuthoringError.BusyWithActiveJob -> stringResource(R.string.widget_authoring_busy)
+        WidgetAuthoringError.DeferralExhausted -> stringResource(R.string.widget_authoring_deferral_exhausted)
+        WidgetAuthoringError.Unexpected -> stringResource(R.string.widget_authoring_unexpected)
     }
     WidgetAuthoringMessage(message, warning = true)
 }

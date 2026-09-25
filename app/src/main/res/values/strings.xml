@@ -471,6 +471,17 @@
     <string name="widget_authoring_stage_validation">Validating the exact assembled program…</string>
     <string name="widget_authoring_stage_repair">Repairing %1$s (%2$d/%3$d)…</string>
     <string name="widget_authoring_stage_ready">Draft ready</string>
+    <string name="widget_authoring_notification_channel_name">Widget generation</string>
+    <string name="widget_authoring_notification_title">Generating widget</string>
+    <string name="widget_authoring_notification_queued">Waiting to start widget generation…</string>
+    <string name="widget_authoring_notification_succeeded">Widget draft ready. Open ArarAI to review it.</string>
+    <string name="widget_authoring_notification_failed">Widget generation failed. Open ArarAI to try again.</string>
+    <string name="widget_authoring_notification_cancelled">Widget generation cancelled.</string>
+    <string name="widget_authoring_deferred_thermal">Waiting for the device to cool down before generating…</string>
+    <string name="widget_authoring_deferred_memory">Waiting for enough free memory to generate safely…</string>
+    <string name="widget_authoring_busy">One widget generation is already in progress. Wait for it to finish or cancel it before requesting another one.</string>
+    <string name="widget_authoring_deferral_exhausted">The device did not reach a safe temperature and memory state to generate this widget. Nothing was saved; try again later.</string>
+    <string name="widget_authoring_unexpected">Widget generation failed unexpectedly. Nothing was saved; try again.</string>
     <string name="widget_authoring_model_load_failed">The local model could not be prepared for widget authorship. Nothing was saved; try again.</string>
     <string name="widget_authoring_protocol_failed">The local model produced an invalid structured tool call before a proposal could be captured. Nothing was saved. Try again explicitly.</string>
     <string name="widget_authoring_request_rejected">LiteRT-LM rejected the widget-authoring request before a proposal could be captured. Nothing was saved.</string>

@@ -31,7 +31,6 @@ import com.jesjobom.ararai.chat.SharedPreferencesChatPreferences
 import com.jesjobom.ararai.chat.SqliteChatSessionStore
 import com.jesjobom.ararai.chat.WhisperCppAudioTranscriber
 import com.jesjobom.ararai.engine.prepareLiteRtLmCacheDir
-import com.jesjobom.ararai.knowledge.EncryptedWebSearchPreferences
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.model.SharedPreferencesGenerationPreferences
 import com.jesjobom.ararai.model.SharedPreferencesModelDownloadPromptPreferenceStore
@@ -82,7 +81,7 @@ class MainActivity : ComponentActivity() {
         val generationPreferences = SharedPreferencesGenerationPreferences(this)
         val modelDownloadPromptPreferenceStore = SharedPreferencesModelDownloadPromptPreferenceStore(this)
         val transcriptionLanguagePreferences = SharedPreferencesTranscriptionLanguagePreferences(this)
-        val webSearchPreferences = EncryptedWebSearchPreferences(this)
+        val webSearchPreferences = app.webSearchPreferences
         val audioTranscriber = WhisperCppAudioTranscriber(
             models = { modelController.state.value.models },
             languageTag = {
@@ -175,6 +174,8 @@ class MainActivity : ComponentActivity() {
                             Log.w("ArarAI.LiteRtLm", "Unable to prepare LiteRT-LM cache", error)
                         },
                         managedWidgetServices = app.managedWidgetApplicationServices,
+                        localLlmEngineFactory = { app.localLlmRuntime.engine },
+                        widgetAuthoringJobs = app.widgetAuthoringJobs,
                         onShareWidgetToolCallingDiagnostic = ::shareWidgetToolCallingDiagnostic,
                         onShareRawWidgetToolCallingDiagnostic = ::shareRawWidgetToolCallingDiagnostic,
                     )
