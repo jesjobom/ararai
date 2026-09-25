@@ -133,6 +133,8 @@ internal fun ManagedWidgetAuthoringRoute(
         mutableStateOf(ToolCallingDiagnosticState.Idle)
     }
     var job by remember(widgetId) { mutableStateOf<Job?>(null) }
+    var probeRequestId by remember(widgetId) { mutableStateOf<String?>(null) }
+    var probeCompleted by remember(widgetId) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val view = LocalView.current
@@ -148,11 +150,29 @@ internal fun ManagedWidgetAuthoringRoute(
     val busy = confirming || diagnosticRunning || generationActive
     LaunchedEffect(jobState) {
         when (val state = jobState) {
-            is WidgetAuthoringJobState.Succeeded<*> ->
-                @Suppress("UNCHECKED_CAST")
-                draft = state.value as ManagedWidgetDraftUiState
-            is WidgetAuthoringJobState.Failed ->
+            is WidgetAuthoringJobState.Succeeded<*> -> {
+                if (state.request.requestId == probeRequestId) {
+                    probeRequestId = null
+                    probeCompleted = true
+                    jobController?.clear()
+                } else {
+                    @Suppress("UNCHECKED_CAST")
+                    draft = state.value as ManagedWidgetDraftUiState
+                }
+            }
+            is WidgetAuthoringJobState.Failed -> {
+                if (state.request.requestId == probeRequestId) {
+                    probeRequestId = null
+                    jobController?.clear()
+                }
                 error = state.reason.toAuthoringError(state.detail)
+            }
+            is WidgetAuthoringJobState.Cancelled -> {
+                if (state.request.requestId == probeRequestId) {
+                    probeRequestId = null
+                    jobController?.clear()
+                }
+            }
             else -> Unit
         }
     }
@@ -184,6 +204,28 @@ internal fun ManagedWidgetAuthoringRoute(
             jobs.submit(WidgetAuthoringJobRequest(selectedModel, selectedInference, instruction, widgetId))
         ) {
             is WidgetAuthoringJobController.SubmitResult.Accepted -> Unit
+            is WidgetAuthoringJobController.SubmitResult.BusyWithActiveJob ->
+                error = WidgetAuthoringError.BusyWithActiveJob
+        }
+    }
+    fun runBackgroundAuthoringProbe() {
+        val jobs = jobController ?: return
+        val selectedModel = model ?: return
+        val selectedInference = inference ?: return
+        if (busy) return
+        error = null
+        confirmationError = false
+        draft = null
+        probeCompleted = false
+        val request = WidgetAuthoringJobRequest(
+            model = selectedModel,
+            inference = selectedInference,
+            instruction = TOOL_CALLING_DIAGNOSTIC_PROMPT,
+            widgetId = null,
+            probe = true,
+        )
+        when (jobs.submit(request)) {
+            is WidgetAuthoringJobController.SubmitResult.Accepted -> probeRequestId = request.requestId
             is WidgetAuthoringJobController.SubmitResult.BusyWithActiveJob ->
                 error = WidgetAuthoringError.BusyWithActiveJob
         }
@@ -243,6 +285,8 @@ internal fun ManagedWidgetAuthoringRoute(
         deferralReason = generationDeferral,
         confirming = confirming,
         onCancelGeneration = { jobController?.cancel() },
+        probeCompleted = probeCompleted,
+        onRunBackgroundProbe = ::runBackgroundAuthoringProbe,
         diagnosticState = diagnosticState,
         onInstructionChange = { instruction = it },
         onGenerate = ::generate,
@@ -280,6 +324,8 @@ private fun ManagedWidgetAuthoringScreen(
     deferralReason: WidgetAuthoringDeferralReason?,
     confirming: Boolean,
     onCancelGeneration: () -> Unit,
+    probeCompleted: Boolean,
+    onRunBackgroundProbe: () -> Unit,
     diagnosticState: ToolCallingDiagnosticState,
     onInstructionChange: (String) -> Unit,
     onGenerate: () -> Unit,
@@ -348,12 +394,15 @@ private fun ManagedWidgetAuthoringScreen(
                     }
                 }
             }
+            if (probeCompleted) WidgetAuthoringMessage(R.string.widget_authoring_probe_completed)
             error?.let { WidgetAuthoringErrorMessage(it) }
             if (confirmationError) WidgetAuthoringMessage(R.string.widget_operation_failed, warning = true)
             ToolCallingDiagnosticCard(
                 modelAvailable = diagnosticAvailable,
+                busy = busy,
                 state = diagnosticState,
                 onRun = onRunToolCallingDiagnostic,
+                onRunBackgroundProbe = onRunBackgroundProbe,
                 onCopy = onCopyDiagnosticReport,
                 onShare = onShareDiagnosticReport,
                 onShareRaw = onShareRawDiagnosticReport,
@@ -376,8 +425,10 @@ private fun ManagedWidgetAuthoringScreen(
 @Composable
 private fun ToolCallingDiagnosticCard(
     modelAvailable: Boolean,
+    busy: Boolean,
     state: ToolCallingDiagnosticState,
     onRun: (WidgetToolCallingDiagnosticMode) -> Unit,
+    onRunBackgroundProbe: () -> Unit,
     onCopy: (String) -> Unit,
     onShare: (String) -> Unit,
     onShareRaw: (String) -> Unit,
@@ -401,48 +452,55 @@ private fun ToolCallingDiagnosticCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
+            OutlinedButton(
+                onClick = onRunBackgroundProbe,
+                enabled = modelAvailable && !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.widget_tool_diagnostic_probe_background))
+            }
             when (state) {
                 ToolCallingDiagnosticState.Idle -> {
                     DiagnosticRunButton(
                         label = R.string.widget_tool_diagnostic_probe_full,
                         mode = WidgetToolCallingDiagnosticMode.FeasibilityFullNatural,
-                        enabled = modelAvailable,
+                        enabled = modelAvailable && !busy,
                         onRun = onRun,
                     )
                     DiagnosticRunButton(
                         label = R.string.widget_tool_diagnostic_probe_compact,
                         mode = WidgetToolCallingDiagnosticMode.FeasibilityCompactNatural,
-                        enabled = modelAvailable,
+                        enabled = modelAvailable && !busy,
                         onRun = onRun,
                     )
                     DiagnosticRunButton(
                         label = R.string.widget_tool_diagnostic_probe_explicit,
                         mode = WidgetToolCallingDiagnosticMode.FeasibilityCompactExplicit,
-                        enabled = modelAvailable,
+                        enabled = modelAvailable && !busy,
                         onRun = onRun,
                     )
                     DiagnosticRunButton(
                         label = R.string.widget_tool_diagnostic_probe_algorithm,
                         mode = WidgetToolCallingDiagnosticMode.AlgorithmNatural,
-                        enabled = modelAvailable,
+                        enabled = modelAvailable && !busy,
                         onRun = onRun,
                     )
                     DiagnosticRunButton(
                         label = R.string.widget_tool_diagnostic_probe_algorithm_reload,
                         mode = WidgetToolCallingDiagnosticMode.AlgorithmReloadNatural,
-                        enabled = modelAvailable,
+                        enabled = modelAvailable && !busy,
                         onRun = onRun,
                     )
                     DiagnosticRunButton(
                         label = R.string.widget_tool_diagnostic_pipeline_cold,
                         mode = WidgetToolCallingDiagnosticMode.CompletePipelineCompactNatural,
-                        enabled = modelAvailable,
+                        enabled = modelAvailable && !busy,
                         onRun = onRun,
                     )
                     DiagnosticRunButton(
                         label = R.string.widget_tool_diagnostic_run,
                         mode = WidgetToolCallingDiagnosticMode.FullMatrix,
-                        enabled = modelAvailable,
+                        enabled = modelAvailable && !busy,
                         onRun = onRun,
                     )
                 }
@@ -701,7 +759,7 @@ private fun WidgetDraftAuthorityExpansion(diff: com.jesjobom.ararai.widget.manag
 @Composable
 private fun WidgetAuthoringMessage(
     messageResource: Int,
-    warning: Boolean,
+    warning: Boolean = false,
 ) {
     WidgetAuthoringMessage(stringResource(messageResource), warning)
 }

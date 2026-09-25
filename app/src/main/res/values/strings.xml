@@ -471,6 +471,7 @@
     <string name="widget_authoring_stage_validation">Validating the exact assembled program…</string>
     <string name="widget_authoring_stage_repair">Repairing %1$s (%2$d/%3$d)…</string>
     <string name="widget_authoring_stage_ready">Draft ready</string>
+    <string name="widget_authoring_probe_completed">Background authoring probe finished. Nothing was saved.</string>
     <string name="widget_authoring_notification_channel_name">Widget generation</string>
     <string name="widget_authoring_notification_title">Generating widget</string>
     <string name="widget_authoring_notification_queued">Waiting to start widget generation…</string>
@@ -487,6 +488,7 @@
     <string name="widget_authoring_request_rejected">LiteRT-LM rejected the widget-authoring request before a proposal could be captured. Nothing was saved.</string>
     <string name="widget_authoring_runtime_failed">LiteRT-LM stopped generation before a widget proposal could be captured. Nothing was saved; try again.</string>
     <string name="widget_tool_diagnostic_title">Tool-calling diagnostic</string>
+    <string name="widget_tool_diagnostic_probe_background">Probe · background authoring job</string>
     <string name="widget_tool_diagnostic_description">Run one cold stage probe at a time, the production-like complete pipeline, or the complete comparison matrix.</string>
     <string name="widget_tool_diagnostic_privacy">The local report contains device, app, model, input sizes and hashes, outcomes, and lifecycle timings only. It excludes prompts, generated arguments, JavaScript, raw model output, exception messages, and stack traces. Review it before sharing.</string>
     <string name="widget_tool_diagnostic_run">Run complete local diagnostic</string>

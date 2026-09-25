@@ -19,6 +19,7 @@ internal data class WidgetAuthoringJobRequest(
     val inference: InferenceConfig,
     val instruction: String,
     val widgetId: String?,
+    val probe: Boolean = false,
     val requestId: String = UUID.randomUUID().toString(),
     val submittedAtMillis: Long = System.currentTimeMillis(),
 )

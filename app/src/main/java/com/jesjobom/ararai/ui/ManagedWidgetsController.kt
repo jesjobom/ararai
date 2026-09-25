@@ -117,6 +117,18 @@ internal class ManagedWidgetsController(
         draftBuilder = draftBuilder,
         registry = services.toolRegistry,
     )
+
+    /** Controlled probe pipeline: runs the full pipeline without model eligibility. */
+    private val authoringProbe = ManagedWidgetAuthoringPipeline(
+        modelController = WidgetAuthoringPipelineModelController(
+            engine = localLlmEngine,
+            requireDeclaredProtocol = false,
+            recoveryGate = recoveryGate,
+        ),
+        validator = WidgetAuthoringPipelineValidator(services.toolRegistry, widgetJavaScriptEngine),
+        draftBuilder = draftBuilder,
+        registry = services.toolRegistry,
+    )
     private val confirmations = WidgetDraftConfirmationService(services.schedules)
 
     suspend fun loadList(): List<ManagedWidgetListItemUiState> = services.repository.listDefinitions().map { definition ->
@@ -214,6 +226,53 @@ internal class ManagedWidgetsController(
             is WidgetAuthoringPipelineResult.NeedsClarification -> {
                 ManagedWidgetDraftGenerationResult.NeedsClarification(generated.question)
             }
+            is WidgetAuthoringPipelineResult.StageFailed -> ManagedWidgetDraftGenerationResult.StageFailed(
+                generated.stage,
+                generated.code,
+            )
+            WidgetAuthoringPipelineResult.TimedOut -> ManagedWidgetDraftGenerationResult.GenerationTimedOut
+        }
+    }
+
+    /**
+     * Controlled background-authoring probe: runs the complete pipeline with
+     * the fixed diagnostic prompt and without model eligibility gating, so the
+     * pending physical validation can exercise the background job lifecycle
+     * (single-flight, notification, cancellation, device-state deferral) with
+     * the installed test models. Nothing is persisted: the probe stores no
+     * widget, revision, or schedule.
+     */
+    suspend fun runBackgroundAuthoringProbe(
+        model: LocalModel,
+        inference: InferenceConfig,
+        onProgress: (WidgetAuthoringProgress) -> Unit = {},
+    ): ManagedWidgetDraftGenerationResult {
+        val prompt = WidgetAuthoringContextBuilder.build(
+            userInstruction = TOOL_CALLING_DIAGNOSTIC_PROMPT,
+            toolContracts = services.toolRegistry.descriptors(),
+        )
+        return when (
+            val generated = authoringProbe.generate(
+                model,
+                inference,
+                prompt,
+                runtimeContextProvider(),
+                onProgress,
+            )
+        ) {
+            is WidgetAuthoringPipelineResult.DraftReady -> ManagedWidgetDraftGenerationResult.Ready(
+                ManagedWidgetDraftUiState(
+                    widgetId = null,
+                    draft = generated.draft,
+                    diff = null,
+                ),
+            )
+            WidgetAuthoringPipelineResult.ModelUnavailable -> ManagedWidgetDraftGenerationResult.ModelUnavailable
+            WidgetAuthoringPipelineResult.ModelLoadFailed -> ManagedWidgetDraftGenerationResult.ModelLoadFailed
+            is WidgetAuthoringPipelineResult.Unachievable ->
+                ManagedWidgetDraftGenerationResult.Unachievable(generated.reason)
+            is WidgetAuthoringPipelineResult.NeedsClarification ->
+                ManagedWidgetDraftGenerationResult.NeedsClarification(generated.question)
             is WidgetAuthoringPipelineResult.StageFailed -> ManagedWidgetDraftGenerationResult.StageFailed(
                 generated.stage,
                 generated.code,

@@ -251,13 +251,21 @@ class ArarAiApplication :
             scope = applicationScope,
             executor = { request, onProgress ->
                 when (
-                    val result = managedWidgetsController.generateDraft(
-                        request.model,
-                        request.inference,
-                        request.instruction,
-                        request.widgetId,
-                        onProgress,
-                    )
+                    val result = if (request.probe) {
+                        managedWidgetsController.runBackgroundAuthoringProbe(
+                            request.model,
+                            request.inference,
+                            onProgress,
+                        )
+                    } else {
+                        managedWidgetsController.generateDraft(
+                            request.model,
+                            request.inference,
+                            request.instruction,
+                            request.widgetId,
+                            onProgress,
+                        )
+                    }
                 ) {
                     is ManagedWidgetDraftGenerationResult.Ready ->
                         WidgetAuthoringJobOutcome.Ready(result.value)

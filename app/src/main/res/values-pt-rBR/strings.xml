@@ -487,6 +487,7 @@
     <string name="widget_authoring_request_rejected">O LiteRT-LM rejeitou a solicitação de criação antes de entregar uma proposta. Nada foi salvo.</string>
     <string name="widget_authoring_runtime_failed">O LiteRT-LM interrompeu a geração antes de entregar uma proposta de widget. Nada foi salvo; tente novamente.</string>
     <string name="widget_tool_diagnostic_title">Diagnóstico de chamadas de ferramenta</string>
+    <string name="widget_tool_diagnostic_probe_background">Probe · job de autoria em background</string>
     <string name="widget_tool_diagnostic_description">Execute um probe frio de estágio por vez, o pipeline completo semelhante à produção ou a matriz completa de comparação.</string>
     <string name="widget_tool_diagnostic_privacy">O relatório local contém apenas dados do aparelho, app, modelo, tamanhos e hashes das entradas, resultados e tempos do ciclo de vida. Não inclui prompts, argumentos gerados, JavaScript, resposta bruta do modelo, mensagens de exceção nem stack traces. Revise antes de compartilhar.</string>
     <string name="widget_tool_diagnostic_run">Executar diagnóstico local completo</string>
