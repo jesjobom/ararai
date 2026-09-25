@@ -198,6 +198,7 @@ class LiteRtLmLocalLlmEngine(
             }
 
         if (initialState == null) {
+            runtimeTelemetry.record(event = "generation_request_rejected", outcome = "model_not_loaded")
             trySend(expectedGenerationFailure("Model is not loaded"))
             close()
             return@callbackFlow
@@ -207,10 +208,12 @@ class LiteRtLmLocalLlmEngine(
             launch(dispatcher) {
                 try {
                     request.validateAgainst(initialState.capabilities)?.let { failure ->
+                        runtimeTelemetry.record(event = "generation_request_rejected", outcome = "capability_validation")
                         trySend(expectedGenerationFailure(failure))
                         return@launch
                     }
                     if (!request.toolsAreSupported(initialState)) {
+                        runtimeTelemetry.record(event = "generation_request_rejected", outcome = "tools_unsupported")
                         trySend(expectedGenerationFailure("Selected model does not support the requested tools"))
                         return@launch
                     }
@@ -223,7 +226,16 @@ class LiteRtLmLocalLlmEngine(
                     generationFinished.set(true)
                     trySend(GenerationEvent.Completed)
                 } catch (error: Throwable) {
-                    trySend(error.toGenerationFailure())
+                    val failure = error.toGenerationFailure()
+                    runtimeTelemetry.record(
+                        event = "generation_request_failed",
+                        outcome = when (failure.kind) {
+                            GenerationFailureKind.ToolCallParsing -> "tool_call_parsing"
+                            GenerationFailureKind.Unexpected -> "unexpected"
+                            GenerationFailureKind.Expected -> "expected"
+                        },
+                    )
+                    trySend(failure)
                 } finally {
                     generationFinished.set(true)
                     close()
