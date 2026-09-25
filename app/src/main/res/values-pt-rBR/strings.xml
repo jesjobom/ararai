@@ -471,6 +471,7 @@
     <string name="widget_authoring_stage_validation">Validando o programa montado exato…</string>
     <string name="widget_authoring_stage_repair">Corrigindo %1$s (%2$d/%3$d)…</string>
     <string name="widget_authoring_stage_ready">Rascunho pronto</string>
+    <string name="widget_authoring_probe_completed">Probe de autoria em background concluído. Nada foi salvo.</string>
     <string name="widget_authoring_notification_channel_name">Geração de widgets</string>
     <string name="widget_authoring_notification_title">Gerando widget</string>
     <string name="widget_authoring_notification_queued">Aguardando o início da geração do widget…</string>

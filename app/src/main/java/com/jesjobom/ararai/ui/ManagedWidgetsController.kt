@@ -15,11 +15,13 @@ import com.jesjobom.ararai.widget.managed.ManagedWidgetAuthoringPipeline
 import com.jesjobom.ararai.widget.managed.ManagedWidgetDefinition
 import com.jesjobom.ararai.widget.managed.ManagedWidgetExecutionStatus
 import com.jesjobom.ararai.widget.managed.ValidatedWidgetDraft
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringAttemptFailure
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringContextBuilder
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringPipelineModelController
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringPipelineResult
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringPipelineValidator
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringProgress
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringRoundLifecycle
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringStage
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringStageFailureCode
 import com.jesjobom.ararai.widget.managed.WidgetConfirmationMode
@@ -95,10 +97,10 @@ internal sealed interface ManagedWidgetDraftGenerationResult {
 
 internal class ManagedWidgetsController(
     private val services: ManagedWidgetApplicationServices,
-    localLlmEngine: LocalLlmEngine,
-    widgetJavaScriptEngine: WidgetJavaScriptEngine = QuickJsWidgetJavaScriptEngine(),
+    private val localLlmEngine: LocalLlmEngine,
+    private val widgetJavaScriptEngine: WidgetJavaScriptEngine = QuickJsWidgetJavaScriptEngine(),
     private val runtimeContextProvider: () -> WidgetRuntimeContext = ::currentManagedWidgetRuntimeContext,
-    recoveryGate: LocalLlmRecoveryGate = ImmediateLocalLlmRecoveryGate,
+    private val recoveryGate: LocalLlmRecoveryGate = ImmediateLocalLlmRecoveryGate,
 ) {
     private val toolCallingDiagnostic = WidgetToolCallingDiagnosticRunner(
         engine = localLlmEngine,
@@ -118,17 +120,6 @@ internal class ManagedWidgetsController(
         registry = services.toolRegistry,
     )
 
-    /** Controlled probe pipeline: runs the full pipeline without model eligibility. */
-    private val authoringProbe = ManagedWidgetAuthoringPipeline(
-        modelController = WidgetAuthoringPipelineModelController(
-            engine = localLlmEngine,
-            requireDeclaredProtocol = false,
-            recoveryGate = recoveryGate,
-        ),
-        validator = WidgetAuthoringPipelineValidator(services.toolRegistry, widgetJavaScriptEngine),
-        draftBuilder = draftBuilder,
-        registry = services.toolRegistry,
-    )
     private val confirmations = WidgetDraftConfirmationService(services.schedules)
 
     suspend fun loadList(): List<ManagedWidgetListItemUiState> = services.repository.listDefinitions().map { definition ->
@@ -240,7 +231,8 @@ internal class ManagedWidgetsController(
      * pending physical validation can exercise the background job lifecycle
      * (single-flight, notification, cancellation, device-state deferral) with
      * the installed test models. Nothing is persisted: the probe stores no
-     * widget, revision, or schedule.
+     * widget, revision, or schedule. Each round emits sanitized lifecycle
+     * lines under the ArarAI.WidgetDiagnostic tag (debug builds only).
      */
     suspend fun runBackgroundAuthoringProbe(
         model: LocalModel,
@@ -251,8 +243,22 @@ internal class ManagedWidgetsController(
             userInstruction = TOOL_CALLING_DIAGNOSTIC_PROMPT,
             toolContracts = services.toolRegistry.descriptors(),
         )
+        val trace = WidgetProbeTrace()
+        val pipeline = ManagedWidgetAuthoringPipeline(
+            modelController = WidgetAuthoringPipelineModelController(
+                engine = localLlmEngine,
+                requireDeclaredProtocol = false,
+                onCapture = trace::onCapture,
+                onRoundLifecycle = trace::onRoundLifecycle,
+                recoveryGate = recoveryGate,
+            ),
+            validator = WidgetAuthoringPipelineValidator(services.toolRegistry, widgetJavaScriptEngine),
+            draftBuilder = draftBuilder,
+            registry = services.toolRegistry,
+            onAttemptFailure = trace::onAttemptFailure,
+        )
         return when (
-            val generated = authoringProbe.generate(
+            val generated = pipeline.generate(
                 model,
                 inference,
                 prompt,
@@ -341,6 +347,47 @@ private const val WIDGET_DIAGNOSTIC_LOG_TAG = "ArarAI.WidgetDiagnostic"
 
 private fun WidgetToolCallingDiagnosticReport.logControlledTrace() {
     controlledLogLines().forEach { line -> Log.i(WIDGET_DIAGNOSTIC_LOG_TAG, line) }
+}
+
+/**
+ * Sanitized lifecycle trace for the background-authoring probe. Emits per
+ * round and per attempt lines (stage, attempt, repair flag, controlled
+ * outcome, bounded byte counts, and monotonic timings) under the same
+ * ArarAI.WidgetDiagnostic tag the diagnostic runner uses. Never includes the
+ * prompt, context text, generated arguments, or raw model output.
+ */
+private class WidgetProbeTrace {
+    private val attemptsByStage = mutableMapOf<WidgetAuthoringStage, Int>()
+
+    fun onCapture(toolName: String, argumentBytes: Int) {
+        log("capture tool=$toolName argumentBytes=$argumentBytes")
+    }
+
+    fun onRoundLifecycle(lifecycle: WidgetAuthoringRoundLifecycle) {
+        val attempt = attemptsByStage.getOrDefault(lifecycle.stage, 0) + 1
+        attemptsByStage[lifecycle.stage] = attempt
+        log(
+            "round stage=${lifecycle.stage.name} attempt=$attempt repair=${lifecycle.isRepair} " +
+                "outcome=${lifecycle.outcome.diagnosticWireName} " +
+                "firstGen=${lifecycle.firstGenerationEventMillis ?: "none"} " +
+                "capture=${lifecycle.toolCaptureMillis ?: "none"} " +
+                "terminal=${lifecycle.terminalEventMillis ?: "none"} " +
+                "watchdog=${lifecycle.watchdogMillis ?: "none"} " +
+                "return=${lifecycle.returnMillis} " +
+                "cleanupOverrun=${lifecycle.cleanupOverrunMillis ?: "none"}",
+        )
+    }
+
+    fun onAttemptFailure(failure: WidgetAuthoringAttemptFailure) {
+        log(
+            "attempt_failure stage=${failure.stage.name} attempt=${failure.attempt} " +
+                "code=${failure.code.name} argumentBytes=${failure.argumentBytes ?: "none"}",
+        )
+    }
+
+    private fun log(message: String) {
+        if (BuildConfig.DEBUG) Log.i(WIDGET_DIAGNOSTIC_LOG_TAG, "probe $message")
+    }
 }
 
 private fun currentManagedWidgetRuntimeContext(): WidgetRuntimeContext {
