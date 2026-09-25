@@ -7,8 +7,8 @@ permalink: /managed-widgets/
 
 ArarAI managed widgets are local views authored by an eligible downloaded model
 and rendered inside the application. They are not Android launcher widgets. A
-model participates only while the user is in the foreground creation or edit
-flow; confirmed refreshes execute the stored JavaScript program in the bounded
+model participates only in the user-requested creation or edit flow; confirmed
+refreshes execute the stored JavaScript program in the bounded
 QuickJS runtime and do not load or prompt a model.
 
 ## Create and review
@@ -44,6 +44,28 @@ The historical one-shot suite v2 showed that E2B failed the complete proposal
 while E4B passed it. That result does not grant eligibility for the new staged
 protocol. No checked-in model advertises `widget_authoring_pipeline_v1` until it
 passes the physical suite-v3 stage matrix and complete synthetic pipeline.
+
+## Background authoring jobs
+
+A generation request runs as an application-scoped background job instead of a
+screen-owned coroutine, so it continues while the user navigates within the
+app and survives leaving the authoring screen. The job controller enforces
+single-flight: while a job is queued, running, or deferred, new generation
+requests are refused with a visible explanation, and the active job can be
+cancelled from the screen or the persistent notification (a foreground
+`dataSync` service owns the progress notification for the job lifetime).
+
+Before generation starts, the application evaluates device state (severe
+thermal status, low available memory, and the system low-memory signal).
+Unacceptable state defers the job with a stated reason and capped backoff
+retries; exhausting the retry budget fails the job explicitly. Once running,
+transient windows are tolerated through the bounded recovery gate. The
+authoring screen reports the live stage, the deferral reason, and a cancel
+action, and disables new requests while a job is active.
+
+Job state and the resulting draft live only in memory. If the process dies
+during a job, nothing is persisted and the request can simply be repeated.
+Physical-device validation of the deferral gating is still pending.
 
 ## Refresh and scheduling
 
