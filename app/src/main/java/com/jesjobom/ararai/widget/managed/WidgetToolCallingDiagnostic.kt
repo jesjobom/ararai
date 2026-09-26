@@ -517,11 +517,7 @@ internal class WidgetToolCallingDiagnosticRunner(
             contextTokens = maxContextTokens,
             temperature = inference.temperature.coerceAtMost(maxTemperature),
         )
-        val diagnosticModel = model.copy(
-            toolCapabilities = model.toolCapabilities.copy(
-                authoringProtocolNames = model.toolCapabilities.authoringProtocolNames + WIDGET_AUTHORING_PIPELINE_V1,
-            ),
-        )
+        val diagnosticModel = model.forAuthoringCharacterization()
         val loadStarted = monotonicMillis()
         val loadOutcome = try {
             // Diagnostics intentionally characterize a selected candidate before it is
@@ -1187,6 +1183,19 @@ internal const val DIAGNOSTIC_OUTCOME_PASS = "pass"
 internal const val DIAGNOSTIC_TOOL_CALL_PARSING = "tool_call_parsing"
 internal const val DIAGNOSTIC_NO_TOOL_CALL = "no_tool_call"
 internal const val DIAGNOSTIC_GENERATION_EXPECTED = "generation_rejected"
+
+/**
+ * Characterization harnesses (diagnostic probes and the background authoring
+ * probe) load the selected candidate with the staged authoring protocol
+ * capability even though the static catalog does not grant it yet. Without
+ * it, the engine's tool-support gate rejects every ephemeral authoring-tool
+ * request before generation starts (tools_unsupported).
+ */
+internal fun LocalModel.forAuthoringCharacterization(): LocalModel = copy(
+    toolCapabilities = toolCapabilities.copy(
+        authoringProtocolNames = toolCapabilities.authoringProtocolNames + WIDGET_AUTHORING_PIPELINE_V1,
+    ),
+)
 internal const val DIAGNOSTIC_GENERATION_FAILED = "generation_failed"
 internal const val DIAGNOSTIC_CASE_TIMEOUT = "case_timeout"
 internal const val DIAGNOSTIC_LOAD_FAILED = "model_load_failed"

@@ -36,6 +36,7 @@ import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticEnvironment
 import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticMode
 import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticReport
 import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticRunner
+import com.jesjobom.ararai.widget.managed.forAuthoringCharacterization
 import com.jesjobom.ararai.widget.managed.consentDigest
 import com.jesjobom.ararai.widget.managed.diffWidgetDraft
 import com.jesjobom.ararai.widget.runtime.QuickJsWidgetJavaScriptEngine
@@ -244,6 +245,12 @@ internal class ManagedWidgetsController(
             toolContracts = services.toolRegistry.descriptors(),
         )
         val trace = WidgetProbeTrace()
+        // The probe characterizes the selected candidate exactly like the
+        // diagnostic harness: the static catalog does not grant the staged
+        // authoring protocol yet, so load with it enabled here. Otherwise the
+        // engine's tool gate rejects every authoring round instantly
+        // (tools_unsupported) and the probe measures nothing.
+        val characterizedModel = model.forAuthoringCharacterization()
         val pipeline = ManagedWidgetAuthoringPipeline(
             modelController = WidgetAuthoringPipelineModelController(
                 engine = localLlmEngine,
@@ -259,7 +266,7 @@ internal class ManagedWidgetsController(
         )
         return when (
             val generated = pipeline.generate(
-                model,
+                characterizedModel,
                 inference,
                 prompt,
                 runtimeContextProvider(),
