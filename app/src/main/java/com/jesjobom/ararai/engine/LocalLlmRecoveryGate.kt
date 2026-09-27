@@ -73,7 +73,7 @@ internal class BoundedLocalLlmRecoveryGate(
 
     companion object {
         const val SAMPLE_INTERVAL_MILLIS = 5_000L
-        const val MAXIMUM_WAIT_MILLIS = 3 * 60_000L
+        const val MAXIMUM_WAIT_MILLIS = 10 * 60_000L
         const val STABLE_SAMPLES_REQUIRED = 3
         const val MAXIMUM_BATTERY_TEMPERATURE_CELSIUS = 32f
         const val MAXIMUM_PROCESS_PSS_KIB = 1_048_576

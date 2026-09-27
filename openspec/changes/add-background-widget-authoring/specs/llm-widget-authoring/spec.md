@@ -66,6 +66,12 @@ generation under pressure. Deferred jobs SHALL retry with a bounded attempt
 budget and SHALL transition to an explicit failed state with a stated reason
 when the budget is exhausted.
 
+Between authoring generations, the application SHALL allow the recovery gate up
+to 10 minutes to observe an acceptable device window before failing the active
+pipeline attempt. The existing thermal, battery-temperature, process-memory,
+available-memory, low-memory, and consecutive-sample criteria SHALL remain
+unchanged.
+
 #### Scenario: Defer under severe thermal status
 
 - **WHEN** a job starts while the thermal status is severe or worse
@@ -80,6 +86,13 @@ when the budget is exhausted.
   device state
 - **THEN** the job transitions to failed with a deferral-exhausted reason
 - **AND** the UI and notification reflect the failure.
+
+#### Scenario: Inter-generation recovery needs more than three minutes
+
+- **WHEN** an authoring generation completes and the recovery gate has not yet
+  observed an acceptable stable window after three minutes
+- **THEN** the background authoring job continues waiting instead of failing
+- **AND** it waits for at most 10 minutes before reporting recovery timeout.
 
 ### Requirement: Visible authoring job state
 

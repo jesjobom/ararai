@@ -1353,3 +1353,21 @@ measurements remain release-validation checks rather than claims of this change.
   are materially improved on the test device. Together with the successful
   repeated Voice Chat navigation stress test, this completes OpenSpec change
   `harden-navigation-load-and-startup` physical validation task 2.4.
+
+### 2026-09-26 background widget-authoring recovery-window validation
+
+- Tester: JIA DEV, automated over ADB on the Samsung Galaxy S22 (`SM-S901E`).
+- Model: Gemma 4 E4B IT LiteRT-LM. Debug APK SHA-256:
+  `c7fc1265de5cd6777c1612c0be8b9eb5e1dd5ac3b34ca771d1e6ff95df8dc9da`.
+- The inter-generation recovery gate remained active more than 3 minutes after
+  the battery-temperature criterion initially failed, then accepted three
+  consecutive samples at 30.9 C and resumed model reload after about 4 minutes
+  11 seconds. This physically validates the extended 10-minute recovery bound.
+- The app was on the launcher while the foreground-service job continued,
+  confirming that the recovery wait itself remained active in background.
+- The full probe did not complete: Android LMK killed the foreground-service
+  process during the following E4B initialization because the low watermark was
+  breached and swap was low. Treat the timeout change as passed but the complete
+  background authoring flow as failed pending separate memory-pressure work.
+- Sanitized evidence:
+  `openspec/changes/add-background-widget-authoring/evidence/2026-09-26-sms901e-background-probe-5-ten-minute-recovery.{log,md}`.

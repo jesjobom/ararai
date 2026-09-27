@@ -58,3 +58,9 @@
   in-memory-only job persistence limitation.
 - [x] 5.3 Record that physical-device validation (deferred by request) is the
   remaining acceptance evidence for this change.
+- [x] 5.4 Extend the bounded inter-generation recovery window from 3 to 10
+  minutes while preserving all readiness thresholds, and cover the default
+  duration with a virtual-time regression test.
+- [x] 5.5 Validate the extended window on the SM-S901E by observing recovery
+  continue beyond 3 minutes and complete successfully before the new bound;
+  record the separate LMK interruption during the following model reload.

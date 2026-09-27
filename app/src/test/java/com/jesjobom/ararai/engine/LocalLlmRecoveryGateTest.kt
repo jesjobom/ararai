@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.engine
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -43,6 +44,23 @@ class LocalLlmRecoveryGateTest {
         )
 
         assertFalse(gate.awaitReady())
+    }
+
+    @Test
+    fun `default recovery window remains active beyond three minutes and times out at ten`() = runTest {
+        val gate = BoundedLocalLlmRecoveryGate(
+            snapshot = { snapshot(lowMemory = true) },
+        )
+        val result = async { gate.awaitReady() }
+
+        advanceTimeBy(3 * 60_000L)
+        runCurrent()
+        assertFalse(result.isCompleted)
+
+        advanceTimeBy(7 * 60_000L)
+        runCurrent()
+        assertTrue(result.isCompleted)
+        assertFalse(result.await())
     }
 
     @Test
