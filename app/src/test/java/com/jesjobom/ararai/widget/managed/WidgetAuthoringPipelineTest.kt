@@ -5,6 +5,7 @@ package com.jesjobom.ararai.widget.managed
 import com.google.gson.JsonArray
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.jesjobom.ararai.engine.GenerationEvent
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptRequest
@@ -23,6 +24,7 @@ import com.jesjobom.ararai.widget.runtime.WidgetJavaScriptEngine
 import com.jesjobom.ararai.widget.runtime.WidgetRequestedLimits
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeContext
 import com.jesjobom.ararai.widget.runtime.WidgetScriptResult
+import com.jesjobom.ararai.widget.runtime.WidgetToolCapability
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
@@ -39,7 +41,6 @@ class WidgetAuthoringPipelineTest {
                 feasibility(),
                 algorithm(),
                 fragment("events_call", "buildCallEventsCall", listOf("runtime"), CALL_SOURCE),
-                fragment("plan", "plan", listOf("runtime"), PLAN_SOURCE),
                 fragment("render", "render", listOf("runtime", "outcomes", "state"), RENDER_SOURCE),
             ),
         )
@@ -59,9 +60,9 @@ class WidgetAuthoringPipelineTest {
         val draft = (result as WidgetAuthoringPipelineResult.DraftReady).draft
         assertEquals(listOf("events_call"), draft.plannedCalls.map { it.alias })
         assertEquals(listOf(CALL_SOURCE, PLAN_SOURCE, RENDER_SOURCE).joinToString("\n\n"), draft.program.source)
-        assertEquals(5, modelEngine.loadedModels)
-        assertEquals(4, modelEngine.unloadedModels)
-        assertEquals(5, modelEngine.requests.size)
+        assertEquals(4, modelEngine.loadedModels)
+        assertEquals(3, modelEngine.unloadedModels)
+        assertEquals(4, modelEngine.requests.size)
         assertEquals(
             listOf(
                 "load",
@@ -76,15 +77,43 @@ class WidgetAuthoringPipelineTest {
         assertTrue(feasibilityPrompt.contains("\"outputFields\":[\"events\",\"kind\"]"))
         assertFalse(feasibilityPrompt.contains("\"canonicalUrl\""))
         assertTrue(modelEngine.requests[1].plainChatPrompt.contains("\"canonicalUrl\""))
+        val renderPrompt = modelEngine.requests[3].plainChatPrompt
+        assertTrue(renderPrompt.contains("\"renderApi\""))
+        assertTrue(renderPrompt.contains("\"outcomeShape\""))
+        assertTrue(renderPrompt.contains("outcomes[alias]"))
+        assertTrue(renderPrompt.contains("plain JavaScript object; it is not a Map"))
+        assertTrue(renderPrompt.contains("never call outcomes.get()"))
+        assertFalse(renderPrompt.contains("\"programApi\""))
+        assertTrue(renderPrompt.contains("\"presentationContract\""))
+        assertTrue(renderPrompt.contains("{type:'card',child:N}"))
+        assertTrue(renderPrompt.contains("{type:'text',text:'...',tone:T}"))
         modelEngine.requests.forEach { request ->
             assertEquals(null, request.chatSessionId)
             assertEquals(1, request.ephemeralTools.size)
             assertEquals(request.advertisedToolNames.single(), request.ephemeralTools.single().name)
         }
         assertTrue(progress.contains(WidgetAuthoringProgress.ValidatingAssembly))
-        assertEquals(4, progress.count { it == WidgetAuthoringProgress.WaitingForDeviceRecovery })
+        assertEquals(3, progress.count { it == WidgetAuthoringProgress.WaitingForDeviceRecovery })
         assertEquals(WidgetAuthoringProgress.DraftReady, progress.last())
         assertFalse(modelEngine.requests.any { it.advertisedToolNames.contains("wikipedia_on_this_day") })
+    }
+
+    @Test
+    fun `render context keeps generic API separate from concrete aliases`() {
+        val context = JsonParser.parseString(
+            renderContext(PROMPT, feasibilityArtifact(), algorithmArtifact()),
+        ).asJsonObject
+
+        assertFalse(context.has("programApi"))
+        val renderApi = context.getAsJsonObject("renderApi").toString()
+        assertTrue(renderApi.contains("outcomes[alias]"))
+        assertTrue(renderApi.contains("never call outcomes.get()"))
+        assertFalse(renderApi.contains("events_call"))
+        assertFalse(renderApi.contains("wikipedia"))
+        assertEquals(
+            "events_call",
+            context.getAsJsonArray("toolResults").single().asJsonObject.get("alias").asString,
+        )
     }
 
     @Test
@@ -136,7 +165,6 @@ class WidgetAuthoringPipelineTest {
                 feasibility(),
                 algorithm(),
                 fragment("events_call", "buildCallEventsCall", listOf("runtime"), CALL_SOURCE),
-                fragment("plan", "plan", listOf("runtime"), PLAN_SOURCE),
                 fragment("render", "render", listOf("runtime", "outcomes", "state"), RENDER_SOURCE),
             ),
         )
@@ -155,9 +183,9 @@ class WidgetAuthoringPipelineTest {
         val result = pipeline.generate(MODEL, INFERENCE, PROMPT, RUNTIME, progress::add)
 
         assertTrue(result is WidgetAuthoringPipelineResult.DraftReady)
-        assertEquals(6, modelEngine.requests.size)
-        assertEquals(6, modelEngine.loadedModels)
-        assertEquals(5, modelEngine.unloadedModels)
+        assertEquals(5, modelEngine.requests.size)
+        assertEquals(5, modelEngine.loadedModels)
+        assertEquals(4, modelEngine.unloadedModels)
         assertTrue(
             progress.contains(
                 WidgetAuthoringProgress.Repairing(
@@ -205,6 +233,9 @@ class WidgetAuthoringPipelineTest {
         )
         assertEquals(3, modelEngine.requests.size)
         assertTrue(modelEngine.requests.all { it.advertisedToolNames == setOf(SUBMIT_WIDGET_FEASIBILITY_TOOL) })
+        assertTrue(modelEngine.requests[1].plainChatPrompt.contains("Rejected artifact (bounded evidence"))
+        assertTrue(modelEngine.requests[2].plainChatPrompt.contains("Rejected artifact omitted to prevent anchoring"))
+        assertFalse(modelEngine.requests[2].plainChatPrompt.contains("Rejected artifact (bounded evidence"))
         assertTrue(javascript.calls.isEmpty())
     }
 
@@ -291,7 +322,7 @@ class WidgetAuthoringPipelineTest {
         ): WidgetScriptResult {
             calls += Call(source, entrypoint)
             return when (entrypoint) {
-                "buildCallEventsCall" -> WidgetScriptResult.Success(VALID_CALL)
+                "buildCallEventsCall" -> WidgetScriptResult.Success(VALID_ARGUMENTS)
                 "plan" -> WidgetScriptResult.Success("[$VALID_CALL]")
                 "render" -> WidgetScriptResult.Success("""{"type":"text","text":"Synthetic","tone":"neutral"}""")
                 else -> error("Unexpected entrypoint $entrypoint")
@@ -312,20 +343,36 @@ class WidgetAuthoringPipelineTest {
         private val RUNTIME = WidgetRuntimeContext("en-CA", "America/Toronto", "2026-09-10T12:00:00-04:00", 42)
         private val PROMPT = WidgetAuthoringPrompt(
             "Show one random Wikipedia event for today",
-            """{"tools":[{"id":"wikipedia_on_this_day","version":1,"displayName":"Wikipedia on this day","networkRequired":true,"inputSchema":{"type":"object"},"outputSchema":{"type":"object","properties":{"kind":{"type":"string"},"events":{"type":"array","items":{"type":"object","properties":{"year":{"type":"integer"},"text":{"type":"string"},"canonicalUrl":{"type":"string"}}}}}}}]}""",
+            """{"programApi":{"outcomeShape":"outcomes[alias] is a result object","presentationNodes":"https_link:{label,url,sourceAlias,sourceField}"},"tools":[{"id":"wikipedia_on_this_day","version":1,"displayName":"Wikipedia on this day","networkRequired":true,"inputSchema":{"type":"object"},"outputSchema":{"type":"object","properties":{"kind":{"type":"string"},"events":{"type":"array","items":{"type":"object","properties":{"year":{"type":"integer"},"text":{"type":"string"},"canonicalUrl":{"type":"string"}}}}}}}]}""",
         )
 
         private const val CALL_SOURCE = """function buildCallEventsCall(runtime) {
   const now = runtime.currentLocalDateTime();
-  return {alias:'events_call',toolId:'wikipedia_on_this_day',contractVersion:1,arguments:{month:now.month,day:now.day,language:runtime.language}};
+  return {month:now.month,day:now.day,language:runtime.language};
 }"""
         private const val PLAN_SOURCE = """function plan(runtime) {
-  return [buildCallEventsCall(runtime)];
+  const value0 = buildCallEventsCall(runtime);
+  return [{alias:"events_call",toolId:"wikipedia_on_this_day",contractVersion:1,arguments:value0&&value0.alias==="events_call"&&value0.toolId==="wikipedia_on_this_day"&&value0.contractVersion===1?value0.arguments:value0}];
 }"""
         private const val RENDER_SOURCE = """function render(runtime, outcomes, state) {
   return {type:'text',text:'Synthetic',tone:'neutral'};
 }"""
         private const val VALID_CALL = """{"alias":"events_call","toolId":"wikipedia_on_this_day","contractVersion":1,"arguments":{"month":9,"day":10,"language":"en"}}"""
+        private const val VALID_ARGUMENTS = """{"month":9,"day":10,"language":"en"}"""
+
+        private fun feasibilityArtifact() = when (
+            val parsed = WidgetFeasibilityParser.parse(feasibility(), setOf(WidgetToolCapability("wikipedia_on_this_day", 1)))
+        ) {
+            is WidgetFeasibilityParseResult.Valid -> parsed.artifact
+            is WidgetFeasibilityParseResult.Invalid -> error("Invalid feasibility fixture")
+        }
+
+        private fun algorithmArtifact(): WidgetAlgorithmArtifact = when (
+            val parsed = WidgetAlgorithmParser.parse(algorithm(), feasibilityArtifact())
+        ) {
+            is WidgetAlgorithmParseResult.Valid -> parsed.artifact
+            is WidgetAlgorithmParseResult.Invalid -> error("Invalid algorithm fixture")
+        }
 
         private fun registry() = ApplicationToolRegistry(
             listOf(

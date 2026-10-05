@@ -43,13 +43,13 @@ class WidgetToolCallingDiagnosticTest {
         )
 
         assertTrue(report.toCanonicalJson(), report.overallPassed)
-        assertEquals(6, report.cases.size)
+        assertEquals(5, report.cases.size)
         assertTrue(report.cases.all { it.passed && it.toolCallObserved && it.argumentBytes != null })
         assertTrue(report.cases.all { it.failureStage == null && it.failureCode == null })
         assertTrue(report.cases.all { it.attemptFailures.isEmpty() })
-        assertTrue(report.cases.take(5).all { it.captures.single().callCount == 1 })
+        assertTrue(report.cases.take(4).all { it.captures.single().callCount == 1 })
         assertEquals(EXPECTED_STAGE_TOOLS, report.cases.last().captures.mapTo(mutableSetOf()) { it.toolName })
-        assertEquals(6, report.cases.map { it.schemaSha256 }.distinct().size)
+        assertEquals(5, report.cases.map { it.schemaSha256 }.distinct().size)
         assertEquals(MAX_WIDGET_AUTHORING_CONTEXT_TOKENS, engine.loadedInference?.contextTokens)
         assertEquals(MAX_WIDGET_AUTHORING_TEMPERATURE, engine.loadedInference?.temperature)
         assertTrue(engine.requests.all { it.chatSessionId == null })
@@ -57,7 +57,7 @@ class WidgetToolCallingDiagnosticTest {
         assertTrue(engine.requests.all { it.ephemeralTools.single().name in EXPECTED_STAGE_TOOLS })
 
         val encoded = report.toCanonicalJson()
-        assertEquals(15, JsonParser.parseString(encoded).asJsonObject.get("suiteVersion").asInt)
+        assertEquals(16, JsonParser.parseString(encoded).asJsonObject.get("suiteVersion").asInt)
         assertTrue(encoded.contains("\"containsRawModelOutput\":false"))
         assertTrue(encoded.contains("\"failureStage\":null"))
         assertTrue(encoded.contains("\"failureCode\":null"))
@@ -211,24 +211,22 @@ class WidgetToolCallingDiagnosticTest {
         assertEquals("complete_pipeline_compact_natural", report.mode.wireName)
         assertEquals(1, report.cases.size)
         assertEquals("complete_synthetic_pipeline", report.cases.single().id)
-        assertEquals(5, engine.requests.size)
+        assertEquals(4, engine.requests.size)
         assertEquals(
             listOf(
                 SUBMIT_WIDGET_FEASIBILITY_TOOL,
                 SUBMIT_WIDGET_ALGORITHM_TOOL,
                 SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
-                SUBMIT_WIDGET_PLAN_FUNCTION_TOOL,
                 SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
             ),
             engine.requests.map { it.ephemeralTools.single().name },
         )
-        assertEquals(5, report.cases.single().roundLifecycles.size)
+        assertEquals(4, report.cases.single().roundLifecycles.size)
         assertEquals(
             listOf(
                 WidgetAuthoringStage.Feasibility,
                 WidgetAuthoringStage.Algorithm,
                 WidgetAuthoringStage.CallFunction,
-                WidgetAuthoringStage.PlanFunction,
                 WidgetAuthoringStage.RenderFunction,
             ),
             report.cases.single().roundLifecycles.map { it.stage },
@@ -265,13 +263,12 @@ class WidgetToolCallingDiagnosticTest {
             },
         )
         assertTrue(raw.contains("\"capturedArgumentsJson\":["))
-        assertEquals(5, trace.exchanges.size)
+        assertEquals(4, trace.exchanges.size)
         assertEquals(
             listOf(
                 SUBMIT_WIDGET_FEASIBILITY_TOOL,
                 SUBMIT_WIDGET_ALGORITHM_TOOL,
                 SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
-                SUBMIT_WIDGET_PLAN_FUNCTION_TOOL,
                 SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
             ),
             trace.exchanges.map { it.toolName },
@@ -440,7 +437,7 @@ class WidgetToolCallingDiagnosticTest {
             .run(model(), INFERENCE, prompt(), environment())
 
         assertFalse(report.overallPassed)
-        assertEquals(List(5) { DIAGNOSTIC_TOOL_CALL_PARSING }, report.cases.take(5).map { it.outcome })
+        assertEquals(List(4) { DIAGNOSTIC_TOOL_CALL_PARSING }, report.cases.take(4).map { it.outcome })
         assertEquals(DIAGNOSTIC_PIPELINE_INVALID, report.cases.last().outcome)
         assertTrue(report.cases.none { it.toolCallObserved })
         assertFalse(report.toCanonicalJson().contains(DiagnosticFakeEngine.RAW_EXCEPTION_MARKER))
@@ -515,7 +512,6 @@ class WidgetToolCallingDiagnosticTest {
             SUBMIT_WIDGET_FEASIBILITY_TOOL,
             SUBMIT_WIDGET_ALGORITHM_TOOL,
             SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
-            SUBMIT_WIDGET_PLAN_FUNCTION_TOOL,
             SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
         )
     }
@@ -594,7 +590,6 @@ private class DiagnosticFakeEngine(private val mode: DiagnosticMode) : LocalLlmE
             listOf("runtime"),
             CALL_SOURCE,
         )
-        SUBMIT_WIDGET_PLAN_FUNCTION_TOOL -> fragmentArtifact("plan", "plan", listOf("runtime"), PLAN_SOURCE)
         SUBMIT_WIDGET_RENDER_FUNCTION_TOOL -> fragmentArtifact(
             "render",
             "render",
@@ -617,7 +612,7 @@ private class DiagnosticJavaScriptEngine : WidgetJavaScriptEngine {
         argumentsJson: List<String>,
         limits: WidgetRequestedLimits,
     ): WidgetScriptResult = when (entrypoint) {
-        "buildCallEventsCall" -> WidgetScriptResult.Success(VALID_CALL)
+        "buildCallEventsCall" -> WidgetScriptResult.Success(VALID_ARGUMENTS)
         "plan" -> WidgetScriptResult.Success("[$VALID_CALL]")
         "render" -> WidgetScriptResult.Success("""{"type":"text","text":"Synthetic","tone":"neutral"}""")
         else -> error("Unexpected entrypoint $entrypoint")
@@ -666,7 +661,6 @@ private fun invalidFieldsArtifact(): String = JsonParser.parseString(feasibility
 }.toString()
 
 private fun algorithmArtifact(): String = JsonObject().apply {
-    addProperty("protocolVersion", 1)
     add(
         "steps",
         JsonArray().apply {
@@ -702,12 +696,10 @@ private fun fragmentArtifact(id: String, name: String, inputs: List<String>, sou
 
 private const val CALL_SOURCE = """function buildCallEventsCall(runtime) {
   const now = runtime.currentLocalDateTime();
-  return {alias:'events_call',toolId:'wikipedia_on_this_day',contractVersion:1,arguments:{month:now.month,day:now.day,language:runtime.language}};
-}"""
-private const val PLAN_SOURCE = """function plan(runtime) {
-  return [buildCallEventsCall(runtime)];
+  return {month:now.month,day:now.day,language:runtime.language};
 }"""
 private const val RENDER_SOURCE = """function render(runtime, outcomes, state) {
   return {type:'text',text:'Synthetic',tone:'neutral'};
 }"""
 private const val VALID_CALL = """{"alias":"events_call","toolId":"wikipedia_on_this_day","contractVersion":1,"arguments":{"month":9,"day":10,"language":"en"}}"""
+private const val VALID_ARGUMENTS = """{"month":9,"day":10,"language":"en"}"""

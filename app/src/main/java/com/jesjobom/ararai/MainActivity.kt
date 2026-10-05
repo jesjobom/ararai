@@ -54,6 +54,7 @@ import java.io.File
 
 class MainActivity : ComponentActivity() {
     private val openModelManagementRequests = MutableStateFlow(0)
+    private val openWidgetAuthoringRequests = MutableStateFlow(0)
 
     override fun attachBaseContext(newBase: Context) {
         val language = SharedPreferencesApplicationLanguagePreferenceStore(newBase).language
@@ -111,6 +112,7 @@ class MainActivity : ComponentActivity() {
             val themeMode by themePreferenceStore.themeMode.collectAsState()
             val modelState by modelController.state.collectAsState()
             val openModelManagementRequest by openModelManagementRequests.collectAsState()
+            val openWidgetAuthoringRequest by openWidgetAuthoringRequests.collectAsState()
             val notificationPermissionLauncher =
                 rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission(),
@@ -169,6 +171,7 @@ class MainActivity : ComponentActivity() {
                         tourPreferenceStore = tourPreferenceStore,
                         voiceTemporaryDirectory = voiceTemporaryDirectory,
                         openModelManagementRequest = openModelManagementRequest,
+                        openWidgetAuthoringRequest = openWidgetAuthoringRequest,
                         liteRtLmCacheDir =
                         prepareLiteRtLmCacheDir(cacheDir) { error ->
                             Log.w("ArarAI.LiteRtLm", "Unable to prepare LiteRT-LM cache", error)
@@ -176,6 +179,7 @@ class MainActivity : ComponentActivity() {
                         managedWidgetServices = app.managedWidgetApplicationServices,
                         localLlmEngineFactory = { app.localLlmRuntime.engine },
                         widgetAuthoringJobs = app.widgetAuthoringJobs,
+                        widgetAuthoringWorkflow = app.widgetAuthoringWorkflowCoordinator,
                         onShareWidgetToolCallingDiagnostic = ::shareWidgetToolCallingDiagnostic,
                         onShareRawWidgetToolCallingDiagnostic = ::shareRawWidgetToolCallingDiagnostic,
                     )
@@ -194,6 +198,10 @@ class MainActivity : ComponentActivity() {
         if (intent?.getBooleanExtra(EXTRA_OPEN_MODELS, false) == true) {
             openModelManagementRequests.value += 1
             intent.removeExtra(EXTRA_OPEN_MODELS)
+        }
+        if (intent?.getBooleanExtra(EXTRA_OPEN_WIDGET_AUTHORING, false) == true) {
+            openWidgetAuthoringRequests.value += 1
+            intent.removeExtra(EXTRA_OPEN_WIDGET_AUTHORING)
         }
     }
 
@@ -238,6 +246,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_MODELS = "open_model_management"
+        const val EXTRA_OPEN_WIDGET_AUTHORING = "open_widget_authoring"
         private const val RAW_WIDGET_DIAGNOSTIC_DIRECTORY = "raw-widget-diagnostics"
         private const val RAW_WIDGET_DIAGNOSTIC_FILE = "ararai-widget-diagnostic-raw.json"
     }

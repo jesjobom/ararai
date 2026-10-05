@@ -145,11 +145,11 @@ reviewed legacy baseline and rule configuration live under `config/detekt/`;
 new findings are not added to the baseline as a routine fix. CI cache inputs
 and invalidation rules are documented in `docs/quality-gates.md`.
 
-With an authorized arm64 Android device connected, execute the instrumentation
-suite:
+Connected Android instrumentation may uninstall the target package during
+cleanup. Execute it only on a disposable emulator/device with no data to retain:
 
 ```sh
-./gradlew connectedDebugAndroidTest
+./gradlew -Pararai.allowDestructiveConnectedTests=true connectedDebugAndroidTest
 ```
 
 The generic CI runner compiles but does not execute this suite. Follow

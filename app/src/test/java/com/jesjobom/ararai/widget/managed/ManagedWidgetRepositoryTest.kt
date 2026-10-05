@@ -60,6 +60,10 @@ class ManagedWidgetRepositoryTest {
                 "widget_presentations",
                 "widget_program_revisions",
                 "widget_runs",
+                "widget_authoring_actions",
+                "widget_authoring_attempts",
+                "widget_authoring_checkpoints",
+                "widget_authoring_sessions",
             ),
             repository.writableDatabase.rawQuery(
                 "SELECT name FROM sqlite_master " +
@@ -157,6 +161,32 @@ class ManagedWidgetRepositoryTest {
     }
 
     @Test
+    fun `version one database migrates additively and preserves every existing record`() {
+        createVersionOneDatabase()
+
+        val repository = repository()
+
+        assertEquals(MANAGED_WIDGET_DATABASE_VERSION, repository.writableDatabase.version)
+        assertEquals("legacy-widget", repository.listDefinitions().single().id)
+        assertEquals(SOURCE, repository.listRevisions("legacy-widget").single().source)
+        assertEquals("{\"type\":\"text\"}", repository.cachedPresentation("legacy-widget")?.presentationJson)
+        assertEquals("legacy-run", repository.listRuns("legacy-widget").single().id)
+        val observation = repository.listObservations("legacy-widget").single().value as WidgetObservationValue.Text
+        assertEquals("sunny", observation.value)
+        assertTrue(repository.activeAuthoringSession() == null)
+        assertEquals(
+            4,
+            repository.writableDatabase.rawQuery(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'widget_authoring_%'",
+                emptyArray(),
+            ).use { cursor ->
+                check(cursor.moveToFirst())
+                cursor.getInt(0)
+            },
+        )
+    }
+
+    @Test
     fun `dangling active revision is reported as corruption`() {
         var repository = repository()
         val created = repository.createConfirmed(fixture())
@@ -200,6 +230,89 @@ class ManagedWidgetRepositoryTest {
         nowMillis = { now },
         newId = { "widget-${++nextId}" },
     ).also(repositories::add)
+
+    @Suppress("LongMethod")
+    private fun createVersionOneDatabase() {
+        val path = context.getDatabasePath(MANAGED_WIDGET_DATABASE_NAME)
+        path.parentFile?.mkdirs()
+        SQLiteDatabase.openOrCreateDatabase(path, null).use { database ->
+            database.execSQL(
+                """
+                CREATE TABLE managed_widgets(
+                    id TEXT PRIMARY KEY, display_name TEXT NOT NULL, enabled INTEGER NOT NULL,
+                    periodic_interval_hours INTEGER, active_revision INTEGER NOT NULL,
+                    consent_digest TEXT NOT NULL, status TEXT NOT NULL,
+                    created_at_millis INTEGER NOT NULL, updated_at_millis INTEGER NOT NULL,
+                    last_attempt_at_millis INTEGER, last_success_at_millis INTEGER,
+                    active_run_id TEXT, active_run_started_at_millis INTEGER
+                )
+                """.trimIndent(),
+            )
+            database.execSQL(
+                """
+                CREATE TABLE widget_program_revisions(
+                    widget_id TEXT NOT NULL, revision INTEGER NOT NULL,
+                    manifest_json TEXT NOT NULL, source TEXT NOT NULL,
+                    program_digest TEXT NOT NULL, created_at_millis INTEGER NOT NULL,
+                    PRIMARY KEY(widget_id, revision)
+                )
+                """.trimIndent(),
+            )
+            database.execSQL(
+                """
+                CREATE TABLE widget_presentations(
+                    widget_id TEXT PRIMARY KEY, revision INTEGER NOT NULL,
+                    presentation_json TEXT NOT NULL, completed_at_millis INTEGER NOT NULL
+                )
+                """.trimIndent(),
+            )
+            database.execSQL(
+                """
+                CREATE TABLE widget_runs(
+                    id TEXT PRIMARY KEY, widget_id TEXT NOT NULL, revision INTEGER NOT NULL,
+                    started_at_millis INTEGER NOT NULL, completed_at_millis INTEGER,
+                    duration_millis INTEGER, planned_tool_ids TEXT NOT NULL,
+                    outcome_code TEXT NOT NULL, diagnostic TEXT
+                )
+                """.trimIndent(),
+            )
+            database.execSQL(
+                """
+                CREATE TABLE widget_observations(
+                    widget_id TEXT NOT NULL, name TEXT NOT NULL,
+                    observed_at_millis INTEGER NOT NULL, value_type TEXT NOT NULL,
+                    value_text TEXT NOT NULL,
+                    PRIMARY KEY(widget_id, name, observed_at_millis)
+                )
+                """.trimIndent(),
+            )
+            database.execSQL(
+                """
+                INSERT INTO managed_widgets VALUES(
+                    'legacy-widget', 'Legacy', 1, 24, 1, '$DIGEST_B', 'Ready',
+                    100, 200, 300, 400, NULL, NULL
+                )
+                """.trimIndent(),
+            )
+            database.execSQL(
+                "INSERT INTO widget_program_revisions VALUES(" +
+                    "'legacy-widget', 1, '$MANIFEST', '$SOURCE', '$DIGEST_A', 100)",
+            )
+            database.execSQL(
+                "INSERT INTO widget_presentations VALUES(" +
+                    "'legacy-widget', 1, '{\"type\":\"text\"}', 400)",
+            )
+            database.execSQL(
+                "INSERT INTO widget_runs VALUES(" +
+                    "'legacy-run', 'legacy-widget', 1, 300, 400, 100, '[]', 'Success', NULL)",
+            )
+            database.execSQL(
+                "INSERT INTO widget_observations VALUES(" +
+                    "'legacy-widget', 'condition', 400, 'text', 'sunny')",
+            )
+            database.version = 1
+        }
+    }
 
     private fun fixture(
         displayName: String = "On this day",

@@ -96,7 +96,7 @@ class WidgetAuthoringPipelineModelTest {
 
         val system = engine.requests.single().chatMessages.single { it.role == PromptChatRole.System }.text
         assertTrue(system.contains("Return exactly four fields"))
-        assertTrue(system.contains("achievable => message is the display name"))
+        assertTrue(system.contains("achievable => message is a concise display title"))
         assertTrue(system.contains("unachievable => message is the reason"))
         assertTrue(system.contains("needs_clarification => message is one question"))
         assertTrue(system.contains("Return every required field"))
@@ -124,6 +124,100 @@ class WidgetAuthoringPipelineModelTest {
         assertTrue(prompt.contains("Keep outcome=achievable when the request is supported"))
         assertTrue(prompt.contains("Use message as its display name"))
         assertFalse(prompt.contains("Controlled failure: InvalidFeasibilityOutcome"))
+    }
+
+    @Test
+    fun `source repair requires the current named function instead of another stage artifact`() = runTest {
+        val engine = RecordingStageEngine(wait = false)
+        val controller = WidgetAuthoringPipelineModelController(engine)
+        controller.prepare(MODEL, INFERENCE)
+
+        controller.capture(
+            MODEL,
+            request(
+                repairCode = WidgetAuthoringStageFailureCode.InvalidSource,
+                rejectedArtifact = "{}",
+            ),
+        )
+
+        val prompt = engine.requests.single().plainChatPrompt
+        assertTrue(prompt.contains("only source for the current stage"))
+        assertTrue(prompt.contains("one named function declaration"))
+        assertTrue(prompt.contains("every brace closed"))
+        assertTrue(prompt.contains("do not use an anonymous function"))
+    }
+
+    @Test
+    fun `render execution repair regenerates from generic contract without rejected source`() = runTest {
+        val engine = RecordingStageEngine(wait = false)
+        val controller = WidgetAuthoringPipelineModelController(engine)
+        controller.prepare(MODEL, INFERENCE)
+        val objective = renderFunctionObjective(
+            listOf(
+                WidgetSourceFragmentArtifact(
+                    artifactId = "get_events",
+                    functionName = "buildCallGetEvents",
+                    inputNames = listOf("runtime"),
+                    source = "function buildCallGetEvents(runtime) { return {}; }",
+                ),
+            ),
+        )
+
+        controller.capture(
+            MODEL,
+            WidgetAuthoringRoundRequest(
+                stage = WidgetAuthoringStage.RenderFunction,
+                toolName = SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
+                toolDescriptionJson = WidgetAuthoringStageSchemas.sourceFragment(
+                    SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
+                ),
+                objective = objective,
+                contextJson = "{}",
+                repairCode = WidgetAuthoringStageFailureCode.InvalidRenderExecution,
+                rejectedArtifact = null,
+            ),
+        )
+
+        val prompt = engine.requests.single().plainChatPrompt
+        assertTrue(prompt.contains("Controlled failure: invalid_render_execution"))
+        assertTrue(prompt.contains("Rejected artifact omitted to prevent anchoring"))
+        assertTrue(prompt.contains("outcomes is a plain JavaScript object"))
+        assertTrue(prompt.contains("outcomes[alias]"))
+        assertTrue(prompt.contains("never call outcomes.get()"))
+        assertFalse(prompt.contains("get_events"))
+        assertFalse(prompt.contains("return outcomes.get"))
+        assertTrue(prompt.contains("Follow presentationContract exactly"))
+        assertTrue(prompt.contains("never use type:'text/value'"))
+    }
+
+    @Test
+    fun `repair artifact policy keeps only localized first repair`() {
+        val artifact = "{\"source\":\"rejected\"}"
+
+        assertEquals(
+            artifact,
+            repairArtifactForPrompt(
+                WidgetAuthoringStageFailureCode.InvalidPresentationTone,
+                artifact,
+                repairAttemptNumber = 2,
+            ),
+        )
+        assertEquals(
+            null,
+            repairArtifactForPrompt(
+                WidgetAuthoringStageFailureCode.InvalidRenderExecution,
+                artifact,
+                repairAttemptNumber = 2,
+            ),
+        )
+        assertEquals(
+            null,
+            repairArtifactForPrompt(
+                WidgetAuthoringStageFailureCode.InvalidPresentationTone,
+                artifact,
+                repairAttemptNumber = 3,
+            ),
+        )
     }
 
     @Test

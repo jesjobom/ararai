@@ -212,8 +212,9 @@ class WidgetAuthoringJobControllerTest {
     ) : WidgetAuthoringDeviceState {
         private var index = 0
 
-        override fun evaluate(): WidgetAuthoringDeviceEvaluation =
-            evaluations.getOrElse(index) { evaluations.last() }.also { index += 1 }
+        override fun evaluate(): WidgetAuthoringDeviceEvaluation = evaluations
+            .getOrElse(index) { evaluations.last() }
+            .also { index += 1 }
     }
 
     private class RecordingPresenter : WidgetAuthoringJobPresenter {

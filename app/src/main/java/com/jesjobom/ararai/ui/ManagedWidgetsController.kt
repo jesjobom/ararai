@@ -36,9 +36,9 @@ import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticEnvironment
 import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticMode
 import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticReport
 import com.jesjobom.ararai.widget.managed.WidgetToolCallingDiagnosticRunner
-import com.jesjobom.ararai.widget.managed.forAuthoringCharacterization
 import com.jesjobom.ararai.widget.managed.consentDigest
 import com.jesjobom.ararai.widget.managed.diffWidgetDraft
+import com.jesjobom.ararai.widget.managed.forAuthoringCharacterization
 import com.jesjobom.ararai.widget.runtime.QuickJsWidgetJavaScriptEngine
 import com.jesjobom.ararai.widget.runtime.WidgetJavaScriptEngine
 import com.jesjobom.ararai.widget.runtime.WidgetPresentationCodec
@@ -146,6 +146,18 @@ internal class ManagedWidgetsController(
     }
 
     suspend fun refresh(widgetId: String): ManagedWidgetExecutionStatus = services.manualRefresh.refresh(widgetId)
+
+    suspend fun presentDraft(
+        widgetId: String?,
+        draft: ValidatedWidgetDraft,
+    ): ManagedWidgetDraftUiState {
+        val existing = widgetId?.let { loadExisting(it) }
+        return ManagedWidgetDraftUiState(
+            widgetId = widgetId,
+            draft = draft,
+            diff = existing?.let { diffWidgetDraft(it.first, it.second, draft) },
+        )
+    }
 
     suspend fun setEnabled(widgetId: String, enabled: Boolean): ManagedWidgetDefinition = services.schedules.setEnabled(widgetId, enabled)
 

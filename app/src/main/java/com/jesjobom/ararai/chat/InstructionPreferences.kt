@@ -259,6 +259,8 @@ fun eligibleToolNames(
     }
 }
 
+fun supportsWikipediaTools(model: LocalModel?): Boolean = WIKIPEDIA_MODEL_TOOL_NAMES.any { model.supportsTool(it) }
+
 const val WIKIPEDIA_SEARCH_TOOL_NAME = "wikipedia_search"
 const val WEB_SEARCH_TOOL_NAME = "web_search"
 const val CALCULATOR_TOOL_NAME = "calculator"
@@ -268,6 +270,8 @@ private val WIKIPEDIA_MODEL_TOOL_NAMES = setOf(
     WIKIPEDIA_PAGES_TOOL_NAME,
     WIKIPEDIA_ON_THIS_DAY_TOOL_NAME,
 )
+
+private fun LocalModel?.supportsTool(name: String): Boolean = this?.toolCapabilities?.supports(name) == true
 
 private const val CALCULATOR_UNAVAILABLE_INSTRUCTION =
     "No calculator or math tool is available for this turn. Answer directly without emitting " +

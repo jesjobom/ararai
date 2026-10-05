@@ -17,7 +17,7 @@ import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 internal const val MANAGED_WIDGET_DATABASE_NAME = "ararai_widgets.db"
-internal const val MANAGED_WIDGET_DATABASE_VERSION = 1
+internal const val MANAGED_WIDGET_DATABASE_VERSION = 2
 
 internal class ManagedWidgetPersistenceException(message: String) : IllegalStateException(message)
 
@@ -117,6 +117,43 @@ internal interface ManagedWidgetStore {
     ): ManagedWidgetDefinition
 
     fun delete(widgetId: String)
+}
+
+internal interface WidgetAuthoringWorkflowStore {
+    fun createAuthoringSession(request: NewWidgetAuthoringSession): WidgetAuthoringSessionSnapshot
+
+    fun activeAuthoringSession(): WidgetAuthoringSessionSnapshot?
+
+    fun authoringSession(sessionId: String): WidgetAuthoringSessionSnapshot?
+
+    fun startAuthoringAttempt(command: StartWidgetAuthoringAttempt): StartWidgetAuthoringAttemptResult
+
+    fun markAuthoringAttemptDeferred(
+        sessionId: String,
+        attemptId: String,
+    ): WidgetAuthoringSessionSnapshot
+
+    fun markAuthoringAttemptRunning(
+        sessionId: String,
+        attemptId: String,
+    ): WidgetAuthoringSessionSnapshot
+
+    fun completeAuthoringAttempt(command: CompleteWidgetAuthoringAttempt): WidgetAuthoringSessionSnapshot
+
+    fun acceptAuthoringCandidate(command: AcceptWidgetAuthoringCandidate): WidgetAuthoringMutationResult
+
+    fun reconcileInterruptedAuthoring(): WidgetAuthoringSessionSnapshot?
+
+    fun finalizeAuthoringSession(
+        sessionId: String,
+        expectedSessionRevision: Int,
+        candidate: ConfirmedWidgetRevision,
+    ): FinalizeWidgetAuthoringResult
+
+    fun discardAuthoringSession(
+        sessionId: String,
+        expectedSessionRevision: Int,
+    ): Boolean
 }
 
 internal interface ManagedWidgetRepository {
@@ -261,7 +298,8 @@ internal class SqliteManagedWidgetRepository(
     null,
     MANAGED_WIDGET_DATABASE_VERSION,
 ),
-    ManagedWidgetStore {
+    ManagedWidgetStore,
+    WidgetAuthoringWorkflowStore {
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
         db.setForeignKeyConstraintsEnabled(true)
@@ -273,6 +311,7 @@ internal class SqliteManagedWidgetRepository(
         createHistoryTables(db)
         createObservationTable(db)
         createRevisionGuardsAndIndexes(db)
+        createAuthoringTables(db)
     }
 
     private fun createDefinitionTables(db: SQLiteDatabase) {
@@ -384,13 +423,131 @@ internal class SqliteManagedWidgetRepository(
         )
     }
 
+    @Suppress("LongMethod")
+    private fun createAuthoringTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE widget_authoring_sessions(
+                id TEXT PRIMARY KEY,
+                revision INTEGER NOT NULL CHECK(revision > 0),
+                status TEXT NOT NULL,
+                instruction TEXT NOT NULL
+                    CHECK(length(CAST(instruction AS BLOB)) BETWEEN 1 AND ${WidgetAuthoringWorkflowPolicy.MAX_INSTRUCTION_BYTES}),
+                target_widget_id TEXT,
+                model_id TEXT NOT NULL,
+                model_artifact_digest TEXT NOT NULL CHECK(length(model_artifact_digest) = 64),
+                inference_config_json TEXT NOT NULL
+                    CHECK(length(CAST(inference_config_json AS BLOB)) <= ${WidgetAuthoringWorkflowPolicy.MAX_INFERENCE_CONFIG_BYTES}),
+                protocol_version INTEGER NOT NULL CHECK(protocol_version > 0),
+                schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+                tool_contract_digest TEXT NOT NULL CHECK(length(tool_contract_digest) = 64),
+                current_stage_key TEXT NOT NULL
+                    CHECK(length(current_stage_key) BETWEEN 1 AND ${WidgetAuthoringWorkflowPolicy.MAX_STAGE_KEY_CHARS}),
+                active_attempt_id TEXT,
+                created_at_millis INTEGER NOT NULL,
+                updated_at_millis INTEGER NOT NULL,
+                FOREIGN KEY(active_attempt_id) REFERENCES widget_authoring_attempts(id)
+                    DEFERRABLE INITIALLY DEFERRED
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE widget_authoring_attempts(
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                action_id TEXT NOT NULL
+                    CHECK(length(action_id) BETWEEN 1 AND ${WidgetAuthoringWorkflowPolicy.MAX_ACTION_ID_CHARS}),
+                stage_key TEXT NOT NULL
+                    CHECK(length(stage_key) BETWEEN 1 AND ${WidgetAuthoringWorkflowPolicy.MAX_STAGE_KEY_CHARS}),
+                stage_revision INTEGER NOT NULL CHECK(stage_revision > 0),
+                attempt_number INTEGER NOT NULL CHECK(attempt_number > 0),
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                artifact TEXT CHECK(
+                    artifact IS NULL OR
+                    length(CAST(artifact AS BLOB)) <= ${WidgetAuthoringPipelinePolicy.MAX_ARTIFACT_BYTES}
+                ),
+                artifact_digest TEXT CHECK(artifact_digest IS NULL OR length(artifact_digest) = 64),
+                upstream_digest TEXT NOT NULL CHECK(length(upstream_digest) = 64),
+                failure_code TEXT,
+                started_at_millis INTEGER,
+                completed_at_millis INTEGER,
+                FOREIGN KEY(session_id) REFERENCES widget_authoring_sessions(id) ON DELETE CASCADE,
+                UNIQUE(session_id, action_id),
+                UNIQUE(session_id, stage_key, stage_revision, attempt_number),
+                CHECK((artifact IS NULL) = (artifact_digest IS NULL)),
+                CHECK(completed_at_millis IS NULL OR started_at_millis IS NOT NULL)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE widget_authoring_checkpoints(
+                session_id TEXT NOT NULL,
+                stage_key TEXT NOT NULL,
+                stage_revision INTEGER NOT NULL CHECK(stage_revision > 0),
+                accepted_attempt_id TEXT NOT NULL,
+                artifact TEXT NOT NULL
+                    CHECK(length(CAST(artifact AS BLOB)) <= ${WidgetAuthoringPipelinePolicy.MAX_ARTIFACT_BYTES}),
+                artifact_digest TEXT NOT NULL CHECK(length(artifact_digest) = 64),
+                upstream_digest TEXT NOT NULL CHECK(length(upstream_digest) = 64),
+                status TEXT NOT NULL,
+                accepted_at_millis INTEGER NOT NULL,
+                PRIMARY KEY(session_id, stage_key),
+                FOREIGN KEY(session_id) REFERENCES widget_authoring_sessions(id) ON DELETE CASCADE,
+                FOREIGN KEY(accepted_attempt_id) REFERENCES widget_authoring_attempts(id)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE widget_authoring_actions(
+                session_id TEXT NOT NULL,
+                action_id TEXT NOT NULL,
+                action_kind TEXT NOT NULL,
+                resulting_session_revision INTEGER NOT NULL CHECK(resulting_session_revision > 0),
+                created_at_millis INTEGER NOT NULL,
+                PRIMARY KEY(session_id, action_id),
+                FOREIGN KEY(session_id) REFERENCES widget_authoring_sessions(id) ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE UNIQUE INDEX one_active_widget_authoring_session
+            ON widget_authoring_sessions((1))
+            WHERE status != 'Completed'
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE UNIQUE INDEX one_active_widget_authoring_attempt
+            ON widget_authoring_attempts(session_id)
+            WHERE status IN ('Queued', 'Deferred', 'Running')
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE INDEX widget_authoring_attempt_history
+            ON widget_authoring_attempts(session_id, stage_key, stage_revision, attempt_number)
+            """.trimIndent(),
+        )
+    }
+
     override fun onUpgrade(
         db: SQLiteDatabase,
         oldVersion: Int,
         newVersion: Int,
-    ): Unit = throw ManagedWidgetPersistenceException(
-        "Unsupported managed-widget database upgrade: $oldVersion to $newVersion",
-    )
+    ) {
+        if (oldVersion == 1 && newVersion == 2) {
+            createAuthoringTables(db)
+            return
+        }
+        throw ManagedWidgetPersistenceException(
+            "Unsupported managed-widget database upgrade: $oldVersion to $newVersion",
+        )
+    }
 
     @Synchronized
     override fun listDefinitions(): List<ManagedWidgetDefinition> {
@@ -831,6 +988,706 @@ internal class SqliteManagedWidgetRepository(
         }
     }
 
+    @Synchronized
+    override fun createAuthoringSession(request: NewWidgetAuthoringSession): WidgetAuthoringSessionSnapshot {
+        activeAuthoringSession()?.let {
+            throw ManagedWidgetPersistenceException("A widget authoring session is already active")
+        }
+        val sessionId = newId().also(::requireValidWidgetId)
+        val now = nowMillis()
+        writableDatabase.insertOrThrow(
+            "widget_authoring_sessions",
+            null,
+            ContentValues().apply {
+                put("id", sessionId)
+                put("revision", 1)
+                put("status", WidgetAuthoringSessionStatus.AwaitingStage.name)
+                put("instruction", request.instruction)
+                if (request.targetWidgetId == null) {
+                    putNull("target_widget_id")
+                } else {
+                    put("target_widget_id", request.targetWidgetId)
+                }
+                put("model_id", request.modelId)
+                put("model_artifact_digest", request.modelArtifactDigest)
+                put("inference_config_json", request.inferenceConfigJson)
+                put("protocol_version", request.protocolVersion)
+                put("schema_version", request.schemaVersion)
+                put("tool_contract_digest", request.toolContractDigest)
+                put("current_stage_key", WidgetAuthoringStageKey.Feasibility.wireValue)
+                putNull("active_attempt_id")
+                put("created_at_millis", now)
+                put("updated_at_millis", now)
+            },
+        )
+        return requireNotNull(authoringSession(sessionId))
+    }
+
+    @Synchronized
+    override fun activeAuthoringSession(): WidgetAuthoringSessionSnapshot? {
+        readableDatabase.rawQuery(
+            """
+            SELECT id FROM widget_authoring_sessions
+            WHERE status != ?
+            ORDER BY created_at_millis ASC, id ASC
+            """.trimIndent(),
+            arrayOf(WidgetAuthoringSessionStatus.Completed.name),
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) return null
+            val sessionId = cursor.getString(0)
+            if (cursor.moveToNext()) {
+                throw ManagedWidgetPersistenceException("Multiple active widget authoring sessions")
+            }
+            return requireNotNull(authoringSession(sessionId))
+        }
+    }
+
+    @Synchronized
+    override fun authoringSession(sessionId: String): WidgetAuthoringSessionSnapshot? {
+        requireValidWidgetId(sessionId)
+        val session = readableDatabase.rawQuery(
+            """
+            SELECT id, revision, status, instruction, target_widget_id, model_id,
+                   model_artifact_digest, inference_config_json, protocol_version,
+                   schema_version, tool_contract_digest, current_stage_key,
+                   active_attempt_id, created_at_millis, updated_at_millis
+            FROM widget_authoring_sessions
+            WHERE id = ?
+            """.trimIndent(),
+            arrayOf(sessionId),
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) return null
+            cursor.toAuthoringSession()
+        }
+        val attempts = readableDatabase.rawQuery(
+            """
+            SELECT id, session_id, action_id, stage_key, stage_revision,
+                   attempt_number, kind, status, artifact, artifact_digest,
+                   upstream_digest, failure_code, started_at_millis,
+                   completed_at_millis
+            FROM widget_authoring_attempts
+            WHERE session_id = ?
+            ORDER BY rowid ASC
+            """.trimIndent(),
+            arrayOf(sessionId),
+        ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.toAuthoringAttempt()) } }
+        val checkpoints = readableDatabase.rawQuery(
+            """
+            SELECT session_id, stage_key, stage_revision, accepted_attempt_id,
+                   artifact, artifact_digest, upstream_digest, status,
+                   accepted_at_millis
+            FROM widget_authoring_checkpoints
+            WHERE session_id = ?
+            ORDER BY rowid ASC
+            """.trimIndent(),
+            arrayOf(sessionId),
+        ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.toAuthoringCheckpoint()) } }
+        return WidgetAuthoringSessionSnapshot(session, attempts, checkpoints)
+    }
+
+    @Synchronized
+    @Suppress("LongMethod", "ReturnCount")
+    override fun startAuthoringAttempt(command: StartWidgetAuthoringAttempt): StartWidgetAuthoringAttemptResult {
+        requireValidWidgetId(command.sessionId)
+        existingAttemptForAction(command.sessionId, command.actionId)?.let { existing ->
+            return StartWidgetAuthoringAttemptResult.Duplicate(
+                existing,
+                requireNotNull(authoringSession(command.sessionId)).session.revision,
+            )
+        }
+        val snapshot = requireNotNull(authoringSession(command.sessionId))
+        if (snapshot.session.revision != command.expectedSessionRevision) {
+            return StartWidgetAuthoringAttemptResult.Stale(snapshot.session.revision)
+        }
+        require(snapshot.session.activeAttemptId == null) { "An authoring attempt is already active" }
+        WidgetAuthoringWorkflowStateMachine.requireAllowed(
+            snapshot,
+            when (command.kind) {
+                WidgetAuthoringAttemptKind.Initial -> WidgetAuthoringUserAction.Start
+                WidgetAuthoringAttemptKind.Repair -> WidgetAuthoringUserAction.Retry
+                WidgetAuthoringAttemptKind.Reprocess -> WidgetAuthoringUserAction.Reprocess
+            },
+        )
+        val coordinates = nextAttemptCoordinates(snapshot, command)
+        val attemptId = newId().also(::requireValidWidgetId)
+        val nextRevision = snapshot.session.revision + 1
+        val now = nowMillis()
+        writableDatabase.inTransaction {
+            insertOrThrow(
+                "widget_authoring_attempts",
+                null,
+                ContentValues().apply {
+                    put("id", attemptId)
+                    put("session_id", command.sessionId)
+                    put("action_id", command.actionId)
+                    put("stage_key", command.stage.wireValue)
+                    put("stage_revision", coordinates.first)
+                    put("attempt_number", coordinates.second)
+                    put("kind", command.kind.name)
+                    put("status", WidgetAuthoringAttemptStatus.Queued.name)
+                    putNull("artifact")
+                    putNull("artifact_digest")
+                    put("upstream_digest", command.upstreamDigest)
+                    putNull("failure_code")
+                    putNull("started_at_millis")
+                    putNull("completed_at_millis")
+                },
+            )
+            recordAuthoringAction(this, command.sessionId, command.actionId, "start", nextRevision, now)
+            updateAuthoringSession(
+                database = this,
+                sessionId = command.sessionId,
+                expectedRevision = snapshot.session.revision,
+                nextRevision = nextRevision,
+                status = WidgetAuthoringSessionStatus.AttemptQueued,
+                currentStage = command.stage,
+                activeAttemptId = attemptId,
+                now = now,
+            )
+        }
+        val attempt = requireNotNull(existingAttemptForAction(command.sessionId, command.actionId))
+        return StartWidgetAuthoringAttemptResult.Started(attempt, nextRevision)
+    }
+
+    @Synchronized
+    override fun markAuthoringAttemptRunning(
+        sessionId: String,
+        attemptId: String,
+    ): WidgetAuthoringSessionSnapshot {
+        val snapshot = requireNotNull(authoringSession(sessionId))
+        require(snapshot.session.activeAttemptId == attemptId)
+        val attempt = snapshot.attempts.single { it.id == attemptId }
+        require(attempt.status in setOf(WidgetAuthoringAttemptStatus.Queued, WidgetAuthoringAttemptStatus.Deferred))
+        val now = nowMillis()
+        val nextRevision = snapshot.session.revision + 1
+        writableDatabase.inTransaction {
+            update(
+                "widget_authoring_attempts",
+                ContentValues().apply {
+                    put("status", WidgetAuthoringAttemptStatus.Running.name)
+                    put("started_at_millis", now)
+                },
+                "id = ? AND session_id = ? AND status IN (?, ?)",
+                arrayOf(
+                    attemptId,
+                    sessionId,
+                    WidgetAuthoringAttemptStatus.Queued.name,
+                    WidgetAuthoringAttemptStatus.Deferred.name,
+                ),
+            ).also { if (it != 1) throw ManagedWidgetPersistenceException("Authoring attempt changed") }
+            updateAuthoringSession(
+                this,
+                sessionId,
+                snapshot.session.revision,
+                nextRevision,
+                WidgetAuthoringSessionStatus.AttemptRunning,
+                attempt.stage,
+                attemptId,
+                now,
+            )
+        }
+        return requireNotNull(authoringSession(sessionId))
+    }
+
+    @Synchronized
+    override fun markAuthoringAttemptDeferred(
+        sessionId: String,
+        attemptId: String,
+    ): WidgetAuthoringSessionSnapshot {
+        val snapshot = requireNotNull(authoringSession(sessionId))
+        require(snapshot.session.activeAttemptId == attemptId)
+        val attempt = snapshot.attempts.single { it.id == attemptId }
+        require(attempt.status == WidgetAuthoringAttemptStatus.Queued)
+        val now = nowMillis()
+        val nextRevision = snapshot.session.revision + 1
+        writableDatabase.inTransaction {
+            update(
+                "widget_authoring_attempts",
+                ContentValues().apply { put("status", WidgetAuthoringAttemptStatus.Deferred.name) },
+                "id = ? AND session_id = ? AND status = ?",
+                arrayOf(attemptId, sessionId, WidgetAuthoringAttemptStatus.Queued.name),
+            ).also { if (it != 1) throw ManagedWidgetPersistenceException("Authoring attempt changed") }
+            updateAuthoringSession(
+                this,
+                sessionId,
+                snapshot.session.revision,
+                nextRevision,
+                WidgetAuthoringSessionStatus.AttemptDeferred,
+                attempt.stage,
+                attemptId,
+                now,
+            )
+        }
+        return requireNotNull(authoringSession(sessionId))
+    }
+
+    @Synchronized
+    override fun completeAuthoringAttempt(command: CompleteWidgetAuthoringAttempt): WidgetAuthoringSessionSnapshot {
+        val snapshot = requireNotNull(authoringSession(command.sessionId))
+        require(snapshot.session.activeAttemptId == command.attemptId)
+        val attempt = snapshot.attempts.single { it.id == command.attemptId }
+        require(attempt.status in ACTIVE_ATTEMPT_STATUSES)
+        val now = nowMillis()
+        val nextRevision = snapshot.session.revision + 1
+        val artifactDigest = command.artifact?.let(::authoringDigest)
+        val nextStatus = if (command.status == WidgetAuthoringAttemptStatus.Succeeded) {
+            WidgetAuthoringSessionStatus.AwaitingReview
+        } else {
+            WidgetAuthoringSessionStatus.AwaitingRetry
+        }
+        writableDatabase.inTransaction {
+            update(
+                "widget_authoring_attempts",
+                ContentValues().apply {
+                    put("status", command.status.name)
+                    if (command.artifact == null) putNull("artifact") else put("artifact", command.artifact)
+                    if (artifactDigest == null) putNull("artifact_digest") else put("artifact_digest", artifactDigest)
+                    if (command.failureCode == null) {
+                        putNull("failure_code")
+                    } else {
+                        put("failure_code", command.failureCode.name)
+                    }
+                    if (attempt.startedAtMillis == null) put("started_at_millis", now)
+                    put("completed_at_millis", now)
+                },
+                "id = ? AND session_id = ? AND status IN (?, ?, ?)",
+                arrayOf(
+                    command.attemptId,
+                    command.sessionId,
+                    WidgetAuthoringAttemptStatus.Queued.name,
+                    WidgetAuthoringAttemptStatus.Deferred.name,
+                    WidgetAuthoringAttemptStatus.Running.name,
+                ),
+            ).also { if (it != 1) throw ManagedWidgetPersistenceException("Authoring attempt changed") }
+            updateAuthoringSession(
+                this,
+                command.sessionId,
+                snapshot.session.revision,
+                nextRevision,
+                nextStatus,
+                attempt.stage,
+                null,
+                now,
+            )
+        }
+        return requireNotNull(authoringSession(command.sessionId))
+    }
+
+    @Synchronized
+    @Suppress("LongMethod", "ReturnCount")
+    override fun acceptAuthoringCandidate(command: AcceptWidgetAuthoringCandidate): WidgetAuthoringMutationResult {
+        require(command.actionId.isNotBlank())
+        authoringActionRevision(command.sessionId, command.actionId)?.let {
+            return WidgetAuthoringMutationResult.Duplicate(requireNotNull(authoringSession(command.sessionId)))
+        }
+        val snapshot = requireNotNull(authoringSession(command.sessionId))
+        if (snapshot.session.revision != command.expectedSessionRevision) {
+            return WidgetAuthoringMutationResult.Stale(snapshot)
+        }
+        WidgetAuthoringWorkflowStateMachine.requireAllowed(snapshot, WidgetAuthoringUserAction.Continue)
+        require(snapshot.session.status == WidgetAuthoringSessionStatus.AwaitingReview)
+        require(snapshot.session.activeAttemptId == null)
+        val attempt = snapshot.attempts.single { it.id == command.attemptId }
+        require(attempt.status == WidgetAuthoringAttemptStatus.Succeeded)
+        require(attempt.stage == snapshot.session.currentStage)
+        requireValidAuthoringStageTransition(attempt.stage, command.nextStage)
+        val artifact = requireNotNull(attempt.artifact)
+        val artifactDigest = requireNotNull(attempt.artifactDigest)
+        val now = nowMillis()
+        val nextRevision = snapshot.session.revision + 1
+        writableDatabase.inTransaction {
+            insertWithOnConflict(
+                "widget_authoring_checkpoints",
+                null,
+                ContentValues().apply {
+                    put("session_id", command.sessionId)
+                    put("stage_key", attempt.stage.wireValue)
+                    put("stage_revision", attempt.stageRevision)
+                    put("accepted_attempt_id", attempt.id)
+                    put("artifact", artifact)
+                    put("artifact_digest", artifactDigest)
+                    put("upstream_digest", attempt.upstreamDigest)
+                    put("status", WidgetAuthoringCheckpointStatus.Accepted.name)
+                    put("accepted_at_millis", now)
+                },
+                SQLiteDatabase.CONFLICT_REPLACE,
+            ).also { if (it == -1L) throw ManagedWidgetPersistenceException("Could not accept checkpoint") }
+            authoringDescendants(snapshot, attempt.stage).forEach { descendant ->
+                update(
+                    "widget_authoring_checkpoints",
+                    ContentValues().apply { put("status", WidgetAuthoringCheckpointStatus.Stale.name) },
+                    "session_id = ? AND stage_key = ?",
+                    arrayOf(command.sessionId, descendant.wireValue),
+                )
+            }
+            recordAuthoringAction(this, command.sessionId, command.actionId, "accept", nextRevision, now)
+            updateAuthoringSession(
+                this,
+                command.sessionId,
+                snapshot.session.revision,
+                nextRevision,
+                if (command.nextStage == null) {
+                    WidgetAuthoringSessionStatus.ReadyForPreview
+                } else {
+                    WidgetAuthoringSessionStatus.AwaitingStage
+                },
+                command.nextStage ?: WidgetAuthoringStageKey.Assembly,
+                null,
+                now,
+            )
+        }
+        return WidgetAuthoringMutationResult.Applied(requireNotNull(authoringSession(command.sessionId)))
+    }
+
+    @Synchronized
+    @Suppress("ReturnCount")
+    override fun reconcileInterruptedAuthoring(): WidgetAuthoringSessionSnapshot? {
+        val snapshot = activeAuthoringSession() ?: return null
+        val attemptId = snapshot.session.activeAttemptId ?: return snapshot
+        val attempt = snapshot.attempts.single { it.id == attemptId }
+        if (attempt.status !in ACTIVE_ATTEMPT_STATUSES) {
+            throw ManagedWidgetPersistenceException("Session points to a terminal authoring attempt")
+        }
+        return completeAuthoringAttempt(
+            CompleteWidgetAuthoringAttempt(
+                sessionId = snapshot.session.id,
+                attemptId = attemptId,
+                status = WidgetAuthoringAttemptStatus.Interrupted,
+                artifact = null,
+                failureCode = WidgetAuthoringStageFailureCode.RuntimeUnavailable,
+            ),
+        )
+    }
+
+    @Synchronized
+    @Suppress("LongMethod", "ReturnCount")
+    override fun finalizeAuthoringSession(
+        sessionId: String,
+        expectedSessionRevision: Int,
+        candidate: ConfirmedWidgetRevision,
+    ): FinalizeWidgetAuthoringResult {
+        val snapshot = authoringSession(sessionId) ?: return FinalizeWidgetAuthoringResult.Missing
+        if (snapshot.session.revision != expectedSessionRevision) {
+            return FinalizeWidgetAuthoringResult.Stale(snapshot)
+        }
+        WidgetAuthoringWorkflowStateMachine.requireAllowed(snapshot, WidgetAuthoringUserAction.Confirm)
+        requireFinalizable(snapshot)
+        val now = nowMillis()
+        val target = finalizationTarget(snapshot, now)
+        writableDatabase.inTransaction {
+            if (target.expectedActiveRevision == null) {
+                insertOrThrow(
+                    "managed_widgets",
+                    null,
+                    candidate.definitionValues(target.widgetId, target.nextRevision, target.createdAtMillis),
+                )
+            }
+            insertOrThrow(
+                "widget_program_revisions",
+                null,
+                candidate.revisionValues(target.widgetId, target.nextRevision, now),
+            )
+            if (target.expectedActiveRevision != null) {
+                update(
+                    "managed_widgets",
+                    candidate.definitionValues(target.widgetId, target.nextRevision, target.createdAtMillis),
+                    "id = ? AND active_revision = ?",
+                    arrayOf(target.widgetId, target.expectedActiveRevision.toString()),
+                ).also {
+                    if (it != 1) throw ManagedWidgetPersistenceException("Managed widget changed during finalization")
+                }
+                pruneRevisions(this, target.widgetId)
+            }
+            delete(
+                "widget_authoring_sessions",
+                "id = ? AND revision = ? AND active_attempt_id IS NULL",
+                arrayOf(sessionId, expectedSessionRevision.toString()),
+            ).also {
+                if (it != 1) throw ManagedWidgetPersistenceException("Widget authoring session changed")
+            }
+        }
+        return FinalizeWidgetAuthoringResult.Finalized(definition(target.widgetId))
+    }
+
+    private fun requireFinalizable(snapshot: WidgetAuthoringSessionSnapshot) {
+        val hasCompleteGraph = WidgetAuthoringWorkflowStateMachine.run { snapshot.hasCompleteAcceptedGraph() }
+        require(snapshot.session.activeAttemptId == null)
+        require(hasCompleteGraph)
+        require(
+            snapshot.session.status == WidgetAuthoringSessionStatus.ReadyForPreview ||
+                snapshot.session.status == WidgetAuthoringSessionStatus.AwaitingRetry,
+        )
+    }
+
+    private fun finalizationTarget(
+        snapshot: WidgetAuthoringSessionSnapshot,
+        now: Long,
+    ): WidgetAuthoringFinalizationTarget {
+        val targetWidgetId = snapshot.session.targetWidgetId
+        if (targetWidgetId == null) {
+            require(listDefinitions().size < ManagedWidgetPolicy.MAX_WIDGETS) { "Managed widget limit reached" }
+            return WidgetAuthoringFinalizationTarget(
+                widgetId = newId().also(::requireValidWidgetId),
+                nextRevision = 1,
+                createdAtMillis = now,
+                expectedActiveRevision = null,
+            )
+        }
+        val current = definition(targetWidgetId)
+        return WidgetAuthoringFinalizationTarget(
+            widgetId = targetWidgetId,
+            nextRevision = (listRevisions(targetWidgetId).maxOfOrNull(WidgetProgramRevision::revision) ?: 0) + 1,
+            createdAtMillis = current.createdAtMillis,
+            expectedActiveRevision = current.activeRevision,
+        )
+    }
+
+    @Synchronized
+    @Suppress("ReturnCount")
+    override fun discardAuthoringSession(
+        sessionId: String,
+        expectedSessionRevision: Int,
+    ): Boolean {
+        val snapshot = authoringSession(sessionId) ?: return false
+        if (snapshot.session.revision != expectedSessionRevision) return false
+        WidgetAuthoringWorkflowStateMachine.requireAllowed(snapshot, WidgetAuthoringUserAction.Discard)
+        require(snapshot.session.activeAttemptId == null) { "Cannot discard an active authoring attempt" }
+        return writableDatabase.delete(
+            "widget_authoring_sessions",
+            "id = ? AND revision = ? AND active_attempt_id IS NULL",
+            arrayOf(sessionId, expectedSessionRevision.toString()),
+        ) == 1
+    }
+
+    private fun nextAttemptCoordinates(
+        snapshot: WidgetAuthoringSessionSnapshot,
+        command: StartWidgetAuthoringAttempt,
+    ): Pair<Int, Int> {
+        val attempts = snapshot.attempts.filter { it.stage == command.stage }
+        val checkpoint = snapshot.checkpoints.singleOrNull { it.stage == command.stage }
+        return when (command.kind) {
+            WidgetAuthoringAttemptKind.Initial -> {
+                require(snapshot.session.status == WidgetAuthoringSessionStatus.AwaitingStage)
+                require(snapshot.session.currentStage == command.stage)
+                val nextStageRevision = maxOf(
+                    checkpoint?.stageRevision ?: 0,
+                    attempts.maxOfOrNull(WidgetAuthoringAttempt::stageRevision) ?: 0,
+                ) + 1
+                nextStageRevision to 1
+            }
+            WidgetAuthoringAttemptKind.Repair -> {
+                require(snapshot.session.status == WidgetAuthoringSessionStatus.AwaitingRetry)
+                require(snapshot.session.currentStage == command.stage)
+                val preceding = attempts.maxWithOrNull(
+                    compareBy<WidgetAuthoringAttempt> { it.stageRevision }.thenBy { it.attemptNumber },
+                ) ?: throw IllegalArgumentException("A repair requires a preceding attempt")
+                require(preceding.status != WidgetAuthoringAttemptStatus.Succeeded)
+                require(preceding.attemptNumber <= WidgetAuthoringWorkflowPolicy.MAX_REPAIRS_PER_STAGE_REVISION)
+                preceding.stageRevision to preceding.attemptNumber + 1
+            }
+            WidgetAuthoringAttemptKind.Reprocess -> {
+                require(
+                    snapshot.session.status in setOf(
+                        WidgetAuthoringSessionStatus.AwaitingStage,
+                        WidgetAuthoringSessionStatus.AwaitingRetry,
+                        WidgetAuthoringSessionStatus.ReadyForPreview,
+                    ),
+                )
+                require(checkpoint?.status == WidgetAuthoringCheckpointStatus.Accepted)
+                val nextStageRevision = maxOf(
+                    checkpoint.stageRevision,
+                    attempts.maxOfOrNull(WidgetAuthoringAttempt::stageRevision) ?: 0,
+                ) + 1
+                nextStageRevision to 1
+            }
+        }
+    }
+
+    private fun authoringDescendants(
+        snapshot: WidgetAuthoringSessionSnapshot,
+        stage: WidgetAuthoringStageKey,
+    ): Set<WidgetAuthoringStageKey> {
+        val callStages = (
+            snapshot.checkpoints.map(WidgetAuthoringCheckpoint::stage) +
+                snapshot.attempts.map(WidgetAuthoringAttempt::stage)
+            )
+            .filterIsInstance<WidgetAuthoringStageKey.CallFunction>()
+            .distinctBy(WidgetAuthoringStageKey.CallFunction::stepId)
+        return when (stage) {
+            WidgetAuthoringStageKey.Feasibility -> buildSet {
+                add(WidgetAuthoringStageKey.Algorithm)
+                addAll(callStages)
+                add(WidgetAuthoringStageKey.Plan)
+                add(WidgetAuthoringStageKey.Render)
+                add(WidgetAuthoringStageKey.Assembly)
+            }
+            WidgetAuthoringStageKey.Algorithm -> buildSet {
+                addAll(callStages)
+                add(WidgetAuthoringStageKey.Plan)
+                add(WidgetAuthoringStageKey.Render)
+                add(WidgetAuthoringStageKey.Assembly)
+            }
+            is WidgetAuthoringStageKey.CallFunction -> setOf(
+                WidgetAuthoringStageKey.Plan,
+                WidgetAuthoringStageKey.Render,
+                WidgetAuthoringStageKey.Assembly,
+            )
+            WidgetAuthoringStageKey.Plan -> setOf(
+                WidgetAuthoringStageKey.Render,
+                WidgetAuthoringStageKey.Assembly,
+            )
+            WidgetAuthoringStageKey.Render -> setOf(WidgetAuthoringStageKey.Assembly)
+            WidgetAuthoringStageKey.Assembly -> emptySet()
+        }
+    }
+
+    private fun existingAttemptForAction(
+        sessionId: String,
+        actionId: String,
+    ): WidgetAuthoringAttempt? = readableDatabase.rawQuery(
+        """
+        SELECT id, session_id, action_id, stage_key, stage_revision,
+               attempt_number, kind, status, artifact, artifact_digest,
+               upstream_digest, failure_code, started_at_millis,
+               completed_at_millis
+        FROM widget_authoring_attempts
+        WHERE session_id = ? AND action_id = ?
+        """.trimIndent(),
+        arrayOf(sessionId, actionId),
+    ).use { cursor -> if (cursor.moveToFirst()) cursor.toAuthoringAttempt() else null }
+
+    private fun authoringActionRevision(
+        sessionId: String,
+        actionId: String,
+    ): Int? = readableDatabase.rawQuery(
+        """
+        SELECT resulting_session_revision
+        FROM widget_authoring_actions
+        WHERE session_id = ? AND action_id = ?
+        """.trimIndent(),
+        arrayOf(sessionId, actionId),
+    ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else null }
+
+    private fun recordAuthoringAction(
+        database: SQLiteDatabase,
+        sessionId: String,
+        actionId: String,
+        kind: String,
+        resultingRevision: Int,
+        now: Long,
+    ) {
+        database.insertOrThrow(
+            "widget_authoring_actions",
+            null,
+            ContentValues().apply {
+                put("session_id", sessionId)
+                put("action_id", actionId)
+                put("action_kind", kind)
+                put("resulting_session_revision", resultingRevision)
+                put("created_at_millis", now)
+            },
+        )
+    }
+
+    @Suppress("LongParameterList")
+    private fun updateAuthoringSession(
+        database: SQLiteDatabase,
+        sessionId: String,
+        expectedRevision: Int,
+        nextRevision: Int,
+        status: WidgetAuthoringSessionStatus,
+        currentStage: WidgetAuthoringStageKey,
+        activeAttemptId: String?,
+        now: Long,
+    ) {
+        database.update(
+            "widget_authoring_sessions",
+            ContentValues().apply {
+                put("revision", nextRevision)
+                put("status", status.name)
+                put("current_stage_key", currentStage.wireValue)
+                if (activeAttemptId == null) {
+                    putNull("active_attempt_id")
+                } else {
+                    put(
+                        "active_attempt_id",
+                        activeAttemptId,
+                    )
+                }
+                put("updated_at_millis", now)
+            },
+            "id = ? AND revision = ?",
+            arrayOf(sessionId, expectedRevision.toString()),
+        ).also {
+            if (it != 1) throw ManagedWidgetPersistenceException("Widget authoring session changed")
+        }
+    }
+
+    private fun Cursor.toAuthoringSession(): WidgetAuthoringSession = try {
+        WidgetAuthoringSession(
+            id = getString(0).also(::requireValidWidgetId),
+            revision = getInt(1).also { require(it > 0) },
+            status = WidgetAuthoringSessionStatus.valueOf(getString(2)),
+            instruction = getString(3),
+            targetWidgetId = if (isNull(4)) null else getString(4).also(::requireValidWidgetId),
+            modelId = getString(5),
+            modelArtifactDigest = getString(6).also { require(SHA_256_PATTERN.matches(it)) },
+            inferenceConfigJson = getString(7),
+            protocolVersion = getInt(8).also { require(it > 0) },
+            schemaVersion = getInt(9).also { require(it > 0) },
+            toolContractDigest = getString(10).also { require(SHA_256_PATTERN.matches(it)) },
+            currentStage = WidgetAuthoringStageKey.parse(getString(11)),
+            activeAttemptId = if (isNull(12)) null else getString(12).also(::requireValidWidgetId),
+            createdAtMillis = getLong(13),
+            updatedAtMillis = getLong(14),
+        )
+    } catch (_: IllegalArgumentException) {
+        throw ManagedWidgetPersistenceException("Invalid widget authoring session row")
+    }
+
+    private fun Cursor.toAuthoringAttempt(): WidgetAuthoringAttempt = try {
+        WidgetAuthoringAttempt(
+            id = getString(0).also(::requireValidWidgetId),
+            sessionId = getString(1).also(::requireValidWidgetId),
+            actionId = getString(2),
+            stage = WidgetAuthoringStageKey.parse(getString(3)),
+            stageRevision = getInt(4).also { require(it > 0) },
+            attemptNumber = getInt(5).also { require(it > 0) },
+            kind = WidgetAuthoringAttemptKind.valueOf(getString(6)),
+            status = WidgetAuthoringAttemptStatus.valueOf(getString(7)),
+            artifact = if (isNull(8)) null else getString(8),
+            artifactDigest = if (isNull(9)) {
+                null
+            } else {
+                getString(9).also {
+                    require(SHA_256_PATTERN.matches(it))
+                }
+            },
+            upstreamDigest = getString(10).also { require(SHA_256_PATTERN.matches(it)) },
+            failureCode = if (isNull(11)) null else WidgetAuthoringStageFailureCode.valueOf(getString(11)),
+            startedAtMillis = if (isNull(12)) null else getLong(12),
+            completedAtMillis = if (isNull(13)) null else getLong(13),
+        )
+    } catch (_: IllegalArgumentException) {
+        throw ManagedWidgetPersistenceException("Invalid widget authoring attempt row")
+    }
+
+    private fun Cursor.toAuthoringCheckpoint(): WidgetAuthoringCheckpoint = try {
+        WidgetAuthoringCheckpoint(
+            sessionId = getString(0).also(::requireValidWidgetId),
+            stage = WidgetAuthoringStageKey.parse(getString(1)),
+            stageRevision = getInt(2).also { require(it > 0) },
+            acceptedAttemptId = getString(3).also(::requireValidWidgetId),
+            artifact = getString(4),
+            artifactDigest = getString(5).also { require(SHA_256_PATTERN.matches(it)) },
+            upstreamDigest = getString(6).also { require(SHA_256_PATTERN.matches(it)) },
+            status = WidgetAuthoringCheckpointStatus.valueOf(getString(7)),
+            acceptedAtMillis = getLong(8),
+        )
+    } catch (_: IllegalArgumentException) {
+        throw ManagedWidgetPersistenceException("Invalid widget authoring checkpoint row")
+    }
+
     private fun definition(widgetId: String): ManagedWidgetDefinition = listDefinitions()
         .firstOrNull { it.id == widgetId }
         ?: throw NoSuchElementException("Managed widget does not exist: $widgetId")
@@ -1146,6 +2003,13 @@ internal class SqliteManagedWidgetRepository(
         throw ManagedWidgetPersistenceException("Invalid managed widget observation row")
     }
 }
+
+private data class WidgetAuthoringFinalizationTarget(
+    val widgetId: String,
+    val nextRevision: Int,
+    val createdAtMillis: Long,
+    val expectedActiveRevision: Int?,
+)
 
 private inline fun <T> SQLiteDatabase.inTransaction(block: SQLiteDatabase.() -> T): T {
     beginTransaction()

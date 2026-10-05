@@ -145,13 +145,17 @@ fixed official Wikipedia HTTPS API path. Scheduled and manual refreshes execute 
 loading or prompting a model. Widget JavaScript has no direct network, file,
 database, Android intent, or credential access.
 
-Widget authoring prompts and the ephemeral model exchange remain on-device and
-are not added to Chat, reports, diagnostics, analytics, execution logs, backups,
-or exports. Only a confirmed normalized source revision and consent record become
-durable. Users can disable a widget to cancel future work or confirm deletion to
-remove its definition, all source revisions, cache, observations, run history,
-and schedule. Widgets do not sync, export, share, notify, or appear as Android
-launcher widgets.
+Widget authoring prompts, bounded captured stage artifacts, controlled failure
+codes, and checkpoint metadata remain on-device in app-private storage and are
+excluded from backup and device transfer. They are not added to Chat, reports,
+analytics, execution logs, or exports. Reasoning tokens, internal prompts,
+credentials, provider results, model paths, stack traces, and raw exception
+messages are not persisted in the authoring workflow. Confirming or discarding
+removes the transient session; only a confirmed normalized source revision and
+consent record remain durable. Users can disable a widget to cancel future work
+or confirm deletion to remove its definition, all source revisions, cache,
+observations, run history, and schedule. Widgets do not sync, export, share,
+notify, or appear as Android launcher widgets.
 
 ## Security and incidents
 

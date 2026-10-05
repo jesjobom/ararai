@@ -26,6 +26,21 @@ class WidgetAuthoringPipelineContractsTest {
     }
 
     @Test
+    fun `feasibility normalizes an overlong achievable display name without a repair`() {
+        val raw = achievable().apply {
+            addProperty("message", "  ${"Historical event ".repeat(10)}  ")
+        }
+
+        val parsed = WidgetFeasibilityParser.parse(raw.toString(), AVAILABLE_TOOLS)
+
+        assertTrue(parsed is WidgetFeasibilityParseResult.Valid)
+        val displayName = (parsed as WidgetFeasibilityParseResult.Valid).artifact.displayName
+        assertTrue(displayName.length <= 80)
+        assertTrue(displayName.endsWith("…"))
+        assertEquals(false, displayName.contains("  "))
+    }
+
+    @Test
     fun `feasibility resolves the newest registered version in the application`() {
         val newest = WidgetToolCapability(TOOL.id, 2)
 
@@ -110,6 +125,20 @@ class WidgetAuthoringPipelineContractsTest {
         assertTrue(parsed is WidgetAlgorithmParseResult.Valid)
         assertEquals(1, (parsed as WidgetAlgorithmParseResult.Valid).artifact.toolCallSteps.size)
         assertEquals(TOOL, parsed.artifact.toolCallSteps.single().tool)
+    }
+
+    @Test
+    fun `algorithm derives protocol version while accepting a legacy version field`() {
+        val current = algorithm().apply { remove("protocolVersion") }
+        val incompatible = algorithm().apply { addProperty("protocolVersion", 2) }
+
+        assertTrue(WidgetAlgorithmParser.parse(current.toString(), validFeasibility()) is WidgetAlgorithmParseResult.Valid)
+        assertTrue(WidgetAlgorithmParser.parse(algorithm().toString(), validFeasibility()) is WidgetAlgorithmParseResult.Valid)
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(incompatible.toString(), validFeasibility()),
+        )
+        assertEquals(false, WidgetAuthoringStageSchemas.algorithm.contains("protocolVersion"))
     }
 
     @Test
@@ -235,6 +264,37 @@ class WidgetAuthoringPipelineContractsTest {
     }
 
     @Test
+    fun `source fragment derives identity from the stage while accepting the legacy envelope`() {
+        val current = JsonObject().apply { addProperty("source", VALID_CALL_SOURCE) }
+        val incompatible = fragment("call_events", "buildCallEvents", listOf("runtime"), VALID_CALL_SOURCE).apply {
+            addProperty("protocolVersion", 2)
+        }
+
+        val parsed = WidgetSourceFragmentParser.parse(
+            current.toString(),
+            expectedArtifactId = "call_events",
+            expectedFunctionName = "buildCallEvents",
+            expectedInputNames = listOf("runtime"),
+        )
+
+        assertTrue(parsed is WidgetSourceFragmentParseResult.Valid)
+        val artifact = (parsed as WidgetSourceFragmentParseResult.Valid).artifact
+        assertEquals("call_events", artifact.artifactId)
+        assertEquals("buildCallEvents", artifact.functionName)
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidSource),
+            WidgetSourceFragmentParser.parse(
+                incompatible.toString(),
+                expectedArtifactId = "call_events",
+                expectedFunctionName = "buildCallEvents",
+                expectedInputNames = listOf("runtime"),
+            ),
+        )
+        assertEquals(false, WidgetAuthoringStageSchemas.sourceFragment("submit").contains("protocolVersion"))
+        assertEquals(false, WidgetAuthoringStageSchemas.sourceFragment("submit").contains("artifactId"))
+    }
+
+    @Test
     fun `source fragment rejects renamed extra and ambient functions`() {
         val renamed = fragment("call_events", "renamed", listOf("runtime"), VALID_CALL_SOURCE)
         val extra = fragment(
@@ -261,6 +321,26 @@ class WidgetAuthoringPipelineContractsTest {
                 ),
             )
         }
+    }
+
+    @Test
+    fun `presentation preflight classifies node type fields and tone separately`() {
+        assertEquals(
+            WidgetAuthoringStageFailureCode.InvalidPresentationNodeType,
+            presentationShapeFailure("""{"type":"text/value","text":"event","tone":"neutral"}"""),
+        )
+        assertEquals(
+            WidgetAuthoringStageFailureCode.InvalidPresentationFields,
+            presentationShapeFailure("""{"type":"text","text":"event"}"""),
+        )
+        assertEquals(
+            WidgetAuthoringStageFailureCode.InvalidPresentationTone,
+            presentationShapeFailure("""{"type":"text","text":"event","tone":"normal"}"""),
+        )
+        assertEquals(
+            null,
+            presentationShapeFailure("""{"type":"text","text":"event","tone":"neutral"}"""),
+        )
     }
 
     @Test

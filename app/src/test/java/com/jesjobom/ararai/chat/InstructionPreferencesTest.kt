@@ -12,6 +12,22 @@ import org.junit.Test
 
 class InstructionPreferencesTest {
     @Test
+    fun `recognizes current and legacy Wikipedia model capabilities`() {
+        fun model(vararg tools: String) = LocalModel(
+            id = tools.joinToString().ifBlank { "unsupported" },
+            name = "Model",
+            filePath = "/tmp/model",
+            toolCapabilities = ModelToolCapabilities(tools.toSet()),
+        )
+
+        assertTrue(supportsWikipediaTools(model(WIKIPEDIA_PAGES_TOOL_NAME)))
+        assertTrue(supportsWikipediaTools(model(WIKIPEDIA_ON_THIS_DAY_TOOL_NAME)))
+        assertTrue(supportsWikipediaTools(model(WIKIPEDIA_SEARCH_TOOL_NAME)))
+        assertFalse(supportsWikipediaTools(model()))
+        assertFalse(supportsWikipediaTools(null))
+    }
+
+    @Test
     fun `advertises Wikipedia only when preference and model capability are both enabled`() {
         val supported =
             LocalModel(

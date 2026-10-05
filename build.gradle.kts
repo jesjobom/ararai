@@ -14,6 +14,26 @@ allprojects {
     }
 }
 
+val allowDestructiveConnectedTests =
+    providers
+        .gradleProperty("ararai.allowDestructiveConnectedTests")
+        .map(String::toBoolean)
+        .orElse(false)
+
+subprojects {
+    tasks.configureEach {
+        if (name.startsWith("connected") && name.endsWith("AndroidTest")) {
+            doFirst {
+                check(allowDestructiveConnectedTests.get()) {
+                    "Connected Android tests may uninstall the target package and erase its private data. " +
+                        "Use only a disposable emulator/device and opt in with " +
+                        "-Pararai.allowDestructiveConnectedTests=true."
+                }
+            }
+        }
+    }
+}
+
 spotless {
     kotlin {
         target("app/src/**/*.kt", "quickjs-runtime/src/**/*.kt", "whisper-runtime/src/**/*.kt")

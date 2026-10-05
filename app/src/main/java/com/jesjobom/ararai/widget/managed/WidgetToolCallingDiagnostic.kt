@@ -14,6 +14,7 @@ import com.jesjobom.ararai.engine.LocalLlmRecoveryGate
 import com.jesjobom.ararai.engine.PromptChatMessage
 import com.jesjobom.ararai.engine.PromptChatRole
 import com.jesjobom.ararai.engine.PromptRequest
+import com.jesjobom.ararai.engine.awaitReady
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.WIDGET_AUTHORING_PIPELINE_V1
@@ -626,7 +627,7 @@ internal class WidgetToolCallingDiagnosticRunner(
     ): WidgetToolCallingDiagnosticCaseResult {
         val started = monotonicMillis()
         return try {
-            if (!engine.reloadWhenReady(model, inference, recoveryGate::awaitReady)) {
+            if (!engine.reloadWhenReady(model, inference) { recoveryGate.awaitReady() }) {
                 return WidgetToolCallingDiagnosticCaseResult(
                     id = WidgetToolCallingDiagnosticMode.AlgorithmReloadNatural.wireName,
                     passed = false,
@@ -874,7 +875,6 @@ internal class WidgetToolCallingDiagnosticRunner(
                     WidgetAuthoringStageSchemas.feasibility,
                     WidgetAuthoringStageSchemas.algorithm,
                     WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_CALL_FUNCTION_TOOL),
-                    WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_PLAN_FUNCTION_TOOL),
                     WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_RENDER_FUNCTION_TOOL),
                 ).joinToString("\n"),
             ),
@@ -954,28 +954,21 @@ internal class WidgetToolCallingDiagnosticRunner(
             id = "stage_algorithm_schema",
             toolName = SUBMIT_WIDGET_ALGORITHM_TOOL,
             toolDescriptionJson = WidgetAuthoringStageSchemas.algorithm,
-            systemInstruction = "Call $SUBMIT_WIDGET_ALGORITHM_TOOL exactly once with protocolVersion 1, one tool_call step whose id is lookup, objective is Lookup, empty dependsOn, toolId wikipedia_pages, and presentationObjective Display result. Do not answer in plain text.",
+            systemInstruction = "Call $SUBMIT_WIDGET_ALGORITHM_TOOL exactly once with one tool_call step whose id is lookup, objective is Lookup, empty dependsOn, toolId wikipedia_pages, and presentationObjective Display result. Do not answer in plain text.",
             userInstruction = "Submit the algorithm diagnostic artifact.",
         ),
         DiagnosticCase(
             id = "stage_call_function_schema",
             toolName = SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
             toolDescriptionJson = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_CALL_FUNCTION_TOOL),
-            systemInstruction = "Call $SUBMIT_WIDGET_CALL_FUNCTION_TOOL exactly once with protocolVersion 1, artifactId lookup, functionName buildCallLookup, inputNames containing runtime, and source set to function buildCallLookup(runtime) { return {}; }. Do not answer in plain text.",
+            systemInstruction = "Call $SUBMIT_WIDGET_CALL_FUNCTION_TOOL exactly once with source set to function buildCallLookup(runtime) { return {}; }. Do not answer in plain text.",
             userInstruction = "Submit the call-function diagnostic artifact.",
-        ),
-        DiagnosticCase(
-            id = "stage_plan_function_schema",
-            toolName = SUBMIT_WIDGET_PLAN_FUNCTION_TOOL,
-            toolDescriptionJson = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_PLAN_FUNCTION_TOOL),
-            systemInstruction = "Call $SUBMIT_WIDGET_PLAN_FUNCTION_TOOL exactly once with protocolVersion 1, artifactId plan, functionName plan, inputNames containing runtime, and source set to function plan(runtime) { return []; }. Do not answer in plain text.",
-            userInstruction = "Submit the plan-function diagnostic artifact.",
         ),
         DiagnosticCase(
             id = "stage_render_function_schema",
             toolName = SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
             toolDescriptionJson = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_RENDER_FUNCTION_TOOL),
-            systemInstruction = "Call $SUBMIT_WIDGET_RENDER_FUNCTION_TOOL exactly once with protocolVersion 1, artifactId render, functionName render, inputNames runtime/outcomes/state, and source set to function render(runtime, outcomes, state) { return {type:'text',text:'ok',tone:'neutral'}; }. Do not answer in plain text.",
+            systemInstruction = "Call $SUBMIT_WIDGET_RENDER_FUNCTION_TOOL exactly once with source set to function render(runtime, outcomes, state) { return {type:'text',text:'ok',tone:'neutral'}; }. Do not answer in plain text.",
             userInstruction = "Submit the render-function diagnostic artifact.",
         ),
     )
@@ -1203,9 +1196,9 @@ internal const val DIAGNOSTIC_LOAD_INELIGIBLE = "ineligible_model"
 internal const val DIAGNOSTIC_PIPELINE_INVALID = "pipeline_invalid"
 internal const val DIAGNOSTIC_PIPELINE_TERMINAL = "pipeline_terminal"
 
-private const val DIAGNOSTIC_SUITE_VERSION = 15
+private const val DIAGNOSTIC_SUITE_VERSION = 16
 private const val RAW_DIAGNOSTIC_FORMAT_VERSION = 1
-private const val DIAGNOSTIC_CASE_COUNT = 6
+private const val DIAGNOSTIC_CASE_COUNT = 5
 private const val UNSET_MILLIS = -1L
 private val SHA256_PATTERN = Regex("[0-9a-f]{64}")
 private val CASE_ID_PATTERN = Regex("[a-z][a-z0-9_]{0,63}")

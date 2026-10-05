@@ -97,6 +97,7 @@ import com.jesjobom.ararai.chat.InMemoryInstructionPreferences
 import com.jesjobom.ararai.chat.InstructionPreferences
 import com.jesjobom.ararai.chat.InteractionMode
 import com.jesjobom.ararai.chat.conversationTurnSettings
+import com.jesjobom.ararai.chat.supportsWikipediaTools
 import com.jesjobom.ararai.engine.AndroidLiteRtLmBridge
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.LiteRtLmLocalLlmEngine
@@ -156,6 +157,7 @@ import com.jesjobom.ararai.voice.VoiceChatPreferences
 import com.jesjobom.ararai.voice.VoiceChatViewModel
 import com.jesjobom.ararai.widget.managed.ManagedWidgetApplicationServices
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobController
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringWorkflowCoordinator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
@@ -219,6 +221,7 @@ internal fun ArarAiApp(
     tourPreferenceStore: TourPreferenceStore? = null,
     voiceTemporaryDirectory: File,
     openModelManagementRequest: Int = 0,
+    openWidgetAuthoringRequest: Int = 0,
     liteRtLmCacheDir: String? = null,
     webSearchToolFactory: WebSearchToolFactory = WebSearchToolFactory(),
     localLlmEngineFactory: (() -> LocalLlmEngine)? = null,
@@ -226,6 +229,7 @@ internal fun ArarAiApp(
     onShareWidgetToolCallingDiagnostic: (String) -> Unit = {},
     onShareRawWidgetToolCallingDiagnostic: (String) -> Unit = {},
     widgetAuthoringJobs: WidgetAuthoringJobController<ManagedWidgetDraftUiState>? = null,
+    widgetAuthoringWorkflow: WidgetAuthoringWorkflowCoordinator? = null,
 ) {
     val resourceContext = androidx.compose.ui.platform.LocalContext.current
     val appContext = resourceContext.applicationContext
@@ -530,6 +534,27 @@ internal fun ArarAiApp(
         }
     }
 
+    LaunchedEffect(openWidgetAuthoringRequest) {
+        if (openWidgetAuthoringRequest > 0) {
+            when (destination) {
+                AppDestination.Chat -> chatViewModel.onLeavingChat()
+                AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
+                AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
+                AppDestination.Home,
+                AppDestination.Widgets,
+                AppDestination.WidgetDetail,
+                AppDestination.WidgetAuthoring,
+                AppDestination.ModelStatus,
+                AppDestination.WhisperBenchmark,
+                AppDestination.Settings,
+                AppDestination.OpenSourceLicenses,
+                AppDestination.InstructionsTools,
+                -> Unit
+            }
+            destination = AppDestination.WidgetAuthoring
+        }
+    }
+
     LaunchedEffect(startupState) {
         chatViewModel.onModelStartupState(startupState)
         voiceChatViewModel.onModelStartupState(startupState)
@@ -615,6 +640,7 @@ internal fun ArarAiApp(
                     modelArtifactSha256 = modelConfig.sha256,
                     widgetId = selectedWidgetId,
                     jobController = widgetAuthoringJobs,
+                    workflowCoordinator = widgetAuthoringWorkflow,
                     onBack = {
                         destination = if (selectedWidgetId == null) {
                             AppDestination.Widgets
@@ -778,10 +804,7 @@ internal fun ArarAiApp(
                 )
             },
             wikipediaCompatible =
-            (startupState as? ModelStartupState.Available)
-                ?.model
-                ?.toolCapabilities
-                ?.supports(com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME) == true,
+            supportsWikipediaTools((startupState as? ModelStartupState.Available)?.model),
             calculatorCompatible =
             (startupState as? ModelStartupState.Available)?.model?.toolCapabilities
                 ?.supports(com.jesjobom.ararai.chat.CALCULATOR_TOOL_NAME) == true,
@@ -1562,9 +1585,9 @@ private fun ToolsTab(
                     Text(stringResource(R.string.tools_use_wikipedia))
                     Text(
                         if (wikipediaCompatible) {
-                            stringResource(R.string.tools_available_model)
+                            stringResource(R.string.tools_wikipedia_available_model)
                         } else {
-                            stringResource(R.string.tools_unavailable_model)
+                            stringResource(R.string.tools_wikipedia_unavailable_model)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1573,7 +1596,6 @@ private fun ToolsTab(
                 Switch(
                     checked = settings.wikipediaEnabled,
                     onCheckedChange = onWikipediaEnabledChange,
-                    enabled = wikipediaCompatible || settings.wikipediaEnabled,
                     modifier = Modifier.testTag("wikipedia-enabled"),
                 )
             }

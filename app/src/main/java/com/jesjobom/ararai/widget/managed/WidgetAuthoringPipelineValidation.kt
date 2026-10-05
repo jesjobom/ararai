@@ -54,21 +54,27 @@ internal class WidgetAuthoringPipelineValidator(
         val expectedTool = step.tool ?: return WidgetAuthoringStageFailureCode.InvalidAlgorithm
         for (fixture in runtimeFixtures(runtimeContext)) {
             currentCoroutineContext().ensureActive()
-            val output = call(
-                artifact.source,
-                artifact.functionName,
-                listOf(fixture.toJson(feasibility.runtimeValues)),
-            ) ?: return WidgetAuthoringStageFailureCode.InvalidSource
-            val calls = parsePlan("[$output]", feasibility) ?: return WidgetAuthoringStageFailureCode.InvalidPlan
-            val planned = calls.singleOrNull() ?: return WidgetAuthoringStageFailureCode.InvalidPlan
-            if (planned.alias != step.id || planned.tool != expectedTool) {
-                return WidgetAuthoringStageFailureCode.CapabilityExpansion
+            val output = when (
+                val result = call(
+                    artifact.source,
+                    artifact.functionName,
+                    listOf(fixture.toJson(feasibility.runtimeValues)),
+                )
+            ) {
+                is WidgetScriptResult.Success -> result.outputJson
+                is WidgetScriptResult.Failure -> return result.code.validationFailure(
+                    WidgetAuthoringStageFailureCode.InvalidSource,
+                )
+            }
+            val argumentsJson = when (val normalized = normalizeCallArguments(output, step, feasibility)) {
+                is CallArgumentsNormalization.Valid -> normalized.argumentsJson
+                is CallArgumentsNormalization.Invalid -> return normalized.code
             }
             if (
                 registry.validateWidgetDraftCall(
-                    planned.tool.id,
-                    planned.tool.version,
-                    planned.argumentsJson,
+                    expectedTool.id,
+                    expectedTool.version,
+                    argumentsJson,
                 ) is WidgetDraftToolValidation.Invalid
             ) {
                 return WidgetAuthoringStageFailureCode.InvalidToolArguments
@@ -87,11 +93,18 @@ internal class WidgetAuthoringPipelineValidator(
         val source = joinSource(callFunctions + planFunction)
         val expectedSteps = algorithm.toolCallSteps
         for (fixture in runtimeFixtures(runtimeContext)) {
-            val output = call(
-                source,
-                planFunction.functionName,
-                listOf(fixture.toJson(feasibility.runtimeValues)),
-            ) ?: return WidgetAuthoringStageFailureCode.InvalidSource
+            val output = when (
+                val result = call(
+                    source,
+                    planFunction.functionName,
+                    listOf(fixture.toJson(feasibility.runtimeValues)),
+                )
+            ) {
+                is WidgetScriptResult.Success -> result.outputJson
+                is WidgetScriptResult.Failure -> return result.code.validationFailure(
+                    WidgetAuthoringStageFailureCode.InvalidSource,
+                )
+            }
             val calls = parsePlan(output, feasibility) ?: return WidgetAuthoringStageFailureCode.InvalidPlan
             if (calls.map { it.alias } != expectedSteps.map { it.id } || calls.map { it.tool } != expectedSteps.map { it.tool }) {
                 return WidgetAuthoringStageFailureCode.CapabilityExpansion
@@ -117,29 +130,48 @@ internal class WidgetAuthoringPipelineValidator(
         val source = joinSource(priorFragments + renderFunction)
         val contracts = contracts(feasibility)
         val fixtureSets = listOf(
-            syntheticOutcomes(algorithm, contracts, emptyCollections = false),
-            syntheticOutcomes(algorithm, contracts, emptyCollections = true),
-            failureOutcomes(algorithm),
+            RenderFixture(
+                syntheticOutcomes(algorithm, contracts, emptyCollections = false),
+                WidgetAuthoringStageFailureCode.InvalidRenderExecution,
+            ),
+            RenderFixture(
+                syntheticOutcomes(algorithm, contracts, emptyCollections = true),
+                WidgetAuthoringStageFailureCode.InvalidPresentationEmptyHandling,
+            ),
+            RenderFixture(
+                failureOutcomes(algorithm),
+                WidgetAuthoringStageFailureCode.InvalidPresentationFailureHandling,
+            ),
         )
-        for (outcomes in fixtureSets) {
-            val output = call(
-                source,
-                renderFunction.functionName,
-                listOf(
-                    runtimeContext.toJson(feasibility.runtimeValues),
-                    outcomes.toOutcomeJson(),
-                    "{}",
-                ),
-            ) ?: return WidgetAuthoringStageFailureCode.InvalidSource
+        for (fixture in fixtureSets) {
+            val output = when (
+                val result = call(
+                    source,
+                    renderFunction.functionName,
+                    listOf(
+                        runtimeContext.toJson(feasibility.runtimeValues),
+                        fixture.outcomes.toOutcomeJson(),
+                        "{}",
+                    ),
+                )
+            ) {
+                is WidgetScriptResult.Success -> result.outputJson
+                is WidgetScriptResult.Failure -> return result.code.validationFailure(fixture.executionFailure)
+            }
+            presentationShapeFailure(output)?.let { return it }
             val parsed = runCatching {
                 WidgetPresentationParser.parse(
                     output,
                     capabilities(feasibility),
                     grant(feasibility),
-                    outcomes,
+                    fixture.outcomes,
                     FIXED_PIPELINE_LIMITS,
                 )
-            }.getOrNull() ?: return WidgetAuthoringStageFailureCode.InvalidPresentation
+            }.getOrNull() ?: return if (output.contains("\"https_link\"")) {
+                WidgetAuthoringStageFailureCode.InvalidPresentationProvenance
+            } else {
+                WidgetAuthoringStageFailureCode.InvalidPresentation
+            }
             checkNotNull(parsed)
         }
         return null
@@ -180,20 +212,35 @@ internal class WidgetAuthoringPipelineValidator(
         return WidgetAssembly(feasibility, algorithm, callFunctions.toList(), planFunction, renderFunction, source)
     }
 
-    private suspend fun call(source: String, entrypoint: String, arguments: List<String>): String? = try {
-        when (val result = engine.call(source, entrypoint, arguments, FIXED_PIPELINE_LIMITS)) {
-            is WidgetScriptResult.Success -> result.outputJson
-            is WidgetScriptResult.Failure -> null
-        }
+    private suspend fun call(source: String, entrypoint: String, arguments: List<String>): WidgetScriptResult = try {
+        engine.call(source, entrypoint, arguments, FIXED_PIPELINE_LIMITS)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: RuntimeException) {
-        null
+        WidgetScriptResult.Failure(WidgetRuntimeFailureCode.RuntimeUnavailable)
     }
 
     private fun parsePlan(raw: String, feasibility: WidgetFeasibilityArtifact): List<PlannedWidgetToolCall>? = runCatching {
         WidgetPlanParser.parse(raw, capabilities(feasibility), grant(feasibility), FIXED_PIPELINE_LIMITS)
     }.getOrNull()
+
+    private fun normalizeCallArguments(
+        raw: String,
+        step: WidgetAlgorithmStep,
+        feasibility: WidgetFeasibilityArtifact,
+    ): CallArgumentsNormalization {
+        val value = runCatching { StrictJson.parse(raw).requiredObject() }.getOrNull()
+            ?: return CallArgumentsNormalization.Invalid(WidgetAuthoringStageFailureCode.InvalidPlan)
+        if (value.keySet() != LEGACY_CALL_FIELDS) {
+            return CallArgumentsNormalization.Valid(StrictJson.canonical(value))
+        }
+        val planned = parsePlan("[$raw]", feasibility)?.singleOrNull()
+            ?: return CallArgumentsNormalization.Invalid(WidgetAuthoringStageFailureCode.InvalidPlan)
+        if (planned.alias != step.id || planned.tool != step.tool) {
+            return CallArgumentsNormalization.Invalid(WidgetAuthoringStageFailureCode.CapabilityExpansion)
+        }
+        return CallArgumentsNormalization.Valid(planned.argumentsJson)
+    }
 
     private fun contracts(feasibility: WidgetFeasibilityArtifact): Map<WidgetToolCapability, ApplicationToolContract> {
         val descriptors = registry.descriptors()
@@ -203,6 +250,123 @@ internal class WidgetAuthoringPipelineValidator(
             selected.capability to requireNotNull(descriptors[selected.capability])
         }
     }
+}
+
+internal fun deterministicPlanArtifact(
+    callFunctions: List<WidgetSourceFragmentArtifact>,
+    algorithm: WidgetAlgorithmArtifact,
+): WidgetSourceFragmentArtifact {
+    val steps = algorithm.toolCallSteps
+    require(callFunctions.map { it.artifactId } == steps.map { it.id })
+    val bindings = steps.zip(callFunctions).mapIndexed { index, (step, function) ->
+        val tool = requireNotNull(step.tool)
+        DeterministicPlanBinding(index, step.id, tool, function.functionName)
+    }
+    val source = buildString {
+        append("function plan(runtime) {\n")
+        bindings.forEach { binding ->
+            append("  const value")
+            append(binding.index)
+            append(" = ")
+            append(binding.functionName)
+            append("(runtime);\n")
+        }
+        append("  return [")
+        append(
+            bindings.joinToString(",") { binding ->
+                val alias = JsonPrimitive(binding.alias).toString()
+                val toolId = JsonPrimitive(binding.tool.id).toString()
+                "{alias:$alias,toolId:$toolId,contractVersion:${binding.tool.version}," +
+                    "arguments:value${binding.index}&&value${binding.index}.alias===$alias&&" +
+                    "value${binding.index}.toolId===$toolId&&value${binding.index}.contractVersion===" +
+                    "${binding.tool.version}?value${binding.index}.arguments:value${binding.index}}"
+            },
+        )
+        append("];\n}")
+    }
+    return WidgetSourceFragmentArtifact(
+        artifactId = "plan",
+        functionName = "plan",
+        inputNames = listOf("runtime"),
+        source = source,
+    )
+}
+
+internal fun WidgetSourceFragmentArtifact.toModelArtifactJson(): String = StrictJson.canonical(
+    JsonObject().apply { addProperty("source", source) },
+)
+
+private data class DeterministicPlanBinding(
+    val index: Int,
+    val alias: String,
+    val tool: WidgetToolCapability,
+    val functionName: String,
+)
+
+private data class RenderFixture(
+    val outcomes: List<WidgetToolOutcome>,
+    val executionFailure: WidgetAuthoringStageFailureCode,
+)
+
+private fun WidgetRuntimeFailureCode.validationFailure(
+    scriptFailure: WidgetAuthoringStageFailureCode,
+): WidgetAuthoringStageFailureCode = when (this) {
+    WidgetRuntimeFailureCode.InvalidProgram,
+    WidgetRuntimeFailureCode.IncompatibleProgram,
+    WidgetRuntimeFailureCode.IntegrityMismatch,
+    -> WidgetAuthoringStageFailureCode.InvalidSource
+    WidgetRuntimeFailureCode.CapabilityDenied,
+    WidgetRuntimeFailureCode.PolicyViolation,
+    -> WidgetAuthoringStageFailureCode.CapabilityExpansion
+    WidgetRuntimeFailureCode.InvalidPlan -> WidgetAuthoringStageFailureCode.InvalidPlan
+    WidgetRuntimeFailureCode.InvalidPresentation -> WidgetAuthoringStageFailureCode.InvalidPresentation
+    WidgetRuntimeFailureCode.ScriptError -> scriptFailure
+    WidgetRuntimeFailureCode.ResourceLimit -> WidgetAuthoringStageFailureCode.ResourceLimit
+    WidgetRuntimeFailureCode.RuntimeUnavailable,
+    WidgetRuntimeFailureCode.Cancelled,
+    -> WidgetAuthoringStageFailureCode.RuntimeUnavailable
+}
+
+private sealed interface CallArgumentsNormalization {
+    data class Valid(val argumentsJson: String) : CallArgumentsNormalization
+    data class Invalid(val code: WidgetAuthoringStageFailureCode) : CallArgumentsNormalization
+}
+
+internal fun presentationShapeFailure(raw: String): WidgetAuthoringStageFailureCode? {
+    val root = runCatching { StrictJson.parse(raw).requiredObject() }.getOrNull()
+        ?: return WidgetAuthoringStageFailureCode.InvalidPresentationFields
+    return presentationNodeFailure(root)
+}
+
+private fun presentationNodeFailure(node: JsonObject): WidgetAuthoringStageFailureCode? {
+    val type = node.get("type")
+        ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
+        ?.asString
+        ?: return WidgetAuthoringStageFailureCode.InvalidPresentationFields
+    val expectedFields = PRESENTATION_FIELDS[type]
+        ?: return WidgetAuthoringStageFailureCode.InvalidPresentationNodeType
+    if (node.keySet() != expectedFields) return WidgetAuthoringStageFailureCode.InvalidPresentationFields
+    if (type == "text" || type == "value") {
+        val tone = node.get("tone")
+            ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
+            ?.asString
+        if (tone !in PRESENTATION_TONES) return WidgetAuthoringStageFailureCode.InvalidPresentationTone
+    }
+    val children = when (type) {
+        "card" -> listOf(node.get("child"))
+        "column", "row" -> node.get("children")
+            ?.takeIf(JsonElement::isJsonArray)
+            ?.asJsonArray
+            ?.toList()
+            ?: return WidgetAuthoringStageFailureCode.InvalidPresentationFields
+        else -> emptyList()
+    }
+    for (child in children) {
+        val childObject = child?.takeIf(JsonElement::isJsonObject)?.asJsonObject
+            ?: return WidgetAuthoringStageFailureCode.InvalidPresentationFields
+        presentationNodeFailure(childObject)?.let { return it }
+    }
+    return null
 }
 
 internal fun WidgetAssembly.toProposal(): UntrustedWidgetProposal = feasibility.toUntrustedProposal(source)
@@ -334,3 +498,14 @@ internal val FIXED_PIPELINE_LIMITS = WidgetRequestedLimits(
 )
 
 private const val MAX_SAFE_JAVASCRIPT_INTEGER = 9_007_199_254_740_991L
+private val LEGACY_CALL_FIELDS = setOf("alias", "toolId", "contractVersion", "arguments")
+private val PRESENTATION_TONES = setOf("neutral", "muted", "positive", "warning")
+private val PRESENTATION_FIELDS = mapOf(
+    "card" to setOf("type", "child"),
+    "column" to setOf("type", "children"),
+    "row" to setOf("type", "children"),
+    "text" to setOf("type", "text", "tone"),
+    "value" to setOf("type", "text", "tone"),
+    "icon" to setOf("type", "name"),
+    "https_link" to setOf("type", "label", "url", "sourceAlias", "sourceField"),
+)

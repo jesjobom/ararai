@@ -1,3 +1,5 @@
+@file:Suppress("LongMethod", "MaxLineLength", "ReturnCount")
+
 package com.jesjobom.ararai.widget.managed
 
 import com.jesjobom.ararai.model.InferenceConfig

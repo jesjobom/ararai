@@ -12,6 +12,7 @@ import com.jesjobom.ararai.engine.LocalLlmRecoveryGate
 import com.jesjobom.ararai.engine.PromptChatMessage
 import com.jesjobom.ararai.engine.PromptChatRole
 import com.jesjobom.ararai.engine.PromptRequest
+import com.jesjobom.ararai.engine.awaitReady
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.WIDGET_AUTHORING_PIPELINE_V1
@@ -37,7 +38,7 @@ internal data class WidgetAuthoringRoundRequest(
         require(objective.isNotBlank() && objective.length <= WidgetAuthoringPipelinePolicy.MAX_TEXT_CHARS)
         require(contextJson.toByteArray(Charsets.UTF_8).size <= ManagedWidgetPolicy.MAX_PROPOSAL_CONTEXT_BYTES)
         require(rejectedArtifact == null || rejectedArtifact.toByteArray(Charsets.UTF_8).size <= WidgetAuthoringPipelinePolicy.MAX_ARTIFACT_BYTES)
-        require((repairCode == null) == (rejectedArtifact == null))
+        require(repairCode != null || rejectedArtifact == null)
     }
 }
 
@@ -214,6 +215,11 @@ internal class WidgetAuthoringPipelineModelController(
         preparedModelId = null
     }
 
+    suspend fun unload() {
+        preparedModelId = null
+        engine.unload()
+    }
+
     private suspend fun captureRound(
         request: WidgetAuthoringRoundRequest,
         started: Long,
@@ -311,10 +317,26 @@ internal fun WidgetAuthoringRoundRequest.toUserText(): String = buildString {
         append(stage.name)
         append(" artifact. Controlled failure: ")
         append(repairCode.diagnosticWireName)
+        if (rejectedArtifact != null) {
+            append("\nRejected artifact (bounded evidence; change only the diagnosed defect): ")
+            append(rejectedArtifact)
+        } else {
+            append("\nRejected artifact omitted to prevent anchoring; regenerate from the validated context and contract.")
+        }
         append("\nCorrection: ")
         append(repairCode.repairInstruction())
-        append("\nRejected artifact: ")
-        append(rejectedArtifact)
+        append("\nAuthoritative replacement contract: ")
+        append(objective)
+        if (
+            stage == WidgetAuthoringStage.RenderFunction &&
+            repairCode in setOf(
+                WidgetAuthoringStageFailureCode.InvalidSource,
+                WidgetAuthoringStageFailureCode.InvalidRenderExecution,
+            )
+        ) {
+            append("\nFinal source check: outcomes is a plain object. Select aliases only from toolResults[].alias, ")
+            append("access results with outcomes[alias], never outcomes.get(), and reuse that alias as sourceAlias.")
+        }
     }
 }
 
@@ -346,7 +368,7 @@ private val REPAIR_INSTRUCTIONS = mapOf(
     WidgetAuthoringStageFailureCode.InvalidFeasibilityProtocol to
         "Do not return protocol metadata; the application derives it.",
     WidgetAuthoringStageFailureCode.InvalidFeasibilityDisplayName to
-        "For achievable, use message as a non-blank display name of at most 80 characters.",
+        "For achievable, use message as a concise non-blank display title of at most 80 characters; do not copy the full instruction.",
     WidgetAuthoringStageFailureCode.InvalidFeasibilityEnabled to
         "Do not return enabled; the application derives it.",
     WidgetAuthoringStageFailureCode.InvalidFeasibilitySchedule to
@@ -361,18 +383,72 @@ private val REPAIR_INSTRUCTIONS = mapOf(
         "Keep outcome=achievable when the request is supported. Use message as its display name. For unachievable, " +
         "use message as the reason; for needs_clarification, use message as the question. " +
         FEASIBILITY_OUTCOME_CONTRACT,
+    WidgetAuthoringStageFailureCode.InvalidSource to
+        "Submit only source for the current stage. It must contain one named function declaration whose " +
+        "name and parameters exactly match the authoritative stage signature, and it must parse with every brace closed; " +
+        "do not use an anonymous function.",
+    WidgetAuthoringStageFailureCode.InvalidRenderExecution to
+        "Regenerate render from renderApi and presentationContract. outcomes is a plain JavaScript object: select an " +
+        "alias from toolResults[].alias, access it only with outcomes[alias], never call outcomes.get(), and check " +
+        "status before payload.",
+    WidgetAuthoringStageFailureCode.InvalidPlan to
+        "Return the frozen call object directly from a call function, or the ordered array of frozen call-function " +
+        "results from plan(runtime). Do not wrap a call in toolCall or another field.",
+    WidgetAuthoringStageFailureCode.InvalidToolArguments to
+        "Keep the frozen alias, tool id, and contract version, and make arguments match the supplied tool contract.",
+    WidgetAuthoringStageFailureCode.InvalidPresentation to
+        "Return one bounded presentation object allowed by the supplied presentation capabilities. Every text or " +
+        "value node must include tone set to neutral, muted, positive, or warning.",
+    WidgetAuthoringStageFailureCode.InvalidPresentationNodeType to
+        "Use one exact node type: card, column, row, text, value, icon, or https_link. Never combine names such as text/value.",
+    WidgetAuthoringStageFailureCode.InvalidPresentationFields to
+        "Use exactly the fields shown for each node. Text and value require type, text, and tone; every fallback must also be a complete node.",
+    WidgetAuthoringStageFailureCode.InvalidPresentationTone to
+        "Set tone on every text or value node to exactly neutral, muted, positive, or warning.",
+    WidgetAuthoringStageFailureCode.InvalidPresentationProvenance to
+        "For https_link, copy the exact URL from a successful outcome and provide the matching frozen sourceAlias and sourceField.",
+    WidgetAuthoringStageFailureCode.InvalidPresentationEmptyHandling to
+        "Check for an empty collection before indexing it and return a complete fallback presentation node.",
+    WidgetAuthoringStageFailureCode.InvalidPresentationFailureHandling to
+        "Check outcomes[alias].status === 'success' before reading payload; return a complete fallback node for failure.",
+    WidgetAuthoringStageFailureCode.CapabilityExpansion to
+        "Keep every frozen alias, tool id, contract version, dependency, and capability unchanged.",
     WidgetAuthoringStageFailureCode.MissingArtifact to
         "Call the advertised capture tool exactly once with the complete artifact; do not answer in plain text.",
     WidgetAuthoringStageFailureCode.TimedOut to
         "Call the advertised capture tool promptly with one complete bounded artifact.",
+    WidgetAuthoringStageFailureCode.DeviceRecoveryTimedOut to
+        "The previous attempt ended before generation. Produce the current stage normally when this retry starts.",
     WidgetAuthoringStageFailureCode.ResourceLimit to
         "Keep the artifact within the supplied size and context limits.",
 )
 
 private const val FEASIBILITY_OUTCOME_CONTRACT =
-    "Return exactly four fields. achievable => message is the display name, periodicIntervalHours is supported or " +
+    "Return exactly four fields. achievable => message is a concise display title of at most 80 characters, not a " +
+        "copy of the full instruction; periodicIntervalHours is supported or " +
         "null, and toolIds contains only the minimum available tool ids. unachievable => message is the reason. " +
         "needs_clarification => message is one question. The application derives every other field. "
+
+internal fun repairArtifactForPrompt(
+    code: WidgetAuthoringStageFailureCode,
+    artifact: String?,
+    repairAttemptNumber: Int,
+): String? {
+    require(repairAttemptNumber in 2..WidgetAuthoringPipelinePolicy.MAX_REPAIRS + 1)
+    if (repairAttemptNumber > 2 || code in CLEAN_REGENERATION_FAILURES) return null
+    return artifact
+}
+
+private val CLEAN_REGENERATION_FAILURES = setOf(
+    WidgetAuthoringStageFailureCode.InvalidSchema,
+    WidgetAuthoringStageFailureCode.InvalidSource,
+    WidgetAuthoringStageFailureCode.InvalidRenderExecution,
+    WidgetAuthoringStageFailureCode.ResourceLimit,
+    WidgetAuthoringStageFailureCode.MissingArtifact,
+    WidgetAuthoringStageFailureCode.TimedOut,
+    WidgetAuthoringStageFailureCode.DeviceRecoveryTimedOut,
+    WidgetAuthoringStageFailureCode.RuntimeUnavailable,
+)
 
 private val STAGE_TOOL_NAMES = setOf(
     SUBMIT_WIDGET_FEASIBILITY_TOOL,

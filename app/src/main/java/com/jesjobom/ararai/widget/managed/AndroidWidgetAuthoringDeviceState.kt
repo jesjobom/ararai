@@ -1,3 +1,5 @@
+@file:Suppress("ReturnCount")
+
 package com.jesjobom.ararai.widget.managed
 
 import android.app.ActivityManager

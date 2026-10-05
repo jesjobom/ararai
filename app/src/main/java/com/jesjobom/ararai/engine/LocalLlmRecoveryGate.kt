@@ -1,10 +1,35 @@
 package com.jesjobom.ararai.engine
 
+import com.jesjobom.ararai.model.LocalModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 
 internal fun interface LocalLlmRecoveryGate {
-    suspend fun awaitReady(): Boolean
+    suspend fun awaitReady(requirement: LocalLlmRecoveryRequirement): Boolean
+}
+
+internal suspend fun LocalLlmRecoveryGate.awaitReady(): Boolean = awaitReady(LocalLlmRecoveryRequirement())
+
+internal data class LocalLlmRecoveryRequirement(
+    val minimumAvailableMemoryKiB: Long = 0,
+) {
+    init {
+        require(minimumAvailableMemoryKiB >= 0)
+    }
+
+    companion object {
+        fun forModel(model: LocalModel): LocalLlmRecoveryRequirement {
+            val artifactBytes = runCatching { File(model.filePath).length() }
+                .getOrDefault(0L)
+                .coerceAtLeast(0L)
+            if (artifactBytes == 0L) return LocalLlmRecoveryRequirement()
+            val estimatedResidentKiB = artifactBytes / BYTES_PER_KIBIBYTE / MODEL_ARTIFACT_TO_RESIDENT_DIVISOR
+            return LocalLlmRecoveryRequirement(
+                minimumAvailableMemoryKiB = estimatedResidentKiB + MODEL_LOAD_HEADROOM_KIB,
+            )
+        }
+    }
 }
 
 internal data class LocalLlmRecoverySnapshot(
@@ -36,12 +61,12 @@ internal class BoundedLocalLlmRecoveryGate(
         require(minimumAvailableMemoryFraction in 0.0..1.0)
     }
 
-    override suspend fun awaitReady(): Boolean {
+    override suspend fun awaitReady(requirement: LocalLlmRecoveryRequirement): Boolean {
         val ready = withTimeoutOrNull(maximumWaitMillis) {
             var stableSamples = 0
             while (true) {
                 val current = snapshot()
-                val sampleReady = current.isReady()
+                val sampleReady = current.isReady(requirement)
                 onSample(current, sampleReady)
                 stableSamples = if (sampleReady) stableSamples + 1 else 0
                 if (stableSamples >= stableSamplesRequired) return@withTimeoutOrNull true
@@ -54,7 +79,7 @@ internal class BoundedLocalLlmRecoveryGate(
         return ready
     }
 
-    private fun LocalLlmRecoverySnapshot.isReady(): Boolean {
+    private fun LocalLlmRecoverySnapshot.isReady(requirement: LocalLlmRecoveryRequirement): Boolean {
         val thermalReady = thermalStatus == null || thermalStatus <= THERMAL_STATUS_NONE
         val batteryReady = batteryTemperatureCelsius == null ||
             batteryTemperatureCelsius <= maximumBatteryTemperatureCelsius
@@ -62,7 +87,8 @@ internal class BoundedLocalLlmRecoveryGate(
         val availableReady = if (availableMemoryKiB == null || totalMemoryKiB == null || totalMemoryKiB == 0L) {
             true
         } else {
-            availableMemoryKiB.toDouble() / totalMemoryKiB >= minimumAvailableMemoryFraction
+            availableMemoryKiB.toDouble() / totalMemoryKiB >= minimumAvailableMemoryFraction &&
+                availableMemoryKiB >= requirement.minimumAvailableMemoryKiB
         }
         return thermalReady &&
             batteryReady &&
@@ -75,7 +101,7 @@ internal class BoundedLocalLlmRecoveryGate(
         const val SAMPLE_INTERVAL_MILLIS = 5_000L
         const val MAXIMUM_WAIT_MILLIS = 10 * 60_000L
         const val STABLE_SAMPLES_REQUIRED = 3
-        const val MAXIMUM_BATTERY_TEMPERATURE_CELSIUS = 32f
+        const val MAXIMUM_BATTERY_TEMPERATURE_CELSIUS = 35f
         const val MAXIMUM_PROCESS_PSS_KIB = 1_048_576
         const val MINIMUM_AVAILABLE_MEMORY_FRACTION = 0.20
         private const val THERMAL_STATUS_NONE = 0
@@ -83,3 +109,7 @@ internal class BoundedLocalLlmRecoveryGate(
 }
 
 internal val ImmediateLocalLlmRecoveryGate = LocalLlmRecoveryGate { true }
+
+private const val BYTES_PER_KIBIBYTE = 1_024L
+private const val MODEL_ARTIFACT_TO_RESIDENT_DIVISOR = 2L
+private const val MODEL_LOAD_HEADROOM_KIB = 512L * 1_024L

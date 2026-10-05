@@ -17,55 +17,75 @@ QuickJS runtime and do not load or prompt a model.
 2. Describe the view to a downloaded model verified for
    `widget_authoring_pipeline_v1`. ArarAI runs isolated capture-only rounds for
    feasibility and tool selection, a typed algorithm, each tool-call function,
-   the `plan` orchestrator, and `render`. Every round uses a fresh conversation,
-   one stage schema, and only the already validated dependencies needed by that
-   stage. An edit additionally receives the current normalized widget/source.
-3. ArarAI validates each artifact before the next round. Generated call
-   functions run against normal and boundary fixtures; `plan` and `render` run
-   with synthetic tool outcomes. At most two repair rounds may replace only the
-   rejected stage without changing its frozen authority envelope.
-4. Review the final unconfirmed source, schedule, tool/runtime/presentation
+   and `render`. The application derives the `plan` orchestrator locally from
+   accepted call functions; that stage performs no model load or generation.
+   Every model round uses a fresh conversation, one stage schema, and only the
+   already validated dependencies needed by that stage. Protocol version,
+   artifact identity, function signature, call alias, tool id, and tool version
+   are application-owned rather than requested from the model. An edit
+   additionally receives the current normalized widget/source.
+3. For a model stage, ArarAI executes exactly one generation, validates it, saves the bounded
+   result as a local attempt, unloads the model, and waits. Review the captured
+   content and controlled validation result as inert selectable text. **Accept
+   and continue** promotes a successful candidate to the checkpoint used by the
+   next stage; **Retry** authorizes one repair attempt for the same stage.
+4. An accepted stage can be reprocessed without immediately replacing it. The
+   prior valid graph remains authoritative until the replacement is accepted;
+   accepting it marks dependent checkpoints stale. Attempts are limited to two
+   repairs per stage revision, including across application restarts.
+5. Review the final unconfirmed source, schedule, tool/runtime/presentation
    permissions, retained-data limits, user actions, and any semantic/source diff.
-5. Choose **Create and enable** (or save the replacement revision and enable it)
+6. Choose **Create and enable** (or save the replacement revision and enable it)
    or **Save disabled**. Leaving or discarding the draft stores no widget,
-   revision, schedule, prompt, or model exchange.
+   revision, or schedule; discarding also removes the transient authoring
+   session, attempts, and checkpoints.
 
 An edit is always a complete replacement revision and always needs confirmation.
 Additional tools, runtime values, presentation actions, or a more frequent
 schedule are called out as authority expansion. A disabled or unavailable tool
 blocks activation; ArarAI does not silently enable it.
 
-The authoring screen reports the current stage and repair count and supports
-cancellation throughout. Intermediate algorithms and fragments remain only in
-memory and are never shown as saved or executable. Unachievable requests and
-requests needing clarification stop before code generation.
+The authoring screen is a repository-backed timeline. It distinguishes queued,
+running, review, retry, accepted, stale, interrupted, cancelled, and completed
+states and shows bounded attempt metadata. Captured JSON and JavaScript are
+displayed only as plain text; rejected content is never executed. The user may
+leave between stages without cancelling or losing accepted work. Unachievable
+requests and requests needing clarification stop before code generation.
 
 The historical one-shot suite v2 showed that E2B failed the complete proposal
 while E4B passed it. That result does not grant eligibility for the new staged
 protocol. No checked-in model advertises `widget_authoring_pipeline_v1` until it
 passes the physical suite-v3 stage matrix and complete synthetic pipeline.
 
-## Background authoring jobs
+## Resumable stage attempts
 
-A generation request runs as an application-scoped background job instead of a
-screen-owned coroutine, so it continues while the user navigates within the
-app and survives leaving the authoring screen. The job controller enforces
-single-flight: while a job is queued, running, or deferred, new generation
-requests are refused with a visible explanation, and the active job can be
-cancelled from the screen or the persistent notification (a foreground
-`dataSync` service owns the progress notification for the job lifetime).
+Only the current stage attempt runs in the background. Its foreground
+`dataSync` service and ongoing notification exist while that attempt is queued,
+checking device readiness, loading, generating, validating, persisting, or
+unloading. At the committed boundary the foreground service stops and a normal
+notification offers Review, Continue, or Retry when applicable. Notification
+actions carry the saved session revision and an action ID, so duplicate or
+stale delivery cannot spend a second generation.
 
-Before generation starts, the application evaluates device state (severe
-thermal status, low available memory, and the system low-memory signal).
-Unacceptable state defers the job with a stated reason and capped backoff
-retries; exhausting the retry budget fails the job explicitly. Once running,
-transient windows are tolerated through the bounded recovery gate. The
-authoring screen reports the live stage, the deferral reason, and a cancel
-action, and disables new requests while a job is active.
+Before model load, the application waits up to 10 minutes for the checked-in
+thermal and memory criteria while the model remains unloaded. Available-memory
+admission includes bounded headroom derived from the selected model artifact.
+A recovery-window expiry is reported separately from a model-generation
+watchdog timeout, and both are controlled retryable attempt results. Chat,
+Voice, diagnostics, and authoring share one application engine whose
+generations are serialized.
 
-Job state and the resulting draft live only in memory. If the process dies
-during a job, nothing is persisted and the request can simply be repeated.
-Physical-device validation of the deferral gating is still pending.
+An achievable feasibility title is requested as a concise name of at most 80
+characters; a longer non-blank title is normalized locally instead of spending
+a repair. Render validation exercises success, empty, and failed tool outcomes
+and reports controlled node-type, field, tone, provenance, empty-result, or
+failed-outcome categories without exposing JavaScript exceptions.
+
+The private widget database stores one non-terminal authoring session, bounded
+append-only attempts, and accepted checkpoints. If Android kills the process,
+startup marks an in-flight attempt interrupted and restores the timeline,
+accepted checkpoints, and consumed retry budget. Final confirmation promotes
+one widget revision and removes the transient session in one transaction.
 
 ## Refresh and scheduling
 

@@ -68,6 +68,12 @@ class WikipediaOnThisDayApplicationToolTest {
         }
         val dispatcher = ApplicationToolDispatcher(registry(tool))
 
+        assertTrue(
+            dispatcher.execute(invocation(argumentsJson = """{"month":1e1,"day":3,"language":"en"}""")) is
+                ApplicationToolDispatchResult.Executed,
+        )
+        calls = 0
+
         listOf(
             invocation(argumentsJson = """{"month":2,"day":30,"language":"en"}"""),
             invocation(argumentsJson = """{"month":9,"day":9,"language":"en","url":"x"}"""),

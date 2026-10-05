@@ -62,6 +62,7 @@ class LiteRtLmLocalLlmEngine(
     override val supportsIncrementalConversation: Boolean = true
     private val lock = Any()
     private val transitionMutex = Mutex()
+    private val generationMutex = Mutex()
     private var loadedSession: LiteRtLmSession? = null
     private var loadedModelId: String? = null
     private var loadedModelPath: String? = null
@@ -184,47 +185,55 @@ class LiteRtLmLocalLlmEngine(
         }
     }
 
+    @Suppress("LongMethod")
     override fun generate(request: PromptRequest): Flow<GenerationEvent> = callbackFlow {
+        val generationStarted = AtomicBoolean(false)
         val generationFinished = AtomicBoolean(false)
-        val initialState =
-            synchronized(lock) {
-                val config = loadedConfig
-                val capabilities = loadedInputCapabilities
-                if (loadedSession == null || config == null || capabilities == null) {
-                    null
-                } else {
-                    LoadedState(config, capabilities, loadedToolNames, loadedAuthoringToolNames)
-                }
-            }
-
-        if (initialState == null) {
-            runtimeTelemetry.record(event = "generation_request_rejected", outcome = "model_not_loaded")
-            trySend(expectedGenerationFailure("Model is not loaded"))
-            close()
-            return@callbackFlow
-        }
-
         val job =
             launch(dispatcher) {
                 try {
-                    request.validateAgainst(initialState.capabilities)?.let { failure ->
-                        runtimeTelemetry.record(event = "generation_request_rejected", outcome = "capability_validation")
-                        trySend(expectedGenerationFailure(failure))
-                        return@launch
+                    generationMutex.withLock generation@{
+                        val initialState =
+                            synchronized(lock) {
+                                val config = loadedConfig
+                                val capabilities = loadedInputCapabilities
+                                if (loadedSession == null || config == null || capabilities == null) {
+                                    null
+                                } else {
+                                    LoadedState(config, capabilities, loadedToolNames, loadedAuthoringToolNames)
+                                }
+                            }
+                        if (initialState == null) {
+                            runtimeTelemetry.record(event = "generation_request_rejected", outcome = "model_not_loaded")
+                            trySend(expectedGenerationFailure("Model is not loaded"))
+                            return@generation
+                        }
+                        request.validateAgainst(initialState.capabilities)?.let { failure ->
+                            runtimeTelemetry.record(
+                                event = "generation_request_rejected",
+                                outcome = "capability_validation",
+                            )
+                            trySend(expectedGenerationFailure(failure))
+                            return@generation
+                        }
+                        if (!request.toolsAreSupported(initialState)) {
+                            runtimeTelemetry.record(
+                                event = "generation_request_rejected",
+                                outcome = "tools_unsupported",
+                            )
+                            trySend(expectedGenerationFailure("Selected model does not support the requested tools"))
+                            return@generation
+                        }
+                        val session = transitionMutex.withLock {
+                            ensureProfile(LiteRtLmWorkloadProfile.from(request))
+                        }
+                        generationStarted.set(true)
+                        session.generate(request, initialState.config).collect { chunk ->
+                            chunk.toGenerationEvents().forEach { trySend(it) }
+                        }
+                        generationFinished.set(true)
+                        trySend(GenerationEvent.Completed)
                     }
-                    if (!request.toolsAreSupported(initialState)) {
-                        runtimeTelemetry.record(event = "generation_request_rejected", outcome = "tools_unsupported")
-                        trySend(expectedGenerationFailure("Selected model does not support the requested tools"))
-                        return@launch
-                    }
-                    val session = transitionMutex.withLock {
-                        ensureProfile(LiteRtLmWorkloadProfile.from(request))
-                    }
-                    session.generate(request, initialState.config).collect { chunk ->
-                        chunk.toGenerationEvents().forEach { trySend(it) }
-                    }
-                    generationFinished.set(true)
-                    trySend(GenerationEvent.Completed)
                 } catch (error: Throwable) {
                     val failure = error.toGenerationFailure()
                     runtimeTelemetry.record(
@@ -243,7 +252,7 @@ class LiteRtLmLocalLlmEngine(
             }
 
         awaitClose {
-            if (!generationFinished.get()) {
+            if (generationStarted.get() && !generationFinished.get()) {
                 synchronized(lock) { loadedSession }?.cancel()
             }
             job.cancel()

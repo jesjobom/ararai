@@ -1,7 +1,8 @@
 # contextual-screen-tours Specification
 
 ## Purpose
-TBD - created by archiving change add-contextual-screen-tours. Update Purpose after archive.
+Define optional, stateful in-app guidance that introduces features on the
+screens where they are used without disrupting normal navigation.
 
 ## Requirements
 

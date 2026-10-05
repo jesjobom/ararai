@@ -16,9 +16,9 @@ import com.jesjobom.ararai.engine.androidLocalLlmRecoveryGate
 import com.jesjobom.ararai.engine.prepareLiteRtLmCacheDir
 import com.jesjobom.ararai.knowledge.EncryptedWebSearchPreferences
 import com.jesjobom.ararai.knowledge.FallbackKnowledgeTool
+import com.jesjobom.ararai.knowledge.WebSearchToolFactory
 import com.jesjobom.ararai.knowledge.WikipediaKnowledgeTool
 import com.jesjobom.ararai.knowledge.WikipediaOnThisDayKnowledgeTool
-import com.jesjobom.ararai.knowledge.WebSearchToolFactory
 import com.jesjobom.ararai.math.EvalExLocalMathEngine
 import com.jesjobom.ararai.model.ForegroundModelDownloadGateway
 import com.jesjobom.ararai.model.LegacyModelArtifactMigration
@@ -45,18 +45,27 @@ import com.jesjobom.ararai.ui.ManagedWidgetDraftUiState
 import com.jesjobom.ararai.ui.ManagedWidgetsController
 import com.jesjobom.ararai.widget.WidgetToolExecutionGateway
 import com.jesjobom.ararai.widget.managed.AndroidWidgetAuthoringDeviceState
-import com.jesjobom.ararai.widget.managed.ManagedWidgetApplicationServices
 import com.jesjobom.ararai.widget.managed.DispatcherManagedWidgetRepository
+import com.jesjobom.ararai.widget.managed.DispatcherWidgetAuthoringWorkflowRepository
+import com.jesjobom.ararai.widget.managed.JavaScriptWidgetDraftPlanner
+import com.jesjobom.ararai.widget.managed.ManagedWidgetApplicationServices
 import com.jesjobom.ararai.widget.managed.ManagedWidgetExecutionCoordinator
 import com.jesjobom.ararai.widget.managed.ManagedWidgetExecutionProvider
 import com.jesjobom.ararai.widget.managed.ManagedWidgetManualRefresh
 import com.jesjobom.ararai.widget.managed.ManagedWidgetScheduleController
 import com.jesjobom.ararai.widget.managed.ManagedWidgetStartupReconciler
+import com.jesjobom.ararai.widget.managed.ResumableWidgetAuthoringController
 import com.jesjobom.ararai.widget.managed.RuntimeManagedWidgetProgramExecutor
 import com.jesjobom.ararai.widget.managed.SqliteManagedWidgetRepository
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringAssemblyBuilder
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobController
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobFailureReason
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobOutcome
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringPipelineModelController
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringPipelineValidator
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringStageRunner
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringWorkflowCoordinator
+import com.jesjobom.ararai.widget.managed.WidgetDraftBuilder
 import com.jesjobom.ararai.widget.managed.WorkManagerManagedWidgetScheduler
 import com.jesjobom.ararai.widget.runtime.GatewayWidgetProgramToolExecutor
 import com.jesjobom.ararai.widget.runtime.QuickJsWidgetJavaScriptEngine
@@ -65,6 +74,7 @@ import com.jesjobom.ararai.widget.runtime.WidgetRuntimeCoordinator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -85,6 +95,14 @@ class ArarAiApplication :
         LegacyModelArtifactMigration.run(filesDir)
         applicationScope.launch(Dispatchers.IO) {
             runCatching { managedWidgetStartupReconciler.reconcile() }
+        }
+        applicationScope.launch {
+            runCatching { resumableWidgetAuthoringController.initialize() }
+        }
+        applicationScope.launch {
+            widgetAuthoringWorkflowCoordinator.activeSession.collect {
+                resumableWidgetAuthoringNotificationPresenter.onStateChanged(it)
+            }
         }
     }
 
@@ -109,6 +127,12 @@ class ArarAiApplication :
     private val managedWidgetStore by lazy { SqliteManagedWidgetRepository(this) }
 
     private val managedWidgetRepository by lazy { DispatcherManagedWidgetRepository(managedWidgetStore) }
+
+    private val managedWidgetJavaScriptEngine by lazy { QuickJsWidgetJavaScriptEngine() }
+
+    private val widgetAuthoringWorkflowRepository by lazy {
+        DispatcherWidgetAuthoringWorkflowRepository(managedWidgetStore)
+    }
 
     val wikipediaTool by lazy { WikipediaKnowledgeTool() }
 
@@ -238,7 +262,42 @@ class ArarAiApplication :
         ManagedWidgetsController(
             services = managedWidgetApplicationServices,
             localLlmEngine = localLlmRuntime.engine,
+            widgetJavaScriptEngine = managedWidgetJavaScriptEngine,
             recoveryGate = localLlmRecoveryGate,
+        )
+    }
+
+    internal val resumableWidgetAuthoringController: ResumableWidgetAuthoringController by lazy {
+        val stageRunner = WidgetAuthoringStageRunner(
+            repository = widgetAuthoringWorkflowRepository,
+            modelController = WidgetAuthoringPipelineModelController(
+                localLlmRuntime.engine,
+                recoveryGate = localLlmRecoveryGate,
+            ),
+            recoveryGate = localLlmRecoveryGate,
+            validator = WidgetAuthoringPipelineValidator(managedWidgetToolRegistry, managedWidgetJavaScriptEngine),
+            registry = managedWidgetToolRegistry,
+        )
+        ResumableWidgetAuthoringController(
+            scope = applicationScope,
+            repository = widgetAuthoringWorkflowRepository,
+            executor = stageRunner,
+        )
+    }
+
+    internal val widgetAuthoringWorkflowCoordinator: WidgetAuthoringWorkflowCoordinator by lazy {
+        val validator = WidgetAuthoringPipelineValidator(managedWidgetToolRegistry, managedWidgetJavaScriptEngine)
+        val draftBuilder = WidgetDraftBuilder(
+            registry = managedWidgetToolRegistry,
+            planner = JavaScriptWidgetDraftPlanner(managedWidgetJavaScriptEngine),
+        )
+        WidgetAuthoringWorkflowCoordinator(
+            controller = resumableWidgetAuthoringController,
+            widgetRepository = managedWidgetRepository,
+            schedules = managedWidgetApplicationServices.schedules,
+            registry = managedWidgetToolRegistry,
+            assemblyBuilder = WidgetAuthoringAssemblyBuilder(validator, draftBuilder, managedWidgetToolRegistry),
+            runtimeContextProvider = ::currentWidgetRuntimeContext,
         )
     }
 
@@ -246,26 +305,23 @@ class ArarAiApplication :
         WidgetAuthoringNotificationPresenter(this)
     }
 
+    internal val resumableWidgetAuthoringNotificationPresenter by lazy {
+        ResumableWidgetAuthoringNotificationPresenter(this)
+    }
+
     internal val widgetAuthoringJobs: WidgetAuthoringJobController<ManagedWidgetDraftUiState> by lazy {
         WidgetAuthoringJobController(
             scope = applicationScope,
             executor = { request, onProgress ->
+                require(request.probe) {
+                    "Continuous widget authoring is disabled; use the resumable workflow"
+                }
                 when (
-                    val result = if (request.probe) {
-                        managedWidgetsController.runBackgroundAuthoringProbe(
-                            request.model,
-                            request.inference,
-                            onProgress,
-                        )
-                    } else {
-                        managedWidgetsController.generateDraft(
-                            request.model,
-                            request.inference,
-                            request.instruction,
-                            request.widgetId,
-                            onProgress,
-                        )
-                    }
+                    val result = managedWidgetsController.runBackgroundAuthoringProbe(
+                        request.model,
+                        request.inference,
+                        onProgress,
+                    )
                 ) {
                     is ManagedWidgetDraftGenerationResult.Ready ->
                         WidgetAuthoringJobOutcome.Ready(result.value)

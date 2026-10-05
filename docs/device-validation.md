@@ -17,9 +17,15 @@ prompts and media; never attach private conversations, logs, or user files.
 
 ## Automated device gate
 
-1. Connect an arm64 device with USB debugging enabled.
+Connected Android instrumentation may uninstall the target package during
+cleanup and permanently erase app-private models, preferences, conversations,
+and widget state. Never run this gate on a retained or personal installation.
+
+1. Connect a disposable arm64 emulator/device with USB debugging enabled and no
+   application data to retain.
 2. Run `adb devices` and confirm exactly the intended device is authorized.
-3. Run `./gradlew connectedDebugAndroidTest`.
+3. Run
+   `./gradlew -Pararai.allowDestructiveConnectedTests=true connectedDebugAndroidTest`.
 4. Retain the generated test report, but inspect it before sharing to ensure it
    contains no private device data.
 
@@ -99,18 +105,20 @@ This result satisfies physical tasks 1.2, 1.3, and 6.3 for the foundation.
 Run the complete debug device suite first:
 
 ```sh
-./gradlew connectedDebugAndroidTest
+./gradlew -Pararai.allowDestructiveConnectedTests=true connectedDebugAndroidTest
 ```
 
 Then run the focused runtime suites against optimized targets:
 
 ```sh
 ./gradlew \
+  -Pararai.allowDestructiveConnectedTests=true \
   -Pararai.appInstrumentationBuildType=releaseCandidate \
   :app:connectedReleaseCandidateAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=com.jesjobom.ararai.widget.runtime.WidgetRuntimeCoordinatorInstrumentedTest
 
 ./gradlew \
+  -Pararai.allowDestructiveConnectedTests=true \
   -Pararai.quickJsInstrumentationBuildType=release \
   :quickjs-runtime:connectedReleaseAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=com.jesjobom.ararai.quickjs.QuickJsSandboxInstrumentedTest

@@ -343,9 +343,11 @@ private fun JsonObject.strictString(name: String): String? = get(name)
 
 private fun JsonObject.strictInt(name: String): Int? = get(name)
     ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }
-    ?.asString
-    ?.takeIf(UNSIGNED_INTEGER_PATTERN::matches)
-    ?.toIntOrNull()
+    ?.asJsonPrimitive
+    ?.let { value ->
+        runCatching { value.asBigDecimal.toBigIntegerExact().toString().toIntOrNull() }
+            .getOrNull()
+    }
 
 private fun validWikipediaCalendarDay(month: Int, day: Int): Boolean = try {
     LocalDate.of(2000, month, day)

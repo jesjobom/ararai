@@ -41,6 +41,7 @@ internal class ManagedWidgetAuthoringPipeline(
     private val onAttemptFailure: (WidgetAuthoringAttemptFailure) -> Unit = {},
 ) {
     private var activeArtifacts: MutableList<Any> = mutableListOf()
+    private val stageValidators = WidgetAuthoringStageValidators(validator)
 
     suspend fun generate(
         model: LocalModel?,
@@ -102,9 +103,9 @@ internal class ManagedWidgetAuthoringPipeline(
             generationRecovery = generationRecovery,
             onProgress = onProgress,
         ) { raw ->
-            when (val parsed = WidgetFeasibilityParser.parse(raw, availableTools)) {
-                is WidgetFeasibilityParseResult.Valid -> StageValidation.Valid(parsed.artifact)
-                is WidgetFeasibilityParseResult.Invalid -> StageValidation.Invalid(parsed.code)
+            when (val validated = stageValidators.feasibility(raw, availableTools)) {
+                is WidgetAuthoringArtifactValidation.Valid -> StageValidation.Valid(validated.artifact)
+                is WidgetAuthoringArtifactValidation.Invalid -> StageValidation.Invalid(validated.code)
             }
         }.valueOrReturn { return it }
         activeArtifacts += feasibility
@@ -133,9 +134,9 @@ internal class ManagedWidgetAuthoringPipeline(
             generationRecovery = generationRecovery,
             onProgress = onProgress,
         ) { raw ->
-            when (val parsed = WidgetAlgorithmParser.parse(raw, feasibility)) {
-                is WidgetAlgorithmParseResult.Valid -> StageValidation.Valid(parsed.artifact)
-                is WidgetAlgorithmParseResult.Invalid -> StageValidation.Invalid(parsed.code)
+            when (val validated = stageValidators.algorithm(raw, feasibility)) {
+                is WidgetAuthoringArtifactValidation.Valid -> StageValidation.Valid(validated.artifact)
+                is WidgetAuthoringArtifactValidation.Invalid -> StageValidation.Invalid(validated.code)
             }
         }.valueOrReturn { return it }
         activeArtifacts += algorithm
@@ -150,30 +151,15 @@ internal class ManagedWidgetAuthoringPipeline(
                 stageProgress = WidgetAuthoringProgress.GeneratingCall(index + 1, algorithm.toolCallSteps.size),
                 toolName = SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
                 schema = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_CALL_FUNCTION_TOOL),
-                objective = "Generate exactly function $functionName(runtime). It must return alias '${step.id}', fixed tool '${step.tool?.id}' version ${step.tool?.version}, and contract-valid arguments. Use runtime.currentLocalDateTime() for current date/time.",
+                objective = callFunctionObjective(step, functionName),
                 baseContext = callContext(prompt, feasibility, algorithm, step),
                 budget = budget,
                 generationRecovery = generationRecovery,
                 onProgress = onProgress,
             ) { raw ->
-                when (
-                    val parsed = WidgetSourceFragmentParser.parse(
-                        raw,
-                        expectedArtifactId = step.id,
-                        expectedFunctionName = functionName,
-                        expectedInputNames = listOf("runtime"),
-                    )
-                ) {
-                    is WidgetSourceFragmentParseResult.Invalid -> StageValidation.Invalid(parsed.code)
-                    is WidgetSourceFragmentParseResult.Valid -> {
-                        val failure = validator.validateCallFunction(
-                            parsed.artifact,
-                            step,
-                            feasibility,
-                            runtimeContext,
-                        )
-                        if (failure == null) StageValidation.Valid(parsed.artifact) else StageValidation.Invalid(failure)
-                    }
+                when (val validated = stageValidators.callFunction(raw, step, feasibility, runtimeContext)) {
+                    is WidgetAuthoringArtifactValidation.Valid -> StageValidation.Valid(validated.artifact)
+                    is WidgetAuthoringArtifactValidation.Invalid -> StageValidation.Invalid(validated.code)
                 }
             }.valueOrReturn { return it }
             callFunctions += fragment
@@ -181,39 +167,22 @@ internal class ManagedWidgetAuthoringPipeline(
         }
 
         onProgress(WidgetAuthoringProgress.GeneratingPlan)
-        val planFunction = captureValidated(
-            model = model,
-            stage = WidgetAuthoringStage.PlanFunction,
-            stageProgress = WidgetAuthoringProgress.GeneratingPlan,
-            toolName = SUBMIT_WIDGET_PLAN_FUNCTION_TOOL,
-            schema = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_PLAN_FUNCTION_TOOL),
-            objective = "Generate exactly function plan(runtime). Return one ordered array that calls each frozen call-function signature exactly once; do not reproduce or rewrite those functions.",
-            baseContext = planContext(prompt, feasibility, algorithm, callFunctions),
-            budget = budget,
-            generationRecovery = generationRecovery,
-            onProgress = onProgress,
-        ) { raw ->
-            when (
-                val parsed = WidgetSourceFragmentParser.parse(
-                    raw,
-                    expectedArtifactId = "plan",
-                    expectedFunctionName = "plan",
-                    expectedInputNames = listOf("runtime"),
-                )
-            ) {
-                is WidgetSourceFragmentParseResult.Invalid -> StageValidation.Invalid(parsed.code)
-                is WidgetSourceFragmentParseResult.Valid -> {
-                    val failure = validator.validatePlanFunction(
-                        callFunctions,
-                        parsed.artifact,
-                        algorithm,
-                        feasibility,
-                        runtimeContext,
-                    )
-                    if (failure == null) StageValidation.Valid(parsed.artifact) else StageValidation.Invalid(failure)
-                }
-            }
-        }.valueOrReturn { return it }
+        val planFunction = deterministicPlanArtifact(callFunctions, algorithm)
+        when (
+            val validated = stageValidators.plan(
+                planFunction.toModelArtifactJson(),
+                callFunctions,
+                algorithm,
+                feasibility,
+                runtimeContext,
+            )
+        ) {
+            is WidgetAuthoringArtifactValidation.Valid -> Unit
+            is WidgetAuthoringArtifactValidation.Invalid -> return WidgetAuthoringPipelineResult.StageFailed(
+                WidgetAuthoringStage.PlanFunction,
+                validated.code,
+            )
+        }
         activeArtifacts += planFunction
 
         onProgress(WidgetAuthoringProgress.GeneratingPresentation)
@@ -223,31 +192,23 @@ internal class ManagedWidgetAuthoringPipeline(
             stageProgress = WidgetAuthoringProgress.GeneratingPresentation,
             toolName = SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
             schema = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_RENDER_FUNCTION_TOOL),
-            objective = "Generate exactly function render(runtime, outcomes, state). Return one allowed presentation for success, empty, and failure outcomes with link provenance when a link is shown.",
+            objective = renderFunctionObjective(callFunctions),
             baseContext = renderContext(prompt, feasibility, algorithm),
             budget = budget,
             generationRecovery = generationRecovery,
             onProgress = onProgress,
         ) { raw ->
             when (
-                val parsed = WidgetSourceFragmentParser.parse(
+                val validated = stageValidators.render(
                     raw,
-                    expectedArtifactId = "render",
-                    expectedFunctionName = "render",
-                    expectedInputNames = listOf("runtime", "outcomes", "state"),
+                    callFunctions + planFunction,
+                    algorithm,
+                    feasibility,
+                    runtimeContext,
                 )
             ) {
-                is WidgetSourceFragmentParseResult.Invalid -> StageValidation.Invalid(parsed.code)
-                is WidgetSourceFragmentParseResult.Valid -> {
-                    val failure = validator.validateRenderFunction(
-                        callFunctions + planFunction,
-                        parsed.artifact,
-                        algorithm,
-                        feasibility,
-                        runtimeContext,
-                    )
-                    if (failure == null) StageValidation.Valid(parsed.artifact) else StageValidation.Invalid(failure)
-                }
+                is WidgetAuthoringArtifactValidation.Valid -> StageValidation.Valid(validated.artifact)
+                is WidgetAuthoringArtifactValidation.Invalid -> StageValidation.Invalid(validated.code)
             }
         }.valueOrReturn { return it }
         activeArtifacts += renderFunction
@@ -303,7 +264,9 @@ internal class ManagedWidgetAuthoringPipeline(
                 objective = objective,
                 contextJson = baseContext,
                 repairCode = repairCode,
-                rejectedArtifact = rejectedArtifact,
+                rejectedArtifact = repairCode?.let {
+                    repairArtifactForPrompt(it, rejectedArtifact, attempt)
+                },
             )
             when (val round = modelController.capture(model, request)) {
                 is WidgetAuthoringRoundResult.Captured -> when (val validated = validate(round.rawArgumentsJson)) {
@@ -410,7 +373,7 @@ private class WidgetAuthoringGenerationRecovery(
     }
 }
 
-private fun baseContext(prompt: WidgetAuthoringPrompt): String = diagnosticFeasibilityContext(prompt, compact = true)
+internal fun baseContext(prompt: WidgetAuthoringPrompt): String = diagnosticFeasibilityContext(prompt, compact = true)
 
 internal fun diagnosticFeasibilityContext(
     prompt: WidgetAuthoringPrompt,
@@ -497,7 +460,7 @@ internal fun algorithmContext(
     },
 )
 
-private fun callContext(
+internal fun callContext(
     prompt: WidgetAuthoringPrompt,
     feasibility: WidgetFeasibilityArtifact,
     algorithm: WidgetAlgorithmArtifact,
@@ -519,7 +482,7 @@ private fun callContext(
     },
 )
 
-private fun planContext(
+internal fun planContext(
     prompt: WidgetAuthoringPrompt,
     feasibility: WidgetFeasibilityArtifact,
     algorithm: WidgetAlgorithmArtifact,
@@ -546,7 +509,7 @@ private fun planContext(
     },
 )
 
-private fun renderContext(
+internal fun renderContext(
     prompt: WidgetAuthoringPrompt,
     feasibility: WidgetFeasibilityArtifact,
     algorithm: WidgetAlgorithmArtifact,
@@ -554,11 +517,13 @@ private fun renderContext(
     JsonObject().apply {
         addProperty("userInstruction", prompt.userInstruction)
         add("runtimeApi", runtimeApi(feasibility.runtimeValues))
+        add("renderApi", renderApi())
         add("algorithm", algorithm.toJson())
         add(
             "presentationCapabilities",
             JsonArray().apply { feasibility.presentation.map { it.wireName }.sorted().forEach(::add) },
         )
+        add("presentationContract", renderPresentationContract())
         val allTools = JsonParser.parseString(prompt.apiContextJson).asJsonObject.getAsJsonArray("tools")
         add(
             "toolResults",
@@ -582,6 +547,58 @@ private fun renderContext(
         )
     },
 )
+
+private fun renderApi(): JsonObject = JsonObject().apply {
+    addProperty("entrypoint", "function render(runtime, outcomes, state) -> one presentation node")
+    addProperty("outcomesContainer", "plain JavaScript object; it is not a Map")
+    addProperty(
+        "outcomeAccess",
+        "Read a result only with outcomes[alias], where alias is copied exactly from toolResults[].alias; " +
+            "never call outcomes.get().",
+    )
+    addProperty(
+        "outcomeShape",
+        "A result is {status:'success',payload:<tool result>} or {status:'failure',reason:<code>}.",
+    )
+    addProperty(
+        "aliasBinding",
+        "Every outcome lookup and https_link.sourceAlias must use the same alias selected from toolResults[].alias.",
+    )
+    addProperty("state", "state.observations is a bounded array of this widget's typed observations")
+    addProperty(
+        "executionRules",
+        "Use synchronous deterministic data-only JavaScript. No network, storage, imports, eval, async, timers, " +
+            "host APIs, HTML, callbacks, or arbitrary endpoints.",
+    )
+}
+
+private fun renderPresentationContract(): JsonObject = JsonObject().apply {
+    addProperty("root", "{type:'card',child:N}")
+    add(
+        "containerNodes",
+        JsonArray().apply {
+            add("{type:'column',children:[N]}")
+            add("{type:'row',children:[N]}")
+        },
+    )
+    add(
+        "contentNodes",
+        JsonArray().apply {
+            add("{type:'text',text:'...',tone:T}")
+            add("{type:'value',text:'...',tone:T}")
+            add("{type:'icon',name:'info'}")
+            add("{type:'https_link',label:'...',url:U,sourceAlias:A,sourceField:P}")
+        },
+    )
+    add(
+        "tones",
+        JsonArray().apply {
+            listOf("neutral", "muted", "positive", "warning").forEach(::add)
+        },
+    )
+    addProperty("outcomes", "Check status before payload; return a valid fallback for failure and empty arrays")
+    addProperty("provenance", "Copy sourceAlias and sourceField from the exact tool result")
+}
 
 private fun runtimeApi(values: Set<WidgetRuntimeValue>): JsonObject = JsonObject().apply {
     addProperty("apiVersion", 1)

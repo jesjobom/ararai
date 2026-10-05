@@ -100,7 +100,7 @@ internal object WidgetFeasibilityParser {
             .orEmpty()
         return WidgetFeasibilityArtifact(
             outcome,
-            message.take(MAX_PIPELINE_DISPLAY_NAME_CHARS),
+            message.toDisplayName(),
             outcome == WidgetFeasibilityOutcome.Achievable,
             interval,
             tools,
@@ -143,8 +143,6 @@ internal object WidgetFeasibilityParser {
             require(message.isNotBlank())
             val maximum = if (outcome == WidgetFeasibilityOutcome.NeedsClarification) {
                 WidgetAuthoringPipelinePolicy.MAX_QUESTION_CHARS
-            } else if (outcome == WidgetFeasibilityOutcome.Achievable) {
-                MAX_PIPELINE_DISPLAY_NAME_CHARS
             } else {
                 WidgetAuthoringPipelinePolicy.MAX_TEXT_CHARS
             }
@@ -233,8 +231,11 @@ internal object WidgetAlgorithmParser {
             raw,
             maxStringChars = WidgetAuthoringPipelinePolicy.MAX_TEXT_CHARS,
         ).requiredObject()
-        root.requireFields("protocolVersion", "steps", "presentationObjective")
-        require(root.requiredInt("protocolVersion") == WIDGET_AUTHORING_PROTOCOL_VERSION)
+        require(root.keySet().all { it in setOf("protocolVersion", "steps", "presentationObjective") })
+        require(root.has("steps") && root.has("presentationObjective"))
+        root.get("protocolVersion")?.let {
+            require(root.requiredInt("protocolVersion") == WIDGET_AUTHORING_PROTOCOL_VERSION)
+        }
         val selectedTools = envelope.tools.map { it.capability }.toSet()
         val steps = root.requiredArray("steps").map { element ->
             parseStep(element.requiredObject(), selectedTools)
@@ -328,19 +329,19 @@ internal object WidgetSourceFragmentParser {
             raw,
             maxStringChars = WidgetAuthoringPipelinePolicy.MAX_FRAGMENT_BYTES,
         ).requiredObject()
-        root.requireFields("protocolVersion", "artifactId", "functionName", "inputNames", "source")
-        require(root.requiredInt("protocolVersion") == WIDGET_AUTHORING_PROTOCOL_VERSION)
-        val artifactId = root.requiredString("artifactId")
-        val functionName = root.requiredString("functionName")
-        val inputs = root.requiredArray("inputNames").map { it.asString }
+        val legacyFields = setOf("protocolVersion", "artifactId", "functionName", "inputNames", "source")
+        require(root.keySet() == setOf("source") || root.keySet() == legacyFields)
+        if (root.keySet() == legacyFields) {
+            require(root.requiredInt("protocolVersion") == WIDGET_AUTHORING_PROTOCOL_VERSION)
+            require(root.requiredString("artifactId") == expectedArtifactId)
+            require(root.requiredString("functionName") == expectedFunctionName)
+            require(root.requiredArray("inputNames").map { it.asString } == expectedInputNames)
+        }
         val source = root.requiredString("source")
-        require(artifactId == expectedArtifactId)
-        require(functionName == expectedFunctionName)
-        require(inputs == expectedInputNames)
         require(source.utf8Size() <= WidgetAuthoringPipelinePolicy.MAX_FRAGMENT_BYTES)
-        requireSafeSingleFunction(source, functionName, inputs)
+        requireSafeSingleFunction(source, expectedFunctionName, expectedInputNames)
         WidgetSourceFragmentParseResult.Valid(
-            WidgetSourceFragmentArtifact(artifactId, functionName, inputs, source),
+            WidgetSourceFragmentArtifact(expectedArtifactId, expectedFunctionName, expectedInputNames, source),
         )
     } catch (_: RuntimeException) {
         WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidSource)
@@ -398,13 +399,21 @@ internal enum class WidgetAuthoringStageFailureCode(val diagnosticWireName: Stri
     InvalidFeasibilityOutcome("invalid_feasibility_outcome"),
     InvalidAlgorithm("invalid_algorithm"),
     InvalidSource("invalid_source"),
+    InvalidRenderExecution("invalid_render_execution"),
     InvalidToolArguments("invalid_tool_arguments"),
     InvalidPlan("invalid_plan"),
     InvalidPresentation("invalid_presentation"),
+    InvalidPresentationNodeType("invalid_presentation_node_type"),
+    InvalidPresentationFields("invalid_presentation_fields"),
+    InvalidPresentationTone("invalid_presentation_tone"),
+    InvalidPresentationProvenance("invalid_presentation_provenance"),
+    InvalidPresentationEmptyHandling("invalid_presentation_empty_handling"),
+    InvalidPresentationFailureHandling("invalid_presentation_failure_handling"),
     CapabilityExpansion("capability_expansion"),
     ResourceLimit("resource_limit"),
     MissingArtifact("missing_artifact"),
     TimedOut("timed_out"),
+    DeviceRecoveryTimedOut("device_recovery_timed_out"),
     RuntimeUnavailable("runtime_unavailable"),
 }
 
@@ -461,11 +470,11 @@ internal data class WidgetAuthoringAttemptBudget(
 }
 
 internal object WidgetAuthoringStageSchemas {
-    val feasibility: String = """{"name":"$SUBMIT_WIDGET_FEASIBILITY_TOOL","description":"Submit one small feasibility decision. The application derives protocol metadata, tool versions, runtime grants, presentation grants, enablement, and terminal normalization.","parameters":{"type":"object","additionalProperties":false,"properties":{"outcome":{"type":"string","enum":["achievable","unachievable","needs_clarification"]},"message":{"type":"string","minLength":1,"maxLength":512},"periodicIntervalHours":{"type":["integer","null"],"enum":[null,1,6,12,24]},"toolIds":{"type":"array","maxItems":4,"uniqueItems":true,"items":{"type":"string"}}},"required":["outcome","message","periodicIntervalHours","toolIds"]}}"""
+    val feasibility: String = """{"name":"$SUBMIT_WIDGET_FEASIBILITY_TOOL","description":"Submit one small feasibility decision. For achievable, message is a concise display title of at most 80 characters, not a copy of the instruction. The application derives protocol metadata, tool versions, runtime grants, presentation grants, enablement, and terminal normalization.","parameters":{"type":"object","additionalProperties":false,"properties":{"outcome":{"type":"string","enum":["achievable","unachievable","needs_clarification"]},"message":{"type":"string","minLength":1,"maxLength":512},"periodicIntervalHours":{"type":["integer","null"],"enum":[null,1,6,12,24]},"toolIds":{"type":"array","maxItems":4,"uniqueItems":true,"items":{"type":"string"}}},"required":["outcome","message","periodicIntervalHours","toolIds"]}}"""
 
-    val algorithm: String = """{"name":"$SUBMIT_WIDGET_ALGORITHM_TOOL","description":"Submit one bounded typed algorithm. Runtime authority and tool versions are application-derived. This captures data only.","parameters":{"type":"object","additionalProperties":false,"properties":{"protocolVersion":{"type":"integer","const":1},"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"kind":{"type":"string","enum":["runtime_input","transform","tool_call"]},"objective":{"type":"string","minLength":1,"maxLength":512},"dependsOn":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"toolId":{"type":["string","null"],"description":"Required only when kind is tool_call; otherwise omit."}},"required":["id","kind","objective","dependsOn"]}},"presentationObjective":{"type":"string","minLength":1,"maxLength":512}},"required":["protocolVersion","steps","presentationObjective"]}}"""
+    val algorithm: String = """{"name":"$SUBMIT_WIDGET_ALGORITHM_TOOL","description":"Submit one bounded typed algorithm. Protocol metadata, runtime authority, and tool versions are application-derived. This captures data only.","parameters":{"type":"object","additionalProperties":false,"properties":{"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"kind":{"type":"string","enum":["runtime_input","transform","tool_call"]},"objective":{"type":"string","minLength":1,"maxLength":512},"dependsOn":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"toolId":{"type":["string","null"],"description":"Required only when kind is tool_call; otherwise omit."}},"required":["id","kind","objective","dependsOn"]}},"presentationObjective":{"type":"string","minLength":1,"maxLength":512}},"required":["steps","presentationObjective"]}}"""
 
-    fun sourceFragment(toolName: String): String = """{"name":"$toolName","description":"Submit one bounded JavaScript function artifact. This captures source only and executes nothing.","parameters":{"type":"object","additionalProperties":false,"properties":{"protocolVersion":{"type":"integer","const":1},"artifactId":{"type":"string"},"functionName":{"type":"string"},"inputNames":{"type":"array","items":{"type":"string"}},"source":{"type":"string","minLength":1,"maxLength":6144}},"required":["protocolVersion","artifactId","functionName","inputNames","source"]}}"""
+    fun sourceFragment(toolName: String): String = """{"name":"$toolName","description":"Submit one bounded JavaScript function source. Artifact identity and signature are fixed by the application. This captures source only and executes nothing.","parameters":{"type":"object","additionalProperties":false,"properties":{"source":{"type":"string","minLength":1,"maxLength":6144}},"required":["source"]}}"""
 }
 
 internal fun WidgetFeasibilityArtifact.toUntrustedProposal(source: String): UntrustedWidgetProposal = UntrustedWidgetProposal(
@@ -496,6 +505,12 @@ private fun String.boundedText(): String = also {
     require(isNotBlank() && length <= WidgetAuthoringPipelinePolicy.MAX_TEXT_CHARS)
 }
 
+private fun String.toDisplayName(): String {
+    val normalized = trim().replace(WHITESPACE, " ")
+    if (normalized.length <= MAX_PIPELINE_DISPLAY_NAME_CHARS) return normalized
+    return normalized.take(MAX_PIPELINE_DISPLAY_NAME_CHARS - 1).trimEnd() + DISPLAY_NAME_ELLIPSIS
+}
+
 private fun <T> JsonArray.strictEnumSet(values: Iterable<T>, wireName: (T) -> String): Set<T> {
     val byName = values.associateBy(wireName)
     val result = map { element ->
@@ -508,6 +523,8 @@ private fun <T> JsonArray.strictEnumSet(values: Iterable<T>, wireName: (T) -> St
 
 private val ALGORITHM_STEP_ID_PATTERN = Regex("[a-z][a-z0-9_]{0,31}")
 private const val MAX_PIPELINE_DISPLAY_NAME_CHARS = 80
+private const val DISPLAY_NAME_ELLIPSIS = '…'
+private val WHITESPACE = Regex("\\s+")
 private val FUNCTION_DECLARATION = Regex("\\bfunction\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\(([^)]*)\\)")
 private val FORBIDDEN_SOURCE_TOKENS = Regex(
     "\\b(?:Date|eval|Function|fetch|XMLHttpRequest|WebSocket|require|import|globalThis|process|Java|Packages)\\b|Math\\s*\\.\\s*random|=>|\\b(?:async|await)\\b",
