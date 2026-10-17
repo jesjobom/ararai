@@ -146,7 +146,13 @@ internal class WidgetAuthoringStageRunner(
         val algorithm = accepted.algorithm(feasibility)
         val calls = accepted.callFunctions(algorithm)
         val raw = deterministicPlanArtifact(calls, algorithm).toModelArtifactJson()
-        val failure = stageValidators.plan(raw, calls, algorithm, feasibility, runtimeContext).failureOrNull()
+        val failure = stageValidators.plan(
+            raw,
+            calls,
+            algorithm,
+            feasibility,
+            runtimeContext,
+        ).failureOrNull()
         return if (failure == null) {
             CompleteWidgetAuthoringAttempt(
                 snapshot.session.id,
@@ -174,7 +180,7 @@ internal class WidgetAuthoringStageRunner(
                     WidgetAuthoringStage.Feasibility,
                     SUBMIT_WIDGET_FEASIBILITY_TOOL,
                     WidgetAuthoringStageSchemas.feasibility,
-                    "Decide feasibility and select the minimum fixed capability envelope for the user's widget.",
+                    WIDGET_FEASIBILITY_OBJECTIVE,
                     baseContext(prompt),
                     repair.first,
                     repair.second,
@@ -186,8 +192,8 @@ internal class WidgetAuthoringStageRunner(
                     WidgetAuthoringRoundRequest(
                         WidgetAuthoringStage.Algorithm,
                         SUBMIT_WIDGET_ALGORITHM_TOOL,
-                        WidgetAuthoringStageSchemas.algorithm,
-                        "Design an ordered typed algorithm inside the frozen capability envelope.",
+                        algorithmCaptureSchema(feasibility),
+                        WIDGET_ALGORITHM_OBJECTIVE,
                         algorithmContext(prompt, feasibility),
                         repair.first,
                         repair.second,
@@ -209,7 +215,14 @@ internal class WidgetAuthoringStageRunner(
                         repair.first,
                         repair.second,
                     ),
-                ) { raw -> stageValidators.callFunction(raw, step, feasibility, runtimeContext).failureOrNull() }
+                ) { raw ->
+                    stageValidators.callFunction(
+                        raw,
+                        step,
+                        feasibility,
+                        runtimeContext,
+                    ).failureOrNull()
+                }
             }
             WidgetAuthoringStageKey.Plan -> {
                 val feasibility = accepted.feasibility()
@@ -226,7 +239,13 @@ internal class WidgetAuthoringStageRunner(
                         repair.second,
                     ),
                 ) { raw ->
-                    stageValidators.plan(raw, calls, algorithm, feasibility, runtimeContext).failureOrNull()
+                    stageValidators.plan(
+                        raw,
+                        calls,
+                        algorithm,
+                        feasibility,
+                        runtimeContext,
+                    ).failureOrNull()
                 }
             }
             WidgetAuthoringStageKey.Render -> {
@@ -235,14 +254,9 @@ internal class WidgetAuthoringStageRunner(
                 val calls = accepted.callFunctions(algorithm)
                 val plan = accepted.plan()
                 StagePlan(
-                    WidgetAuthoringRoundRequest(
-                        WidgetAuthoringStage.RenderFunction,
-                        SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
-                        WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_RENDER_FUNCTION_TOOL),
-                        renderFunctionObjective(calls),
-                        renderContext(prompt, feasibility, algorithm),
-                        repair.first,
-                        repair.second,
+                    renderRoundRequest(prompt, feasibility, algorithm, calls).copy(
+                        repairCode = repair.first,
+                        rejectedArtifact = repair.second,
                     ),
                 ) { raw ->
                     stageValidators.render(
@@ -305,7 +319,7 @@ internal class WidgetAuthoringAssemblyBuilder(
         val algorithm = accepted.algorithm(feasibility)
         val calls = accepted.callFunctions(algorithm)
         val plan = accepted.plan()
-        val render = accepted.render()
+        val render = accepted.render(algorithm)
         val assembly = validator.assemble(feasibility, algorithm, calls, plan, render)
         validator.validateExactAssembly(assembly, runtimeContext)?.let {
             return WidgetAuthoringAssemblyResult.Invalid(it)
@@ -331,7 +345,7 @@ private fun WidgetAuthoringArtifactValidation<*>.failureOrNull(): WidgetAuthorin
     is WidgetAuthoringArtifactValidation.Invalid -> code
 }
 
-private class AcceptedArtifacts(
+internal class AcceptedArtifacts(
     private val snapshot: WidgetAuthoringSessionSnapshot,
     registry: ApplicationToolRegistry,
 ) {
@@ -381,13 +395,17 @@ private class AcceptedArtifacts(
         is WidgetSourceFragmentParseResult.Invalid -> error("Persisted plan checkpoint is invalid")
     }
 
-    fun render(): WidgetSourceFragmentArtifact = when (
-        val parsed = WidgetSourceFragmentParser.parse(
-            artifact(WidgetAuthoringStageKey.Render),
-            "render",
-            "render",
-            listOf("runtime", "outcomes", "state"),
-        )
+    fun render(algorithm: WidgetAlgorithmArtifact): WidgetSourceFragmentArtifact = when (
+        val parsed = if (algorithm.renderCapability == WidgetRenderCapability.CollectionCard) {
+            WidgetCollectionCardArtifact.parse(artifact(WidgetAuthoringStageKey.Render), algorithm)
+        } else {
+            WidgetSourceFragmentParser.parse(
+                artifact(WidgetAuthoringStageKey.Render),
+                "render",
+                "render",
+                listOf("runtime", "outcomes", "state"),
+            )
+        }
     ) {
         is WidgetSourceFragmentParseResult.Valid -> parsed.artifact
         is WidgetSourceFragmentParseResult.Invalid -> error("Persisted render checkpoint is invalid")
@@ -403,10 +421,16 @@ internal fun callFunctionObjective(
     functionName: String = callFunctionName(step.id),
 ): String {
     val tool = requireNotNull(step.tool)
-    return "Generate exactly function $functionName(runtime) for frozen step ${step.id}. " +
-        "It must return only the arguments object matching tool '${tool.id}' version ${tool.version}; " +
-        "the application adds alias, toolId, and contractVersion. " +
-        "Use runtime.currentLocalDateTime() for current date/time and runtime.language for language when granted."
+    val selection = step.selectionMode?.let { mode ->
+        "Frozen selectionMode=${mode.wireName}: return selection='${mode.wireName}'" +
+            if (mode == WidgetToolSelectionMode.SeededRandom) " and seed=runtime.seed. " else " without seed. "
+    }.orEmpty()
+    return "Generate function $functionName(runtime) for step ${step.id}. " +
+        "Return the bare inputSchema arguments object for '${tool.id}' v${tool.version}; " +
+        "the app adds alias, toolId and contractVersion. Never wrap it in args or arguments. " +
+        selection +
+        "Implement data-selection dependencies here; transform steps do not execute. " +
+        "Use runtime.currentLocalDateTime() for time; runtime.language only for language."
 }
 
 internal fun planFunctionObjective(callFunctions: List<WidgetSourceFragmentArtifact>): String {
@@ -418,16 +442,22 @@ internal fun planFunctionObjective(callFunctions: List<WidgetSourceFragmentArtif
 internal fun renderFunctionObjective(
     callFunctions: List<WidgetSourceFragmentArtifact> = emptyList(),
 ): String {
-    val aliasContract = if (callFunctions.isNotEmpty()) {
-        "Copy aliases only from toolResults[].alias. outcomes is a plain object: use outcomes[alias], never " +
-            "outcomes.get(); links reuse the selected alias as sourceAlias."
+    val dataGuidance = if (callFunctions.isNotEmpty()) {
+        "Use runtime.pickArrayItem(outcomes,alias,path,mode), mode 'first' or 'seeded_random'; " +
+            "null means no item. For success return runtime.card([title, body, " +
+            "runtime.linkFor(outcomes,alias,picked.path+'.'+urlField,label)]). " +
+            "card takes one array, not a builder. For comparisons check runtime.isSuccess, " +
+            "then runtime.getArray(outcomes,alias,path) with an indexed loop."
     } else {
-        "Do not invent outcome aliases."
+        "Do not invent outcome aliases; return a complete presentation node."
     }
-    return "Submit only source declaring function render(runtime, outcomes, state). $aliasContract " +
-        "Follow presentationContract exactly; handle failed and empty outcomes with a valid fallback; " +
-        "never use type:'text/value'."
+    return "Submit function render(runtime, outcomes, state). $dataGuidance " +
+        "No Math.random, collectionCard, arrow functions (=>), or textNode."
 }
+
+internal fun collectionCardObjective(): String = "Submit one collection card configuration. Copy alias, items, title, " +
+    "optional body and url from the allowed tool-result property names; only fallback is literal display text. " +
+    "Set selection=first or seeded_random according to the user request. Do not write JavaScript."
 
 private fun WidgetAuthoringSessionSnapshot.repairContext(
     attempt: WidgetAuthoringAttempt,

@@ -1,5 +1,20 @@
 # ArarAI physical-device validation
 
+## 2026-10-11 — staged-authoring foreground-service race
+
+On SM-S901E (America/Toronto), repeated widget-authoring closes were traced
+to `ForegroundServiceDidNotStartInTimeException`: a terminal state stopped
+`WidgetAuthoringService` before a queued foreground start was acknowledged.
+Both notification presenters now send a final refresh, and the service
+promotes before consulting the latest session state. Targeted transition
+regressions and the broad JVM/detekt/lint/debug-build gate passed. APK
+`202610112137` (SHA-256
+`9e33b72e7fd25005bf2310194bf271c370937a9eb779d0a668f31b7971b2c7bc`)
+was installed with `adb install -r`; the device reported
+`lastUpdateTime=2026-10-11 21:40:39` local time. This verifies installation,
+not a completed model-driven authoring run after the fix. Sanitized crash
+evidence is filed under the resumable-authoring OpenSpec change.
+
 Use this matrix for release candidates and changes that touch inference, native
 libraries, media, lifecycle, permissions, or performance. Use only synthetic
 prompts and media; never attach private conversations, logs, or user files.
@@ -1379,3 +1394,317 @@ measurements remain release-validation checks rather than claims of this change.
   background authoring flow as failed pending separate memory-pressure work.
 - Sanitized evidence:
   `openspec/changes/add-background-widget-authoring/evidence/2026-09-26-sms901e-background-probe-5-ten-minute-recovery.{log,md}`.
+
+### 2026-10-09 widget initial-request retention install
+
+- Tester: JIA DEV, non-destructive ADB install on Samsung `SM-S901E`.
+- Debug APK `202610090046`, SHA-256
+  `ee5750d7afd087e0c824b61dab85d5fc89f9e6daa7a8a234538ed17256604e28`.
+- `adb install -r` succeeded; Android reports `lastUpdateTime=2026-10-09 00:53:04`
+  device local time. The app launched and the private widget database migrated
+  from schema 2 to 3. All three existing widget definitions remained readable.
+- The new `initial_prompt` revision column is present. Existing confirmed
+  revisions have no recoverable request because their transient sessions were
+  already deleted. New authoring and revision confirmation have not yet been
+  exercised physically with this build.
+
+### 2026-10-09 Wikipedia collection-card link install
+
+- Tester: JIA DEV, non-destructive ADB install on Samsung `SM-S901E`.
+- Debug APK `202610091619`, SHA-256
+  `e13f1e6beeb42645cf1f1f9dff81105ba3a42060e876ca23081d27d372f9fc0a`.
+- `adb install -r` succeeded; Android reports `lastUpdateTime=2026-10-09 16:26:10`
+  device local time. The existing widget revision was not edited.
+- The device was locked, so a fresh widget execution and visual confirmation
+  of the link remain pending. Automated runtime-helper tests and the full
+  quality gate passed; see the active change evidence for the diagnosis.
+
+### 2026-10-12 hourly managed-widget background check
+
+- Tester: JIA DEV, Samsung `SM-S901E`, read-only ADB inspection followed by a
+  non-destructive debug APK update. The private database and WorkManager state
+  still held five enabled one-hour widgets and one daily widget.
+- The latest hourly widget last succeeded at `2026-10-12 02:22:49 UTC`. Its next
+  recorded run was at `18:06:58 UTC` (about 15 hours 44 minutes later); all five
+  hourly widgets then recorded `ControlledFailure` / `ToolUnavailable` within
+  one second. This does not validate an hourly delivery guarantee.
+- The Wikipedia preference was enabled and Wi-Fi was later validated. At the
+  failed run, Android logged a DNS request blocked for the app UID as Samsung's
+  background freeze released it. WorkManager nevertheless marked the workers
+  `SUCCESS` because the app had persisted a controlled failure without
+  returning `Result.retry()`.
+- Transient tool `Unavailable`, `TimedOut`, and `RateLimited` outcomes now return
+  a WorkManager retry with exponential backoff; disabled/misconfigured tools
+  do not retry. The last good card remains cached. `spotlessCheck`, `detekt`,
+  `testDebugUnitTest`, `lintDebug`, and `assembleDebug` passed.
+- APK SHA-256 `ce6c9afb001cf86245e6bd836bf1a227930d832cefbac6c935ca680fc18a31e8`
+  installed with `adb install -r`; Android reported a local update time of
+  `2026-10-12 14:21:29`. App data remained present. Three of six periodic jobs
+  were initially registered with JobScheduler after the update; launching the
+  app triggered reconciliation and restored all six. The device then reported
+  `NET WAIT:DEV_NOT_DOZING` for the jobs while in idle state, despite validated
+  Wi-Fi. A future unattended background/recovery observation is still required
+  to close OpenSpec task 9.4. WorkManager timing remains inexact.
+- Follow-up at device-local `15:13`: opening the app coincided with five
+  `ManagedWidgetWorker` starts through `WM-SystemJobService` at `15:13:09`;
+  all five completed successfully by `15:13:11`. Before that, all five had
+  failed at `14:06:58`; only one had an additional success at `14:25:40`
+  (after an app launch during this investigation). The other four had no
+  successful run since about `22:28` the prior evening. This is evidence of
+  deferred work catching up on foreground activity, not of independent hourly
+  delivery or unattended retry after the fix.
+
+### 2026-10-12 render-route contract install
+
+- Tester: JIA DEV, non-destructive ADB install on Samsung `SM-S901E`.
+- Debug APK SHA-256
+  `3eb60067dd0dbe7dfae2865555077dc1d21026465144030d8d07a61c0c3bd36b`
+  installed with `adb install -r`; Android reported local update time
+  `2026-10-12 14:42:27`, and the existing widget database remained present.
+- The build passed `spotlessCheck`, `detekt`, `testDebugUnitTest`, `lintDebug`,
+  and `assembleDebug`; the active OpenSpec change passed strict validation.
+- This verifies installation and structural regression coverage, not that the
+  on-device model will preserve every semantic condition. Physical authoring
+  with the original Brazil and America/Europe prompts remains pending.
+
+### 2026-10-13 date-event authoring regression
+
+- The physical test's first feasibility attempt was interrupted by Android
+  `LOW_MEMORY` at 01:22:25 UTC; the second passed. The algorithm then failed
+  three times before generation with `InvalidSchema`. Its objective had grown
+  to 613 characters, exceeding the stage request limit of 512.
+- A redundant page-selection sentence was removed from the algorithm objective;
+  this date-event request selects `wikipedia_on_this_day@1`, not the page tool.
+  A stage-runner regression test now proves that an accepted date-event
+  feasibility result reaches model generation. The memory kill remains a
+  separate device-pressure issue, not evidence of an algorithm-model failure.
+- Sanitized evidence: `openspec/changes/add-resumable-widget-authoring-workflow/evidence/2026-10-13-sms901e-algorithm-preflight.log`,
+  SHA-256 `d0fc8163e21787e83fb40ffb06a3eef5ed63c54a4e26473be75b8bb7cbeec1b8`.
+- Directed stage-runner and pipeline tests, `spotlessCheck`, `detekt`,
+  `lintDebug`, and `assembleDebug` passed. Debug APK SHA-256
+  `3aea2bc1581d8bf9c1c06b27bbe63520d75c73d9dddc98c0a7871482dcd6faa3`
+  was installed with `adb install -r`; Android reported local update time
+  `2026-10-12 21:37:46`. The authoring session and its accepted feasibility
+  checkpoint remained persisted. The algorithm repair budget is exhausted;
+  the user must reprocess the accepted feasibility stage to start a new
+  algorithm revision. End-to-end model success after this fix is not yet
+  verified on device.
+
+### 2026-10-13 custom-render repair after physical test
+
+- The resumed date-event workflow passed feasibility, algorithm, call-function
+  (on the third attempt), and deterministic plan. Its render stage then timed
+  out once and returned two `InvalidSource` artifacts. Both captured sources
+  used arrow callbacks, forbidden by the fragment parser. Both also computed
+  an oldest event but used `collectionCard` for the final card, losing that
+  computed selection.
+- The custom-source objective, API context, and repair text no longer suggest
+  `collectionCard`; they explain indexed iteration, `runtime.card`, and an
+  exact `runtime.linkFor` result path. Regression tests cover accepted indexed
+  source, rejected arrow syntax, and selecting and linking the oldest event.
+- Directed tests and `spotlessCheck`, `detekt`, `testDebugUnitTest`, `lintDebug`,
+  `assembleDebug` passed. The APK SHA-256 is
+  `027fedba582a950ef95ab0f543c8f95a3872f60b30a0de6740b96959831917bd`;
+  `adb install -r` succeeded, and Android reported local update time
+  `2026-10-12 22:14:07`. The authoring session remained persisted.
+- Sanitized evidence:
+  `openspec/changes/add-resumable-widget-authoring-workflow/evidence/2026-10-13-sms901e-custom-render-repair.log`,
+  SHA-256 `19b80b560fb40f597a2e3c141941594fcb065dc62926248ba4ef000220e66214`.
+  Render success from the on-device model still requires a retest; reprocessing
+  the accepted Plan stage starts a new render revision without discarding the
+  upstream stages.
+
+### 2026-10-13 custom-render provenance retest
+
+- Reprocessing the accepted Plan preserved the upstream stages and started
+  render revision 2. Its first attempt timed out; the second produced source
+  that selected the minimum-year event but built a raw link with an incomplete
+  provenance path, yielding `InvalidPresentationProvenance`. The source also
+  read the array before checking tool success, so its failure branch would not
+  work.
+- The custom-source context no longer exposes raw presentation-node shapes.
+  Objective, API, and repair text now direct the model to check success first
+  and return a `runtime.card` containing display text and the exact
+  `runtime.linkFor` node. The separate typed collection-card route is unchanged.
+- Directed tests and `spotlessCheck`, `detekt`, `testDebugUnitTest`, `lintDebug`,
+  `assembleDebug` passed. APK SHA-256
+  `2db6f22586ad5942fe7860f9aa97ee85feaa80c2ae045f918a3270d78b0721cc`
+  installed successfully. Android reported local update time
+  `2026-10-12 22:31:56`; the authoring session and its retry state persisted.
+- Sanitized evidence:
+  `openspec/changes/add-resumable-widget-authoring-workflow/evidence/2026-10-13-sms901e-render-provenance.log`,
+  SHA-256 `b0a06e4b9e2254912d3c8b5df61ecdbac4f8d30df4dba927a82b2b13b6e626b7`.
+  An on-device retry with this APK is still needed; one repair attempt remains
+  on the current render revision.
+
+### 2026-10-13 completed date-event widget verification
+
+- The physical authoring session completed and was removed from the active
+  authoring tables. A new enabled daily widget was persisted with the
+  `wikipedia_on_this_day@1` tool; its plan derives month and day from local
+  device time. Five initial executions recorded `Success` without a diagnostic.
+- The cached card contains a Portuguese event description and a result-proven
+  link to `events.62.canonicalUrl`. The device date was October 12 in
+  `America/Toronto`. The Portuguese On This Day feed contained 63 events;
+  item 62 has year -539, the minimum of those returned. This verifies the
+  requested selection and matching link for the observed execution.
+- The initial prompt also asked to display the year. The generated card only
+  displays the description and link, so semantic compliance is incomplete
+  despite successful execution. Failure and empty-result branches were not
+  exercised on the physical device. No source or widget state was modified
+  during this read-only verification.
+
+### 2026-10-14 random-event algorithm failure
+
+- A new authoring session requested a random On This Day event with its year
+  in the title. Six algorithm artifacts in two revisions were captured and
+  rejected as `InvalidAlgorithm`. All omitted `dependsOn` on the first
+  independent step; four also set `selectionMode=seeded_random` on the
+  `wikipedia_on_this_day` call, where tool-level selection is unsupported.
+- The model-facing schema now exposes `selectionMode` only when
+  `wikipedia_pages@2` is selected. The first step may omit its empty dependency
+  list, while dependent steps remain strict; the context and repair text
+  distinguish selection of a page by the tool from selection of an event
+  after a tool result. No user-word matching gate was introduced.
+- Directed tests and `spotlessCheck`, `detekt`, `testDebugUnitTest`, `lintDebug`,
+  `assembleDebug` passed. Debug APK SHA-256
+  `872290c478558bbb0e40da2d76aa784563799b9fe3500b23c320aa2ac9fd1f20`
+  installed with `adb install -r`; Android reported local update time
+  `2026-10-13 23:28:22`. The session remained persisted, awaiting a new
+  algorithm revision. Model success on this APK is not yet claimed.
+- Sanitized evidence:
+  `openspec/changes/simplify-widget-result-access/evidence/2026-10-14-sms901e-algorithm-selection-scope.log`,
+  SHA-256 `42b6b301b8cb872ce858205c0fe1f4b425938e4e03a647359c044e3856c2e865`.
+
+### 2026-10-14 call-function argument-shape failure
+
+- The physical retest accepted feasibility and algorithm revision 3, then
+  exhausted three call-function attempts with `InvalidToolArguments`. The
+  functions returned tool-call wrappers rather than the date tool's bare
+  input arguments. The repair prompt had contradicted the stage contract by
+  instructing the model to keep call metadata.
+- The initial objective, selected-tool context and call-specific repair now
+  agree on the bare `inputSchema` arguments shape. See
+  `openspec/changes/simplify-widget-result-access/evidence/2026-10-14-sms901e-call-argument-shape.md`.
+- Directed tests, Spotless, Detekt, the full debug unit suite, lint, debug
+  build, and strict OpenSpec validation passed. APK SHA-256
+  `56c83e71ca81cb0641cf586c19089091914d02811e600ce92c68c90c3f7c4da0`
+  was installed; Android reports version `202610140020` and local update time
+  `2026-10-14 00:23:26`. The saved session remains at
+  `call:get_today_events` and no end-to-end success is claimed.
+
+### 2026-10-15 random-event render failure
+
+- The saved session advanced through algorithm, call and plan after the
+  prior APK installation. Three render artifacts were rejected as
+  `InvalidSource`: they used forbidden `Math.random()` and incorrectly
+  treated `outcomes` as an object with a `getArray` method.
+- Render objective, API context and repair now direct first/random selection
+  through `runtime.pickArrayItem`, with exact helper signatures and a
+  provenance-preserving `runtime.linkFor` path. See
+  `openspec/changes/simplify-widget-result-access/evidence/2026-10-15-sms901e-render-selection.md`.
+- Directed tests and the complete Spotless, Detekt, debug unit test, lint and
+  APK build gate passed. Strict OpenSpec validation passed. APK SHA-256
+  `d221d24050f8c249e4b37bd39a58b92119be077647db05be25bb8b9882a96136`
+  was installed; Android reports version `202610142309` and local update time
+  `2026-10-14 23:13:13`. The saved session remains at `render`, awaiting retry;
+  end-to-end success with the corrected instructions is not yet observed.
+
+### 2026-10-15 title and description preservation
+
+- A subsequent physical generation completed and three widget runs recorded
+  `Success`, but its cached card showed article title plus event year and link
+  without the event description. The preceding saved widget showed event
+  description and link without the year. Both are valid presentations yet
+  incomplete relative to the intended card content.
+- The render prompt's single `displayText` example and field names without
+  meanings contributed to this ambiguity. The render contract now allows
+  separate title and body strings; the selected date tool's `year`, `text`,
+  and `title` meanings are included in the render context through generic
+  schema-description projection. See
+  `openspec/changes/simplify-widget-result-access/evidence/2026-10-15-sms901e-title-displaces-description.md`.
+- Existing saved widgets remain unchanged. A new physical generation is
+  needed to verify the corrected model-facing contract.
+- Directed tests, Spotless, Detekt, the full debug unit suite, lint, debug
+  build, and strict OpenSpec validation passed. APK SHA-256
+  `4164ef9a9fcf18bc194b3ca153d5970d4bab139ac84a1a130e5aab9fa0dd150e`
+  was installed on the SM-S901E; Android reports version `202610142346` and
+  local update time `2026-10-14 23:48:42`. A new end-to-end authoring test has
+  not yet been observed.
+
+### 2026-10-15 periodic cold-start reconciliation and non-destructive lifecycle
+
+- Tester: JIA DEV, Samsung SM-S901E, device-local EDT. The device stayed online
+  throughout; no model generation or user-owned widget deletion was performed.
+- A forced JobScheduler start with a cold app process exposed an unchanged
+  startup reconciliation advancing the periodic work generation and stopping
+  the pending dispatch before the worker executed. A failing scheduler test
+  reproduced generation `0 → 1` on an identical reconcile.
+- The scheduler now tags the revision/interval/network identity and skips an
+  identical update. Tests prove an unchanged generation is retained while real
+  configuration changes still update it. The full repository quality gate,
+  including JVM tests, Android lint, R8, and strict OpenSpec validation, passed.
+- Debug APK `202610150911`, SHA-256
+  `34d911f9b55d96e1ad7b1d425113ccee2e739931eeed3be8a45a5c3655bb7d36`,
+  installed with `adb install -r`; Android reported local `lastUpdateTime`
+  `2026-10-15 09:18:21`. On the next process recreation, a selected work
+  retained generation 32 and its enqueue timestamp; all eight existing
+  periodic definitions remained scheduled.
+- An existing Wikipedia widget completed a manual refresh; its canonical
+  `pt.wikipedia.org` article opened only after a tap. Its cached card and
+  detail survived process recreation. A temporary disabled duplicate was
+  enabled, executed once by WorkManager and once manually, disabled, then
+  deleted. Disabled refresh added no run; deletion removed its owned rows and
+  left the original eleven widgets and eight periodic jobs intact.
+- A forced dispatch before the hour was due was deferred by WorkManager's own
+  timing guard, so it does not prove unattended delivery. The device-wide
+  network-loss scenario was not attempted because it would sever remote ADB.
+  At this point, task 9.4 still lacked unattended success, network
+  loss/recovery, and schedule replacement. Sanitized evidence is in the active
+  managed-widget change's
+  `evidence/2026-10-15-sms901e-periodic-reconciliation.md`.
+
+- A later check on the installed `202610151514` build found eight successful
+  runs between 15:47 and 17:09 local with matching updated cached
+  presentations. ArarAI had left the foreground at 15:25, and the display
+  locked at 15:35. Eight periodic definitions retained matching SystemJobs.
+  This confirms autonomous refresh, but not exact hourly timing or the
+  remaining network-loss/recovery and schedule-replacement cases in 9.4.
+
+- On 2026-10-16 local, JJ refreshed a cached widget with Wi-Fi disabled: the
+  prior card remained visible while the app reported an error. After Wi-Fi
+  returned, refresh succeeded and cleared the error. The reconnected device's
+  run database recorded the same widget succeeding at 22:00:24, failing with
+  `ToolUnavailable` at 22:00:47 and 22:00:59, then succeeding at 22:01:02 with
+  an updated presentation. A focused, opt-in physical probe then replaced a
+  temporary copy's interval from one to six hours: it kept one active unique
+  work ID, advanced its generation, and removed the copy afterward. All eleven
+  original widgets and eight periodic jobs remained. The worker's source path
+  reaches the coordinator and QuickJS runtime without requesting a model load;
+  no LiteRT-LM event appeared during the probe. Together with the earlier
+  link, process-recreation, disable/delete, and unattended-run evidence, this
+  completes OpenSpec 9.4. WorkManager still provides inexact timing, not an
+  exact hourly delivery guarantee.
+
+### 2026-10-15 unattended background-network limit
+
+- Five hourly jobs dispatched naturally at 09:45 while ArarAI was out of the
+  foreground, but all failed with `ToolUnavailable`; five retries at 09:50
+  failed likewise. Android marked the app UID `APP_BACKGROUND` and blocked its
+  DNS requests even though the phone's Wi-Fi/remote ADB connection remained up.
+  Four jobs then stayed pending with `CONNECTIVITY` unsatisfied for hours.
+- The scheduler now derives a network requirement from the confirmed tools but
+  does not use a JobScheduler connectivity constraint that can deadlock on this
+  device. Its worker waits at most five seconds for the app UID's network
+  access before dispatching a network tool; unavailable access requests a
+  WorkManager retry without overwriting the last valid card.
+- Debug APK `202610151514`, SHA-256
+  `f2c3cb16ef1bd4585f9e51789d81cd53d380b4b7ba249f1113e9b167ecb21eed`,
+  installed at 15:21:38 with all eleven cached presentations preserved. The
+  eight periodic definitions migrated to the new schedule identity and have
+  no JobScheduler connectivity constraint. A locked-screen migration attempt
+  still found the UID blocked; new workers deferred tool dispatch. Autonomous
+  provider success remains unverified. See the active change's
+  `evidence/2026-10-15-sms901e-periodic-reconciliation.md` for sanitized logs.
+  A subsequent controlled process restart recovered all eight SystemJobs
+  without changing the schedule generations.

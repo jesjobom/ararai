@@ -55,6 +55,10 @@ inference remains device-, driver-, model-, and workload-dependent.
   the confirmed program without model inference. Eligibility is declared through
   `widget_authoring_pipeline_v1` only after the per-stage and complete physical
   diagnostic pass; no checked-in model currently carries that marker.
+  Authoring discloses full tool and render contracts only after capability
+  selection. Simple array cards use model-authored typed configuration and
+  application-generated JavaScript; custom render source and existing accepted
+  checkpoints remain supported.
 - The widget runtime validates strict JSON manifests and separately hashed
   JavaScript, then executes bounded `plan` and `render` phases in fresh data-only
   QuickJS isolates. Plans reach only confirmed widget-eligible tools through the

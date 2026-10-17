@@ -57,11 +57,15 @@ backend, or external database.
   executes the stored bounded JavaScript program without loading a model. The
   initial structured data sources are application-owned Wikipedia page lookup
   and historical-events-by-date tools.
-  Feasibility, algorithm, call functions, orchestration, and presentation are
-  generated in isolated structured rounds, validated between stages, and may
-  use at most two scoped repairs. No checked-in model is advertised for this new
-  protocol until the physical suite-v3 gate passes; normal model workloads are
-  unchanged.
+  Feasibility, algorithm, call functions, and presentation are generated in
+  isolated structured rounds, validated between stages, and may use at most
+  two scoped repairs. Orchestration is derived locally. The algorithm selects a
+  render capability;
+  the final round receives only its detailed contract. Simple collection cards
+  use a typed configuration that the app compiles into JavaScript, while custom
+  layouts retain a source-authoring path. The checked-in catalog enables this
+  protocol only for Gemma 4 E4B; E2B remains available for its other tasks but
+  cannot create widgets.
 - Optional first-visit spotlight tours explain non-obvious controls in Chat,
   Voice Chat, Models, and Assistant configuration without adding a Home tour.
   Each screen can be completed or closed independently, and Settings can restore

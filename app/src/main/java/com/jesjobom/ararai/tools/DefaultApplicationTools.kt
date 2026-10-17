@@ -18,6 +18,10 @@ import com.jesjobom.ararai.knowledge.WikipediaOnThisDayRequest
 import com.jesjobom.ararai.knowledge.WikipediaOnThisDayResult
 import com.jesjobom.ararai.knowledge.WikipediaOnThisDayTool
 import com.jesjobom.ararai.knowledge.WikipediaPage
+import com.jesjobom.ararai.knowledge.WikipediaPageSummary
+import com.jesjobom.ararai.knowledge.WikipediaPageSummaryRequest
+import com.jesjobom.ararai.knowledge.WikipediaPageSummaryResult
+import com.jesjobom.ararai.knowledge.WikipediaPageSummaryTool
 import com.jesjobom.ararai.knowledge.WikipediaPagesResult
 import com.jesjobom.ararai.knowledge.WikipediaPagesTool
 import com.jesjobom.ararai.knowledge.validWebSearchRequest
@@ -96,11 +100,63 @@ internal fun wikipediaWidgetApplicationToolRegistry(
     pagesTool: WikipediaPagesTool,
     onThisDayTool: WikipediaOnThisDayTool,
     state: () -> ApplicationToolOperationalState,
+    summaryTool: WikipediaPageSummaryTool? = null,
 ): ApplicationToolRegistry = ApplicationToolRegistry(
     listOf(
         wikipediaPagesApplicationTool(pagesTool, state),
         wikipediaOnThisDayApplicationTool(onThisDayTool, state),
+    ) + listOfNotNull(summaryTool?.let { wikipediaPageSummaryApplicationTool(it, state) }),
+)
+
+internal fun wikipediaPageSummaryApplicationTool(
+    tool: WikipediaPageSummaryTool,
+    state: () -> ApplicationToolOperationalState,
+): RegisteredApplicationTool = applicationToolBinding(
+    contract = ApplicationToolContract(
+        id = WIKIPEDIA_PAGES_TOOL_NAME,
+        version = 2,
+        displayName = WIKIPEDIA_PAGE_SUMMARY_DISPLAY_NAME,
+        category = ApplicationToolCategory.ExternalKnowledge,
+        consumers = setOf(ApplicationToolConsumer.Widget),
+        inputSchemaJson = WIKIPEDIA_PAGE_SUMMARY_INPUT_SCHEMA,
+        outputSchemaJson = WIKIPEDIA_PAGE_SUMMARY_OUTPUT_SCHEMA,
+        authoringSummary = "Search 10 page candidates by topic; return one complete lead in pages[0].extract " +
+            "and canonicalUrl. selection=first or seeded_random (requires runtime.seed). " +
+            "Pages are not historical events.",
     ),
+    state = state,
+    executor = ApplicationTool(
+        displayName = WIKIPEDIA_PAGE_SUMMARY_DISPLAY_NAME,
+        category = ApplicationToolCategory.ExternalKnowledge,
+        execute = tool::fetch,
+    ),
+    decodeArguments = { arguments ->
+        val selection = arguments.strictString("selection")
+        val expected = if (selection == "seeded_random") {
+            setOf("query", "language", "selection", "seed")
+        } else {
+            setOf("query", "language", "selection")
+        }
+        arguments.takeIf { it.keySet() == expected }
+            ?.let {
+                val query = it.strictString("query")
+                    ?.takeIf { value -> value.isNotBlank() && value.length <= 200 && value.none(Char::isISOControl) }
+                    ?: return@let null
+                val seed = if (selection == "seeded_random") {
+                    it.strictLong("seed")?.takeIf { value -> value in 0..9_007_199_254_740_991L }
+                        ?: return@let null
+                } else {
+                    null
+                }
+                WikipediaPageSummaryRequest(
+                    query = query,
+                    language = it.strictString("language")?.takeIf(LANGUAGE_PATTERN::matches) ?: return@let null,
+                    selection = selection ?: return@let null,
+                    seed = seed,
+                ).takeIf { request -> request.selection in setOf("first", "seeded_random") }
+            }
+    },
+    encodeResult = ::encodeWikipediaPageSummaryResult,
 )
 
 internal fun wikipediaPagesApplicationTool(
@@ -115,6 +171,9 @@ internal fun wikipediaPagesApplicationTool(
         consumers = setOf(ApplicationToolConsumer.Model, ApplicationToolConsumer.Widget),
         inputSchemaJson = WIKIPEDIA_INPUT_SCHEMA,
         outputSchemaJson = WIKIPEDIA_PAGES_OUTPUT_SCHEMA,
+        authoringSummary = "Query-based search returning up to three pages with title, extract, and URL. " +
+            "Pages are not verified historical events; no random event or " +
+            "topic-classification guarantee.",
     ),
     state = state,
     executor = ApplicationTool(
@@ -147,6 +206,8 @@ internal fun wikipediaOnThisDayApplicationTool(
         consumers = setOf(ApplicationToolConsumer.Model, ApplicationToolConsumer.Widget),
         inputSchemaJson = WIKIPEDIA_ON_THIS_DAY_INPUT_SCHEMA,
         outputSchemaJson = WIKIPEDIA_ON_THIS_DAY_OUTPUT_SCHEMA,
+        authoringSummary = "Historical events for one exact calendar month/day. No topic query, region filter, " +
+            "or all-time event search. Use only when a date-based event feed satisfies the request.",
     ),
     state = state,
     executor = ApplicationTool(
@@ -349,6 +410,11 @@ private fun JsonObject.strictInt(name: String): Int? = get(name)
             .getOrNull()
     }
 
+private fun JsonObject.strictLong(name: String): Long? = get(name)
+    ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }
+    ?.asJsonPrimitive
+    ?.let { value -> runCatching { value.asBigDecimal.toBigIntegerExact().toString().toLongOrNull() }.getOrNull() }
+
 private fun validWikipediaCalendarDay(month: Int, day: Int): Boolean = try {
     LocalDate.of(2000, month, day)
     true
@@ -385,6 +451,18 @@ private fun encodeWikipediaPagesResult(result: WikipediaPagesResult): String = w
     }.toString()
 }
 
+private fun encodeWikipediaPageSummaryResult(result: WikipediaPageSummaryResult): String = when (result) {
+    is WikipediaPageSummaryResult.Success -> JsonObject().apply {
+        addProperty("kind", "success")
+        addProperty("defaultBodyField", "extract")
+        add("pages", JsonArray().apply { add(result.page.toJson()) })
+    }.toString()
+    is WikipediaPageSummaryResult.Failure -> JsonObject().apply {
+        addProperty("kind", "failure")
+        addProperty("reason", result.reason.name)
+    }.toString()
+}
+
 private fun encodeWikipediaOnThisDayResult(result: WikipediaOnThisDayResult): String = when (result) {
     is WikipediaOnThisDayResult.Success -> JsonObject().apply {
         addProperty("kind", "success")
@@ -399,6 +477,14 @@ private fun encodeWikipediaOnThisDayResult(result: WikipediaOnThisDayResult): St
 }
 
 private fun WikipediaPage.toJson(): JsonObject = JsonObject().apply {
+    addProperty("title", title)
+    addProperty("extract", extract)
+    addProperty("canonicalUrl", canonicalUrl)
+    addProperty("language", language)
+    addProperty("retrievedAtMillis", retrievedAtMillis)
+}
+
+private fun WikipediaPageSummary.toJson(): JsonObject = JsonObject().apply {
     addProperty("title", title)
     addProperty("extract", extract)
     addProperty("canonicalUrl", canonicalUrl)
@@ -436,6 +522,7 @@ private fun encodeMathResult(result: MathEvaluationResult): String = when (resul
 internal const val CURRENT_TOOL_CONTRACT_VERSION = 1
 internal const val WIKIPEDIA_PAGES_TOOL_NAME = "wikipedia_pages"
 internal const val WIKIPEDIA_PAGES_DISPLAY_NAME = "Wikipedia pages"
+internal const val WIKIPEDIA_PAGE_SUMMARY_DISPLAY_NAME = "Wikipedia page summary"
 internal const val WIKIPEDIA_ON_THIS_DAY_TOOL_NAME = "wikipedia_on_this_day"
 internal const val WIKIPEDIA_ON_THIS_DAY_DISPLAY_NAME = "Wikipedia events by date"
 internal const val WEB_SEARCH_DISPLAY_NAME = "Web search"
@@ -446,6 +533,8 @@ private val LANGUAGE_PATTERN = Regex("[a-z]{2,3}")
 private val UNSIGNED_INTEGER_PATTERN = Regex("0|[1-9][0-9]*")
 private const val WIKIPEDIA_INPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string"},"language":{"type":"string","pattern":"^[a-z]{2,3}$"}},"required":["query","language"]}"""
+private const val WIKIPEDIA_PAGE_SUMMARY_INPUT_SCHEMA =
+    """{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","maxLength":200},"language":{"type":"string","pattern":"^[a-z]{2,3}$"},"selection":{"type":"string","enum":["first","seeded_random"]},"seed":{"type":"integer","minimum":0,"maximum":9007199254740991}},"required":["query","language","selection"]}"""
 private const val WIKIPEDIA_ON_THIS_DAY_INPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"month":{"type":"integer","minimum":1,"maximum":12},"day":{"type":"integer","minimum":1,"maximum":31},"language":{"type":"string","pattern":"^[a-z]{2,3}$"}},"required":["month","day","language"]}"""
 private const val WEB_SEARCH_INPUT_SCHEMA =
@@ -456,7 +545,9 @@ private const val KNOWLEDGE_OUTPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"untrustedContext":{"type":"string"},"sources":{"type":"array"},"reason":{"type":"string"}},"required":["kind"]}"""
 private const val WIKIPEDIA_PAGES_OUTPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"pages":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string","maxLength":200},"extract":{"type":"string","maxLength":2000},"canonicalUrl":{"type":"string","maxLength":2048},"language":{"type":"string","pattern":"^[a-z]{2,3}$"},"retrievedAtMillis":{"type":"integer"}},"required":["title","extract","canonicalUrl","language","retrievedAtMillis"]}},"reason":{"type":"string"}},"required":["kind"]}"""
+private const val WIKIPEDIA_PAGE_SUMMARY_OUTPUT_SCHEMA =
+    """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"defaultBodyField":{"type":"string","enum":["extract"]},"pages":{"type":"array","minItems":1,"maxItems":1,"items":{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string","maxLength":200},"extract":{"type":"string","maxLength":16384},"canonicalUrl":{"type":"string","maxLength":2048},"language":{"type":"string","pattern":"^[a-z]{2,3}$"},"retrievedAtMillis":{"type":"integer"}},"required":["title","extract","canonicalUrl","language","retrievedAtMillis"]}},"reason":{"type":"string"}},"required":["kind"]}"""
 private const val WIKIPEDIA_ON_THIS_DAY_OUTPUT_SCHEMA =
-    """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"events":{"type":"array","maxItems":64,"items":{"type":"object","additionalProperties":false,"properties":{"year":{"type":"integer"},"text":{"type":"string","maxLength":1000},"title":{"type":"string","maxLength":200},"canonicalUrl":{"type":"string","maxLength":2048}},"required":["year","text","title","canonicalUrl"]}},"language":{"type":"string","pattern":"^[a-z]{2,3}$"},"retrievedAtMillis":{"type":"integer"},"reason":{"type":"string"}},"required":["kind"]}"""
+    """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"events":{"type":"array","maxItems":64,"items":{"type":"object","additionalProperties":false,"properties":{"year":{"type":"integer","description":"Year when the event occurred"},"text":{"type":"string","maxLength":1000,"description":"Event description to show as body text"},"title":{"type":"string","maxLength":200,"description":"Linked article title, distinct from event description"},"canonicalUrl":{"type":"string","maxLength":2048}},"required":["year","text","title","canonicalUrl"]}},"language":{"type":"string","pattern":"^[a-z]{2,3}$"},"retrievedAtMillis":{"type":"integer"},"reason":{"type":"string"}},"required":["kind"]}"""
 private const val CALCULATOR_OUTPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"value":{"type":"string"},"precision":{"type":"string"},"reason":{"type":"string"}},"required":["kind"]}"""

@@ -17,7 +17,7 @@ import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 internal const val MANAGED_WIDGET_DATABASE_NAME = "ararai_widgets.db"
-internal const val MANAGED_WIDGET_DATABASE_VERSION = 2
+internal const val MANAGED_WIDGET_DATABASE_VERSION = 3
 
 internal class ManagedWidgetPersistenceException(message: String) : IllegalStateException(message)
 
@@ -44,6 +44,7 @@ internal data class WidgetProgramRevision(
     val source: String,
     val programDigest: String,
     val createdAtMillis: Long,
+    val initialPrompt: String? = null,
 )
 
 internal data class ConfirmedWidgetRevision(
@@ -54,6 +55,7 @@ internal data class ConfirmedWidgetRevision(
     val source: String,
     val programDigest: String,
     val consentDigest: String,
+    val initialPrompt: String? = null,
 ) {
     init {
         require(displayName.isNotBlank() && displayName.length <= MAX_DISPLAY_NAME_CHARS)
@@ -65,6 +67,10 @@ internal data class ConfirmedWidgetRevision(
         require(source.utf8Size() <= ManagedWidgetPolicy.MAX_PROGRAM_SOURCE_BYTES)
         require(SHA_256_PATTERN.matches(programDigest))
         require(SHA_256_PATTERN.matches(consentDigest))
+        initialPrompt?.let {
+            require(it.isNotBlank())
+            require(it.utf8Size() <= WidgetAuthoringWorkflowPolicy.MAX_INSTRUCTION_BYTES)
+        }
     }
 }
 
@@ -347,6 +353,8 @@ internal class SqliteManagedWidgetRepository(
                 source TEXT NOT NULL,
                 program_digest TEXT NOT NULL CHECK(length(program_digest) = 64),
                 created_at_millis INTEGER NOT NULL,
+                initial_prompt TEXT CHECK(initial_prompt IS NULL OR
+                    length(CAST(initial_prompt AS BLOB)) BETWEEN 1 AND ${WidgetAuthoringWorkflowPolicy.MAX_INSTRUCTION_BYTES}),
                 PRIMARY KEY(widget_id, revision),
                 FOREIGN KEY(widget_id) REFERENCES managed_widgets(id) ON DELETE CASCADE
                     DEFERRABLE INITIALLY DEFERRED
@@ -540,8 +548,9 @@ internal class SqliteManagedWidgetRepository(
         oldVersion: Int,
         newVersion: Int,
     ) {
-        if (oldVersion == 1 && newVersion == 2) {
-            createAuthoringTables(db)
+        if (newVersion == 3 && oldVersion in 1..2) {
+            if (oldVersion == 1) createAuthoringTables(db)
+            db.execSQL("ALTER TABLE widget_program_revisions ADD COLUMN initial_prompt TEXT")
             return
         }
         throw ManagedWidgetPersistenceException(
@@ -631,7 +640,7 @@ internal class SqliteManagedWidgetRepository(
     override fun listRevisions(widgetId: String): List<WidgetProgramRevision> {
         readableDatabase.rawQuery(
             """
-            SELECT widget_id, revision, manifest_json, source, program_digest, created_at_millis
+            SELECT widget_id, revision, manifest_json, source, program_digest, created_at_millis, initial_prompt
             FROM widget_program_revisions
             WHERE widget_id = ?
             ORDER BY revision ASC
@@ -1385,7 +1394,8 @@ internal class SqliteManagedWidgetRepository(
             insertOrThrow(
                 "widget_program_revisions",
                 null,
-                candidate.revisionValues(target.widgetId, target.nextRevision, now),
+                candidate.copy(initialPrompt = snapshot.session.instruction)
+                    .revisionValues(target.widgetId, target.nextRevision, now),
             )
             if (target.expectedActiveRevision != null) {
                 update(
@@ -1698,7 +1708,7 @@ internal class SqliteManagedWidgetRepository(
         revision: Int,
     ): WidgetProgramRevision? = database.rawQuery(
         """
-        SELECT widget_id, revision, manifest_json, source, program_digest, created_at_millis
+        SELECT widget_id, revision, manifest_json, source, program_digest, created_at_millis, initial_prompt
         FROM widget_program_revisions
         WHERE widget_id = ? AND revision = ?
         """.trimIndent(),
@@ -1874,6 +1884,7 @@ internal class SqliteManagedWidgetRepository(
         put("source", source)
         put("program_digest", programDigest)
         put("created_at_millis", createdAtMillis)
+        put("initial_prompt", initialPrompt)
     }
 
     private fun WidgetRunRecord.toContentValues(): ContentValues = NewWidgetRun(
@@ -1953,6 +1964,13 @@ internal class SqliteManagedWidgetRepository(
             },
             programDigest = getString(4).also { require(SHA_256_PATTERN.matches(it)) },
             createdAtMillis = getLong(5),
+            initialPrompt = if (isNull(6)) {
+                null
+            } else {
+                getString(6).also {
+                    require(it.isNotBlank() && it.utf8Size() <= WidgetAuthoringWorkflowPolicy.MAX_INSTRUCTION_BYTES)
+                }
+            },
         )
     } catch (_: IllegalArgumentException) {
         throw ManagedWidgetPersistenceException("Invalid managed widget revision row")

@@ -51,9 +51,11 @@ import com.jesjobom.ararai.widget.managed.JavaScriptWidgetDraftPlanner
 import com.jesjobom.ararai.widget.managed.ManagedWidgetApplicationServices
 import com.jesjobom.ararai.widget.managed.ManagedWidgetExecutionCoordinator
 import com.jesjobom.ararai.widget.managed.ManagedWidgetExecutionProvider
+import com.jesjobom.ararai.widget.managed.ManagedWidgetExecutionStatus
 import com.jesjobom.ararai.widget.managed.ManagedWidgetManualRefresh
 import com.jesjobom.ararai.widget.managed.ManagedWidgetScheduleController
 import com.jesjobom.ararai.widget.managed.ManagedWidgetStartupReconciler
+import com.jesjobom.ararai.widget.managed.ManagedWidgetWorkerOutcome
 import com.jesjobom.ararai.widget.managed.ResumableWidgetAuthoringController
 import com.jesjobom.ararai.widget.managed.RuntimeManagedWidgetProgramExecutor
 import com.jesjobom.ararai.widget.managed.SqliteManagedWidgetRepository
@@ -136,6 +138,8 @@ class ArarAiApplication :
 
     val wikipediaTool by lazy { WikipediaKnowledgeTool() }
 
+    private val wikipediaPageSummaryTool by lazy { com.jesjobom.ararai.knowledge.WikipediaPageSummaryKnowledgeTool() }
+
     val wikipediaOnThisDayTool by lazy { WikipediaOnThisDayKnowledgeTool() }
 
     private val calculatorEngine by lazy { EvalExLocalMathEngine() }
@@ -175,12 +179,17 @@ class ArarAiApplication :
     }
 
     private val managedWidgetToolRegistry by lazy {
-        wikipediaWidgetApplicationToolRegistry(wikipediaTool, wikipediaOnThisDayTool) {
-            ApplicationToolOperationalState(
-                enabled = instructionPreferences.settings.value.wikipediaEnabled,
-                ready = true,
-            )
-        }
+        wikipediaWidgetApplicationToolRegistry(
+            wikipediaTool,
+            wikipediaOnThisDayTool,
+            state = {
+                ApplicationToolOperationalState(
+                    enabled = instructionPreferences.settings.value.wikipediaEnabled,
+                    ready = true,
+                )
+            },
+            summaryTool = wikipediaPageSummaryTool,
+        )
     }
 
     val liteRtLmRuntimeTelemetry by lazy {
@@ -355,8 +364,13 @@ class ArarAiApplication :
         )
     }
 
-    override suspend fun executeManagedWidget(widgetId: String) {
-        managedWidgetCoordinator.execute(widgetId)
+    override suspend fun executeManagedWidget(widgetId: String): ManagedWidgetWorkerOutcome {
+        val status = managedWidgetCoordinator.execute(widgetId)
+        return if (status == ManagedWidgetExecutionStatus.RetryableFailure) {
+            ManagedWidgetWorkerOutcome.Retry
+        } else {
+            ManagedWidgetWorkerOutcome.Completed
+        }
     }
 
     val diagnosticErrorReportCoordinator by lazy {

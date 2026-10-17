@@ -99,6 +99,7 @@ class LiteRtLmAuthoringToolTest {
                 "submit_widget_call_function",
                 "submit_widget_plan_function",
                 "submit_widget_render_function",
+                "submit_widget_collection_card",
             ),
             bridge.loadedToolNames,
         )
@@ -120,6 +121,34 @@ class LiteRtLmAuthoringToolTest {
             ),
         ).test {
             assertUnsupported(awaitItem())
+            awaitComplete()
+        }
+    }
+
+    @Test
+    fun `pipeline collection card capture tool is supported by local engine`() = runTest {
+        val engine = LiteRtLmLocalLlmEngine(RecordingAuthoringBridge(), StandardTestDispatcher(testScheduler))
+        val model = LocalModel(
+            id = "gemma-pipeline",
+            name = "Gemma pipeline",
+            filePath = "/models/gemma.litertlm",
+            toolCapabilities = ModelToolCapabilities(authoringProtocolNames = setOf(WIDGET_AUTHORING_PIPELINE_V1)),
+        )
+        val captureTool = object : EphemeralLocalLlmTool {
+            override val name = "submit_widget_collection_card"
+            override val descriptionJson = """{"name":"submit_widget_collection_card","parameters":{"type":"object"}}"""
+            override fun execute(argumentsJson: String) = "{}"
+        }
+        engine.load(model, InferenceConfig(128, 8, 0.2f, 0.9f))
+
+        engine.generate(
+            PromptRequest(
+                content = MessageContent.TextPrompt("collection card"),
+                advertisedToolNames = setOf(captureTool.name),
+                ephemeralTools = listOf(captureTool),
+            ),
+        ).test {
+            assertEquals(GenerationEvent.Completed, awaitItem())
             awaitComplete()
         }
     }

@@ -23,6 +23,14 @@ import org.junit.Test
 
 class WidgetAuthoringPipelineValidationTest {
     @Test
+    fun `nonempty success must not render the empty-result fallback`() = runTest {
+        assertEquals(
+            WidgetAuthoringStageFailureCode.InvalidPresentationSuccessHandling,
+            validator { validText() }.validateRenderFunction(emptyList(), RENDER, ALGORITHM, FEASIBILITY, RUNTIME),
+        )
+    }
+
+    @Test
     fun `physical map style outcome access is classified as render execution failure`() = runTest {
         val render = RENDER.copy(
             source = """function render(runtime, outcomes, state) {
@@ -79,6 +87,8 @@ class WidgetAuthoringPipelineValidationTest {
         val validator = validator { outcomes ->
             if (outcomes.contains("\"status\":\"failure\"")) {
                 WidgetScriptResult.Failure(WidgetRuntimeFailureCode.ScriptError)
+            } else if (outcomes.contains("\"events\":[{")) {
+                WidgetScriptResult.Success("""{"type":"text","text":"Event","tone":"neutral"}""")
             } else {
                 validText()
             }

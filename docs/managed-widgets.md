@@ -52,10 +52,11 @@ displayed only as plain text; rejected content is never executed. The user may
 leave between stages without cancelling or losing accepted work. Unachievable
 requests and requests needing clarification stop before code generation.
 
-The historical one-shot suite v2 showed that E2B failed the complete proposal
-while E4B passed it. That result does not grant eligibility for the new staged
-protocol. No checked-in model advertises `widget_authoring_pipeline_v1` until it
-passes the physical suite-v3 stage matrix and complete synthetic pipeline.
+Only the installed Gemma 4 E4B advertises the staged widget-authoring protocol
+in the checked-in catalog. E2B remains available for Chat and its other tasks,
+but not for widget creation or editing. The separate, non-persistent tool-call
+diagnostic may still characterize either model in debug builds; it cannot save
+a widget.
 
 ## Resumable stage attempts
 
@@ -81,11 +82,38 @@ a repair. Render validation exercises success, empty, and failed tool outcomes
 and reports controlled node-type, field, tone, provenance, empty-result, or
 failed-outcome categories without exposing JavaScript exceptions.
 
+The algorithm stage sees brief descriptions of the render capabilities and
+selects `collection_card` or `custom_source`. The render stage then receives
+only the chosen contract. For a simple collection widget, the model submits
+data-only fields: alias, payload-relative array path, item-relative title,
+optional body and URL, mandatory fallback, and selection (`first` or
+`seeded_random`). The application generates the `render` function and validates
+it against populated, empty, and failed result fixtures. The collection-card
+helper handles item selection, neutral text, proven links, and fallback.
+If the chosen result item has an HTTPS `canonicalUrl`, the helper adds its
+source-proven link even when the model omits the optional URL field.
+Custom layouts retain the JavaScript source path and its lower-level helpers.
+The card can show one unmodified item from one result array; it cannot filter
+fetched results, compare them, or choose between multiple result sets. The
+algorithm must declare post-result operations as steps and use `custom_source`
+for them. A query chosen from the local time before one tool call may still use
+a collection card. If no tool can provide the requested data, the existing
+feasibility stage must return an unavailable/clarification outcome rather than
+silently changing the task. The structural route check does not inspect a
+closed list of words in the user's prompt.
+`custom_source` can only inspect data the selected tool actually returns; it
+cannot filter hidden search candidates from `wikipedia_pages@2`.
+Previously accepted algorithm checkpoints without a capability choice continue
+through that legacy path; confirmed widget sources are unchanged.
+
 The private widget database stores one non-terminal authoring session, bounded
 append-only attempts, and accepted checkpoints. If Android kills the process,
 startup marks an in-flight attempt interrupted and restores the timeline,
 accepted checkpoints, and consumed retry budget. Final confirmation promotes
 one widget revision and removes the transient session in one transaction.
+The exact initial request is retained locally with the confirmed revision and
+shown with its generated source in widget details for diagnosis. Older revisions
+confirmed before this change have no recoverable initial request.
 
 ## Refresh and scheduling
 
@@ -94,14 +122,36 @@ chooses an inexact execution window. Each enabled widget owns one unique
 replaceable periodic work definition and a durable execution lease, so manual
 and background attempts cannot overlap. Disabling cancels future work and also
 blocks manual refresh until the widget is enabled again.
+Transient tool unavailability, timeout, or rate limiting keeps the last good
+card and asks WorkManager to retry with exponential backoff. A disabled or
+misconfigured tool is not retried automatically. The one-hour interval is a
+minimum periodic interval, not a promise of an execution at each clock hour:
+Android can delay background work substantially while the app or device sleeps.
 
 A refresh validates the active immutable revision and consent, runs `plan`,
 dispatches only declared `WIDGET` tools through the application registry, then
 runs `render`. `wikipedia_pages@1` sends only a bounded query and language code
-for direct stable page lookup. `wikipedia_on_this_day@1` sends only numeric
+for direct stable page lookup. The widget-only `wikipedia_pages@2` searches up
+to ten page candidates using metadata, selects `first` or `seeded_random`, and
+fetches only the selected page's complete lead introduction and canonical URL.
+For v2, the typed algorithm freezes the page tool's `selectionMode`; the
+generated call must match it. Since the tool returns one page, a card's own
+`seeded_random` setting cannot make a `first` tool call random.
+It returns `SummaryTooLarge` if that introduction exceeds the bounded result
+budget rather than silently cutting it. New widget drafts see v2; saved v1
+widgets and Chat retain v1. Cards can present the complete bounded introduction
+as one text node; v2 collection cards use `extract` as the default body even
+when a saved renderer specifies only a title. Explicit body configuration wins,
+and v1 cards are unchanged. Total result and presentation byte limits still
+apply. A typed provider failure, including HTTP 429 rate limiting, records a
+controlled failure and retains the last successful card rather than replacing
+it with a successful fallback. The UI diagnostic exposes only an allowlisted
+reason; it does not include provider text.
+`wikipedia_on_this_day@1` sends only numeric
 month/day and language code and returns bounded actual historical event items,
-not a date-index page. Both use fixed official Wikipedia HTTPS endpoints and are
-also available to verified models with distinct selection instructions.
+not a date-index page. These tools use fixed official Wikipedia HTTPS endpoints;
+v1 pages and on-this-day are also available to verified Chat models with
+distinct selection instructions.
 Provider credentials, headers, endpoints, raw
 transport, authoring prompts, Chat history, and unrelated widgets are not given
 to the program.
@@ -111,6 +161,16 @@ cannot construct Compose, HTML, a WebView, Android intents, or executable UI
 callbacks. A Wikipedia article link must exactly match a canonical link in the
 structured tool result and must also pass the application's HTTPS Wikipedia
 allowlist; it opens only after the user taps it.
+
+Render scripts may use `runtime.isSuccess(outcomes, alias)` and
+`runtime.getArray(outcomes, alias, fieldPath)` to read an exact array path
+relative to a successful tool payload. `runtime.get` reads other value types
+at an exact path. `runtime.linkFor(outcomes, alias,
+urlFieldPath, label)` creates a link node with matching source provenance. The
+helpers do not recursively search fields or choose the first matching type.
+Previously confirmed widget revisions may still access the original outcome
+envelope directly. Render authoring receives a compact schema-derived catalog
+of result paths and item fields instead of the complete output JSON Schema.
 
 ## Local data and failure behavior
 

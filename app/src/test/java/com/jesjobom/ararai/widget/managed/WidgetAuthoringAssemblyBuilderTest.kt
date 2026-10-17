@@ -5,6 +5,7 @@ import com.jesjobom.ararai.widget.runtime.WidgetJavaScriptEngine
 import com.jesjobom.ararai.widget.runtime.WidgetRequestedLimits
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeContext
 import com.jesjobom.ararai.widget.runtime.WidgetScriptResult
+import com.jesjobom.ararai.widget.runtime.WidgetToolCapability
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -57,6 +58,33 @@ class WidgetAuthoringAssemblyBuilderTest {
             result,
         )
         assertEquals(0, javascript.calls)
+    }
+
+    @Test
+    fun `accepted typed render checkpoint rehydrates to application generated source`() {
+        val typed = """{"alias":"events","items":"events","title":"title","fallback":"No events","selection":"first"}"""
+        val accepted = AcceptedArtifacts(
+            snapshot().copy(checkpoints = listOf(checkpoint(WidgetAuthoringStageKey.Render, typed))),
+            ApplicationToolRegistry(emptyList()),
+        )
+        val algorithm = WidgetAlgorithmArtifact(
+            steps = listOf(
+                WidgetAlgorithmStep(
+                    id = "events",
+                    kind = WidgetAlgorithmStepKind.ToolCall,
+                    objective = "Fetch events",
+                    dependencies = emptyList(),
+                    tool = WidgetToolCapability("wikipedia_on_this_day", 1),
+                ),
+            ),
+            presentationObjective = "Show one event",
+            renderCapability = WidgetRenderCapability.CollectionCard,
+        )
+
+        val render = accepted.render(algorithm)
+
+        assertTrue(render.source.contains("runtime.collectionCard(outcomes, \"events\""))
+        assertTrue(render.source.contains("\"selection\":\"first\""))
     }
 
     private fun snapshot(): WidgetAuthoringSessionSnapshot {

@@ -5,9 +5,11 @@ package com.jesjobom.ararai.widget.managed
 import com.google.gson.JsonArray
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeValue
 import com.jesjobom.ararai.widget.runtime.WidgetToolCapability
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -125,6 +127,197 @@ class WidgetAuthoringPipelineContractsTest {
         assertTrue(parsed is WidgetAlgorithmParseResult.Valid)
         assertEquals(1, (parsed as WidgetAlgorithmParseResult.Valid).artifact.toolCallSteps.size)
         assertEquals(TOOL, parsed.artifact.toolCallSteps.single().tool)
+    }
+
+    @Test
+    fun `algorithm permits an implicit empty dependency list only on the first step`() {
+        val candidate = algorithm().apply {
+            addProperty("renderCapability", "custom_source")
+            getAsJsonArray("steps").first().asJsonObject.remove("dependsOn")
+            getAsJsonArray("steps").add(transformStep("format_event", listOf("events_call"), "Show event year"))
+        }
+
+        assertTrue(
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true) is
+                WidgetAlgorithmParseResult.Valid,
+        )
+        candidate.getAsJsonArray("steps")[1].asJsonObject.addProperty("selectionMode", "seeded_random")
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true),
+        )
+        candidate.getAsJsonArray("steps")[1].asJsonObject.remove("selectionMode")
+        candidate.getAsJsonArray("steps")[1].asJsonObject.remove("dependsOn")
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true),
+        )
+    }
+
+    @Test
+    fun `non page tool schema omits page selection while page version keeps it`() {
+        val eventSchema = JsonParser.parseString(algorithmCaptureSchema(validFeasibility())).asJsonObject
+        val eventStepFields = eventSchema.getAsJsonObject("parameters").getAsJsonObject("properties")
+            .getAsJsonObject("steps").getAsJsonObject("items").getAsJsonObject("properties")
+        assertFalse(eventStepFields.has("selectionMode"))
+
+        val pageTool = WidgetToolCapability("wikipedia_pages", 2)
+        val pageFeasibility = validFeasibility().copy(tools = listOf(WidgetSelectedTool(pageTool, "page search")))
+        val pageSchema = JsonParser.parseString(algorithmCaptureSchema(pageFeasibility)).asJsonObject
+        val pageStepFields = pageSchema.getAsJsonObject("parameters").getAsJsonObject("properties")
+            .getAsJsonObject("steps").getAsJsonObject("items").getAsJsonObject("properties")
+        assertTrue(pageStepFields.has("selectionMode"))
+    }
+
+    @Test
+    fun `algorithm selects a render capability while legacy checkpoints remain readable`() {
+        val selected = algorithm().apply { addProperty("renderCapability", "collection_card") }
+        val invalid = algorithm().apply { addProperty("renderCapability", "invented") }
+        val feasibility = validFeasibility()
+
+        assertEquals(
+            WidgetRenderCapability.CollectionCard,
+            (WidgetAlgorithmParser.parse(selected.toString(), feasibility) as WidgetAlgorithmParseResult.Valid)
+                .artifact.renderCapability,
+        )
+        assertEquals(
+            null,
+            (WidgetAlgorithmParser.parse(algorithm().toString(), feasibility) as WidgetAlgorithmParseResult.Valid)
+                .artifact.renderCapability,
+        )
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(algorithm().toString(), feasibility, requireRenderCapability = true),
+        )
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(invalid.toString(), feasibility),
+        )
+        assertTrue(WidgetAuthoringStageSchemas.algorithm.contains("\"renderCapability\""))
+    }
+
+    @Test
+    fun `collection card cannot silently drop filtering after a Wikipedia result`() {
+        val prompt = "Mostre um item da Wikipedia sobre Brasil cuja descrição mencione fauna"
+        val candidate = algorithm().apply {
+            addProperty("presentationObjective", prompt)
+            addProperty("renderCapability", "collection_card")
+            getAsJsonArray("steps").add(transformStep("filter_fauna", listOf("events_call"), prompt))
+        }
+
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true),
+        )
+        candidate.getAsJsonArray("steps").last().asJsonObject.add("dependsOn", JsonArray())
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true),
+        )
+        candidate.addProperty("renderCapability", "custom_source")
+        assertTrue(
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true) is
+                WidgetAlgorithmParseResult.Valid,
+        )
+    }
+
+    @Test
+    fun `time dependent query before the tool remains compatible with collection card`() {
+        val prompt = "Busque América à noite ou Europa de dia e mostre uma página"
+        val candidate = algorithm().apply {
+            addProperty("presentationObjective", prompt)
+            addProperty("renderCapability", "collection_card")
+            add(
+                "steps",
+                JsonArray().apply {
+                    add(algorithm().getAsJsonArray("steps").first())
+                    add(transformStep("choose_query", listOf("current_date"), prompt))
+                    add(toolStep("events_call", listOf("choose_query")))
+                },
+            )
+        }
+
+        assertTrue(
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true) is
+                WidgetAlgorithmParseResult.Valid,
+        )
+    }
+
+    @Test
+    fun `collection card cannot ignore a second tool result`() {
+        val candidate = algorithm().apply {
+            addProperty("renderCapability", "collection_card")
+            getAsJsonArray("steps").add(toolStep("second_call", listOf("current_date")))
+        }
+
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true),
+        )
+        candidate.addProperty("renderCapability", "custom_source")
+        assertTrue(
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true) is
+                WidgetAlgorithmParseResult.Valid,
+        )
+    }
+
+    @Test
+    fun `new page algorithm freezes tool selection while old checkpoints remain readable`() {
+        val pageTool = WidgetToolCapability("wikipedia_pages", 2)
+        val feasibility = validFeasibility().copy(tools = listOf(WidgetSelectedTool(pageTool, "page search")))
+        val selected = algorithm().apply {
+            getAsJsonArray("steps").last().asJsonObject.apply {
+                addProperty("toolId", pageTool.id)
+                addProperty("contractVersion", pageTool.version)
+                addProperty("selectionMode", "seeded_random")
+            }
+        }
+
+        val parsed = WidgetAlgorithmParser.parse(selected.toString(), feasibility, requirePageSelection = true)
+        assertEquals(
+            WidgetToolSelectionMode.SeededRandom,
+            (parsed as WidgetAlgorithmParseResult.Valid).artifact.toolCallSteps.single().selectionMode,
+        )
+        selected.getAsJsonArray("steps").last().asJsonObject.remove("selectionMode")
+        assertTrue(WidgetAlgorithmParser.parse(selected.toString(), feasibility) is WidgetAlgorithmParseResult.Valid)
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(selected.toString(), feasibility, requirePageSelection = true),
+        )
+        assertTrue(WidgetAuthoringStageSchemas.algorithm.contains("\"selectionMode\""))
+    }
+
+    @Test
+    fun `collection card artifact generates only application-owned render source`() {
+        val selected = algorithm().apply { addProperty("renderCapability", "collection_card") }
+        val algorithm = (
+            WidgetAlgorithmParser.parse(selected.toString(), validFeasibility()) as
+                WidgetAlgorithmParseResult.Valid
+            ).artifact
+        val raw = """{"alias":"events_call","items":"events","title":"text","url":"canonicalUrl","fallback":"No events","selection":"first"}"""
+
+        val parsed = WidgetCollectionCardArtifact.parse(raw, algorithm) as WidgetSourceFragmentParseResult.Valid
+
+        assertTrue(parsed.artifact.source.startsWith("function render(runtime, outcomes, state)"))
+        assertTrue(parsed.artifact.source.contains("runtime.collectionCard(outcomes, \"events_call\""))
+        assertTrue(parsed.artifact.source.contains("\"selection\":\"first\""))
+        assertTrue(parsed.artifact.source.contains("\"fallback\":\"No events\""))
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidPresentationFields),
+            WidgetCollectionCardArtifact.parse(raw.replace("\"fallback\":\"No events\",", ""), algorithm),
+        )
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidPresentationFields),
+            WidgetCollectionCardArtifact.parse(raw.replace("events_call", "invented"), algorithm),
+        )
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidPresentationFields),
+            WidgetCollectionCardArtifact.parse(raw.replace("\"first\"", "\"last\""), algorithm),
+        )
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidPresentationFields),
+            WidgetCollectionCardArtifact.parse(raw.replace("\"title\":\"text\"", "\"title\":\"Wikipedia event today\""), algorithm),
+        )
     }
 
     @Test
@@ -324,6 +517,64 @@ class WidgetAuthoringPipelineContractsTest {
     }
 
     @Test
+    fun `render rejects ambient random and accepts the compact seeded helper contract`() {
+        val random = "function render(runtime, outcomes, state) { return Math.random(); }"
+        val compact = """function render(runtime, outcomes, state) {
+  const picked = runtime.pickArrayItem(outcomes, 'events', 'events', 'seeded_random');
+  if (!picked) return runtime.card('No events');
+  return runtime.card([picked.item.title + ' (' + picked.item.year + ')', picked.item.text, runtime.linkFor(outcomes, 'events', picked.path + '.canonicalUrl', 'Read')]);
+}"""
+        val collectionCard = """function render(runtime, outcomes, state) {
+  return runtime.collectionCard(outcomes, 'events', {
+    items:'events', title:'title', body:'text', url:'canonicalUrl', fallback:'No events'
+  });
+}"""
+        fun parse(source: String) = WidgetSourceFragmentParser.parse(
+            JsonObject().apply { addProperty("source", source) }.toString(),
+            "render",
+            "render",
+            listOf("runtime", "outcomes", "state"),
+        )
+
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidSource),
+            parse(random),
+        )
+        assertTrue(parse(compact) is WidgetSourceFragmentParseResult.Valid)
+        assertTrue(parse(collectionCard) is WidgetSourceFragmentParseResult.Valid)
+    }
+
+    @Test
+    fun `render accepts indexed selection and rejects arrow callback`() {
+        val indexed = """function render(runtime, outcomes, state) {
+  if (!runtime.isSuccess(outcomes, 'events')) return runtime.card('No events');
+  const events = runtime.getArray(outcomes, 'events', 'events');
+  if (events.length === 0) return runtime.card('No events');
+  let chosen = 0;
+  for (let i = 1; i < events.length; i++) {
+    if (events[i].year < events[chosen].year) chosen = i;
+  }
+  return runtime.card([
+    events[chosen].text,
+    runtime.linkFor(outcomes, 'events', 'events.' + chosen + '.canonicalUrl', 'Read')
+  ]);
+}"""
+        val arrow = indexed.replace("events[i].year < events[chosen].year", "events.map(x => x.year)[i] < events[chosen].year")
+        fun parse(source: String) = WidgetSourceFragmentParser.parse(
+            JsonObject().apply { addProperty("source", source) }.toString(),
+            "render",
+            "render",
+            listOf("runtime", "outcomes", "state"),
+        )
+
+        assertTrue(parse(indexed) is WidgetSourceFragmentParseResult.Valid)
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidSource),
+            parse(arrow),
+        )
+    }
+
+    @Test
     fun `presentation preflight classifies node type fields and tone separately`() {
         assertEquals(
             WidgetAuthoringStageFailureCode.InvalidPresentationNodeType,
@@ -414,6 +665,13 @@ class WidgetAuthoringPipelineContractsTest {
                 add("local_time")
             },
         )
+    }
+
+    private fun transformStep(id: String, dependsOn: List<String>, objective: String) = JsonObject().apply {
+        addProperty("id", id)
+        addProperty("kind", "transform")
+        addProperty("objective", objective)
+        add("dependsOn", JsonArray().apply { dependsOn.forEach(::add) })
     }
 
     private fun fragment(id: String, name: String, inputs: List<String>, source: String) = JsonObject().apply {

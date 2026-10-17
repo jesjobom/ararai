@@ -214,6 +214,76 @@ class ManagedWidgetExecutionCoordinatorTest {
     }
 
     @Test
+    fun `provider rate limit does not replace the last good card with a generated fallback`() = runTest {
+        val store = store()
+        val widget = store.createConfirmed(fixture())
+        store.replacePresentation(WidgetPresentationCache(widget.id, 1, PRESENTATION, 900L))
+        val coordinator = coordinator(store) { _, _, _, _ ->
+            ManagedWidgetProgramResult(
+                WidgetExecutionResult.Success(
+                    WidgetPresentationNode.Text("Wikipedia", "neutral"),
+                    listOf(
+                        WidgetToolOutcome(
+                            "today",
+                            JsonObject().apply {
+                                addProperty("kind", "failure")
+                                addProperty("reason", "RateLimited")
+                            },
+                            null,
+                        ),
+                    ),
+                    listOf(TOOL),
+                ),
+            )
+        }
+
+        assertEquals(ManagedWidgetExecutionStatus.RetryableFailure, coordinator.execute(widget.id))
+        assertEquals(PRESENTATION, store.cachedPresentation(widget.id)?.presentationJson)
+        val run = store.listRuns(widget.id).single()
+        assertEquals(WidgetRunOutcome.ControlledFailure, run.outcome)
+        assertEquals(WidgetRunDiagnostic.ToolRateLimited, run.diagnostic)
+    }
+
+    @Test
+    fun `provider unavailable retries but disabled tool does not`() = runTest {
+        val store = store()
+        val unavailable = store.createConfirmed(fixture(displayName = "Provider unavailable"))
+        val unavailableCoordinator = coordinator(store) { _, _, _, _ ->
+            ManagedWidgetProgramResult(
+                WidgetExecutionResult.Success(
+                    WidgetPresentationNode.Text("fallback", "neutral"),
+                    listOf(
+                        WidgetToolOutcome(
+                            "today",
+                            JsonObject().apply {
+                                addProperty("kind", "failure")
+                                addProperty("reason", "Unavailable")
+                            },
+                            null,
+                        ),
+                    ),
+                    listOf(TOOL),
+                ),
+            )
+        }
+        assertEquals(ManagedWidgetExecutionStatus.RetryableFailure, unavailableCoordinator.execute(unavailable.id))
+        assertEquals(WidgetRunDiagnostic.ToolUnavailable, store.listRuns(unavailable.id).single().diagnostic)
+
+        val disabled = store.createConfirmed(fixture(displayName = "Tool disabled"))
+        val disabledCoordinator = coordinator(store) { _, _, _, _ ->
+            ManagedWidgetProgramResult(
+                WidgetExecutionResult.Success(
+                    WidgetPresentationNode.Text("fallback", "neutral"),
+                    listOf(WidgetToolOutcome("today", null, ApplicationToolRejection.Disabled)),
+                    listOf(TOOL),
+                ),
+            )
+        }
+        assertEquals(ManagedWidgetExecutionStatus.Completed, disabledCoordinator.execute(disabled.id))
+        assertEquals(WidgetRunDiagnostic.ToolUnavailable, store.listRuns(disabled.id).single().diagnostic)
+    }
+
+    @Test
     fun `bounded runtime failures retain stale cache with only stable diagnostics`() = runTest {
         val store = store()
         val failures = listOf(

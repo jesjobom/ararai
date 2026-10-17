@@ -454,6 +454,7 @@ class WidgetAuthoringWorkflowRepositoryTest {
         assertEquals(null, repository.authoringSession(ready.session.id))
         assertEquals(result.definition, repository.listDefinitions().single())
         assertEquals(SOURCE, repository.activeRevision(result.definition.id)?.source)
+        assertEquals("Create a weather widget", repository.activeRevision(result.definition.id)?.initialPrompt)
     }
 
     @Test

@@ -614,7 +614,13 @@ private class DiagnosticJavaScriptEngine : WidgetJavaScriptEngine {
     ): WidgetScriptResult = when (entrypoint) {
         "buildCallEventsCall" -> WidgetScriptResult.Success(VALID_ARGUMENTS)
         "plan" -> WidgetScriptResult.Success("[$VALID_CALL]")
-        "render" -> WidgetScriptResult.Success("""{"type":"text","text":"Synthetic","tone":"neutral"}""")
+        "render" -> WidgetScriptResult.Success(
+            if (argumentsJson[1].contains("\"events\":[{")) {
+                """{"type":"text","text":"Synthetic event","tone":"neutral"}"""
+            } else {
+                """{"type":"text","text":"No event","tone":"muted"}"""
+            },
+        )
         else -> error("Unexpected entrypoint $entrypoint")
     }
 }
@@ -684,6 +690,7 @@ private fun algorithmArtifact(): String = JsonObject().apply {
         },
     )
     addProperty("presentationObjective", "Show one event")
+    addProperty("renderCapability", "custom_source")
 }.toString()
 
 private fun fragmentArtifact(id: String, name: String, inputs: List<String>, source: String): String = JsonObject().apply {

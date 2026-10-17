@@ -370,7 +370,7 @@ private fun JsonElement.resolveSourcePath(path: String): JsonElement? = path.spl
 private fun JsonArray.getOrNull(index: Int): JsonElement? = if (index in 0..<size()) get(index) else null
 
 private val SOURCE_PATH_PATTERN =
-    Regex("[A-Za-z][A-Za-z0-9_]{0,63}(?:\\.(?:[A-Za-z][A-Za-z0-9_]{0,63}|[0-9]{1,2})){0,3}")
+    Regex("[A-Za-z][A-Za-z0-9_]{0,63}(?:\\.(?:[A-Za-z][A-Za-z0-9_]{0,63}|[0-9]{1,2})){0,4}")
 
 internal fun WidgetRuntimeContext.toJson(capabilities: Set<WidgetRuntimeValue>): String {
     val result = JsonObject()

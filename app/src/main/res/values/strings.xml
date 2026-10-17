@@ -434,6 +434,9 @@
     <string name="widget_runtime_values">Runtime values: %1$s</string>
     <string name="widget_presentation_scope">Presentation: %1$s</string>
     <string name="widget_source">JavaScript source</string>
+    <string name="widget_initial_prompt">Initial request</string>
+    <string name="widget_authoring_saved_prompt_hint">This request is saved for the current authoring and cannot be edited. Start a new request to enter a different prompt.</string>
+    <string name="widget_authoring_start_new_request">Start a new request</string>
     <string name="widget_run_history">Run history</string>
     <string name="widget_run_entry">%1$s · revision %2$d · %3$s</string>
     <string name="widget_no_runs">No execution history.</string>
@@ -452,7 +455,7 @@
     <string name="widget_authoring_prompt_hint">For example: show one actual historical event from today, chosen deterministically from Wikipedia’s events.</string>
     <string name="widget_authoring_generate">Generate draft</string>
     <string name="widget_authoring_generating">The local model is generating and validating one draft…</string>
-    <string name="widget_authoring_model_unavailable">The selected downloaded model is not yet verified for the staged widget-authoring protocol. Its other features and existing widgets remain available.</string>
+    <string name="widget_authoring_model_unavailable">Widget authoring requires a downloaded Gemma 4 E4B model. Other features and existing widgets remain available with this model.</string>
     <string name="widget_authoring_no_proposal">The model did not return exactly one widget proposal. Revise the prompt and try again.</string>
     <string name="widget_authoring_invalid_proposal_format">The model returned an incomplete or unsupported proposal format. Nothing was saved or executed.</string>
     <string name="widget_authoring_invalid_program">The proposed JavaScript was invalid or incompatible with the safe widget runtime. Nothing was saved or executed.</string>
@@ -490,13 +493,15 @@
     <string name="widget_authoring_request_rejected">LiteRT-LM rejected the widget-authoring request before a proposal could be captured. Nothing was saved.</string>
     <string name="widget_authoring_runtime_failed">LiteRT-LM stopped generation before a widget proposal could be captured. Nothing was saved; try again.</string>
     <string name="widget_authoring_workflow_start">Start staged authoring</string>
-    <string name="widget_authoring_workflow_diagnostic_notice">Debug characterization only: this model is not enabled for production authoring. Each stage still requires explicit review.</string>
-    <string name="widget_authoring_workflow_diagnostic_start">Start resumable diagnostic</string>
     <string name="widget_authoring_workflow_saved">Progress is saved after every attempt. Review each result before continuing.</string>
     <string name="widget_authoring_workflow_run_stage">Run this stage</string>
     <string name="widget_authoring_workflow_continue">Accept and continue</string>
     <string name="widget_authoring_workflow_retry">Retry this stage</string>
     <string name="widget_authoring_workflow_reprocess">Reprocess stage</string>
+    <string name="widget_authoring_warning_random_selection">Warning: the request appears to ask for a random page, but this algorithm selects the first result. Review it or reprocess this stage. You can still continue.</string>
+    <string name="widget_authoring_warning_first_selection">Warning: the request appears to ask for the first page, but this algorithm selects randomly. Review it or reprocess this stage. You can still continue.</string>
+    <string name="widget_authoring_warning_last_selection">Warning: the request appears to ask for the last page, but this Wikipedia page tool does not support last-result selection. Review the result or change the request. You can still continue.</string>
+    <string name="widget_authoring_warning_time_condition">Warning: the request mentions day and night, but this tool-call source does not appear to read the local time. Review it or reprocess this stage. You can still continue.</string>
     <string name="widget_authoring_workflow_discard">Discard authoring</string>
     <string name="widget_authoring_workflow_attempt_running">One stage attempt is running. You may leave this screen or cancel only this attempt.</string>
     <string name="widget_authoring_workflow_configuration_changed">The saved workflow uses a different model, model artifact, inference configuration, or tool contract. Restore that configuration or discard the workflow.</string>

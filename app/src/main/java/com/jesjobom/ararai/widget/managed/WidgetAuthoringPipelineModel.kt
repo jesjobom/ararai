@@ -324,19 +324,37 @@ internal fun WidgetAuthoringRoundRequest.toUserText(): String = buildString {
             append("\nRejected artifact omitted to prevent anchoring; regenerate from the validated context and contract.")
         }
         append("\nCorrection: ")
-        append(repairCode.repairInstruction())
+        append(
+            if (toolName == SUBMIT_WIDGET_COLLECTION_CARD_TOOL) {
+                "Return the complete collection card configuration. Copy title, optional body and url " +
+                    "as exact itemFields property names, never as a title or instruction sentence. " +
+                    "Only fallback is literal text. Use the enum choices in the tool schema; do not write JavaScript."
+            } else if (toolName == SUBMIT_WIDGET_CALL_FUNCTION_TOOL) {
+                "Regenerate one named call function. Return the bare tool input arguments object with exactly " +
+                    "the fields required by toolContract.inputSchema. Never return alias, toolId, " +
+                    "contractVersion, args, or an arguments wrapper; the application supplies call metadata. " +
+                    "Read date fields from runtime.currentLocalDateTime() and language from runtime.language " +
+                    "only when those fields are required by the selected tool."
+            } else if (toolName == SUBMIT_WIDGET_RENDER_FUNCTION_TOOL) {
+                "Regenerate one named render(runtime, outcomes, state) function. This is custom_source: " +
+                    "for first/random selection call runtime.pickArrayItem(outcomes, alias, arrayPath, " +
+                    "'first' or 'seeded_random'); use picked.item for display and picked.path+'.'+urlField " +
+                    "for runtime.linkFor. It returns null on failure or empty results. " +
+                    "For comparisons use runtime.isSuccess(outcomes, alias), " +
+                    "runtime.getArray(outcomes, alias, arrayPath), and an indexed loop. " +
+                    "Call runtime.card([title, body, runtime.linkFor(outcomes, alias, " +
+                    "exactItemUrlPath, label)]) with ONE array argument; runtime.card returns a " +
+                    "complete node, not a builder. Never use card.addText, card.addLinkFor, " +
+                    "or outcomes.getArray; use runtime.getArray(outcomes, alias, arrayPath). " +
+                    "Formatting a title must not replace a requested body or description. " +
+                    "Do not build card or https_link objects manually; linkFor provides URL and provenance. " +
+                    "Handle failed and empty outcomes. No Math.random, arrow functions, textNode, or collectionCard."
+            } else {
+                repairCode.repairInstruction()
+            },
+        )
         append("\nAuthoritative replacement contract: ")
         append(objective)
-        if (
-            stage == WidgetAuthoringStage.RenderFunction &&
-            repairCode in setOf(
-                WidgetAuthoringStageFailureCode.InvalidSource,
-                WidgetAuthoringStageFailureCode.InvalidRenderExecution,
-            )
-        ) {
-            append("\nFinal source check: outcomes is a plain object. Select aliases only from toolResults[].alias, ")
-            append("access results with outcomes[alias], never outcomes.get(), and reuse that alias as sourceAlias.")
-        }
     }
 }
 
@@ -383,19 +401,32 @@ private val REPAIR_INSTRUCTIONS = mapOf(
         "Keep outcome=achievable when the request is supported. Use message as its display name. For unachievable, " +
         "use message as the reason; for needs_clarification, use message as the question. " +
         FEASIBILITY_OUTCOME_CONTRACT,
+    WidgetAuthoringStageFailureCode.InvalidAlgorithm to
+        "Preserve each required data operation in the step graph. Give dependent steps a dependsOn list; " +
+        "selectionMode belongs only to wikipedia_pages version 2 tool calls, never to other tools. " +
+        "Use collection_card only for one direct item " +
+        "from one tool result; use custom_source when a transform depends on tool results or multiple results " +
+        "must be considered. A runtime-dependent query before the tool call may still use collection_card.",
     WidgetAuthoringStageFailureCode.InvalidSource to
         "Submit only source for the current stage. It must contain one named function declaration whose " +
         "name and parameters exactly match the authoritative stage signature, and it must parse with every brace closed; " +
-        "do not use an anonymous function.",
+        "do not use an anonymous function, arrow callback, or Math.random.",
     WidgetAuthoringStageFailureCode.InvalidRenderExecution to
-        "Regenerate render from renderApi and presentationContract. outcomes is a plain JavaScript object: select an " +
-        "alias from toolResults[].alias, access it only with outcomes[alias], never call outcomes.get(), and check " +
-        "status before payload.",
+        "Regenerate render from renderApi. Select an alias from toolResults[].alias. " +
+        "Return runtime.card([title, body, runtime.linkFor(outcomes, alias, urlPath, label)]) " +
+        "using the selected item's full URL field path. card is not a mutable builder; " +
+        "call runtime.getArray(outcomes, alias, arrayPath), never outcomes.getArray.",
     WidgetAuthoringStageFailureCode.InvalidPlan to
         "Return the frozen call object directly from a call function, or the ordered array of frozen call-function " +
         "results from plan(runtime). Do not wrap a call in toolCall or another field.",
     WidgetAuthoringStageFailureCode.InvalidToolArguments to
-        "Keep the frozen alias, tool id, and contract version, and make arguments match the supplied tool contract.",
+        "Make the tool input arguments match the supplied tool contract. " +
+        "The application supplies the frozen alias, tool id, and contract version.",
+    WidgetAuthoringStageFailureCode.InvalidToolSelection to
+        "The tool call must match the frozen selectionMode in the algorithm step. " +
+        "For seeded_random, return selection: 'seeded_random' and seed: runtime.seed; " +
+        "for first, return selection: 'first' without seed. The tool returns one page, so card selection " +
+        "cannot change which page was fetched.",
     WidgetAuthoringStageFailureCode.InvalidPresentation to
         "Return one bounded presentation object allowed by the supplied presentation capabilities. Every text or " +
         "value node must include tone set to neutral, muted, positive, or warning.",
@@ -406,11 +437,14 @@ private val REPAIR_INSTRUCTIONS = mapOf(
     WidgetAuthoringStageFailureCode.InvalidPresentationTone to
         "Set tone on every text or value node to exactly neutral, muted, positive, or warning.",
     WidgetAuthoringStageFailureCode.InvalidPresentationProvenance to
-        "For https_link, copy the exact URL from a successful outcome and provide the matching frozen sourceAlias and sourceField.",
+        "For an array card, use runtime.collectionCard with the URL field name, not its URL value; it constructs a result-proven link.",
+    WidgetAuthoringStageFailureCode.InvalidPresentationSuccessHandling to
+        "The nonempty success result rendered the fallback. For an array card, use runtime.collectionCard " +
+        "with the exact array, title, and optional body fields.",
     WidgetAuthoringStageFailureCode.InvalidPresentationEmptyHandling to
-        "Check for an empty collection before indexing it and return a complete fallback presentation node.",
+        "For an array card, use runtime.collectionCard; it returns the fallback for an empty collection.",
     WidgetAuthoringStageFailureCode.InvalidPresentationFailureHandling to
-        "Check outcomes[alias].status === 'success' before reading payload; return a complete fallback node for failure.",
+        "For an array card, use runtime.collectionCard; it checks failure before reading the array and returns the fallback.",
     WidgetAuthoringStageFailureCode.CapabilityExpansion to
         "Keep every frozen alias, tool id, contract version, dependency, and capability unchanged.",
     WidgetAuthoringStageFailureCode.MissingArtifact to
@@ -456,4 +490,5 @@ private val STAGE_TOOL_NAMES = setOf(
     SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
     SUBMIT_WIDGET_PLAN_FUNCTION_TOOL,
     SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
+    SUBMIT_WIDGET_COLLECTION_CARD_TOOL,
 )

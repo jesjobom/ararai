@@ -25,7 +25,12 @@ internal class WidgetAuthoringStageValidators(
         raw: String,
         feasibility: WidgetFeasibilityArtifact,
     ): WidgetAuthoringArtifactValidation<WidgetAlgorithmArtifact> = when (
-        val parsed = WidgetAlgorithmParser.parse(raw, feasibility)
+        val parsed = WidgetAlgorithmParser.parse(
+            raw,
+            feasibility,
+            requireRenderCapability = true,
+            requirePageSelection = true,
+        )
     ) {
         is WidgetAlgorithmParseResult.Valid -> WidgetAuthoringArtifactValidation.Valid(parsed.artifact)
         is WidgetAlgorithmParseResult.Invalid -> WidgetAuthoringArtifactValidation.Invalid(parsed.code)
@@ -86,12 +91,16 @@ internal class WidgetAuthoringStageValidators(
         feasibility: WidgetFeasibilityArtifact,
         runtimeContext: WidgetRuntimeContext,
     ): WidgetAuthoringArtifactValidation<WidgetSourceFragmentArtifact> {
-        val parsed = WidgetSourceFragmentParser.parse(
-            raw,
-            expectedArtifactId = "render",
-            expectedFunctionName = "render",
-            expectedInputNames = listOf("runtime", "outcomes", "state"),
-        )
+        val parsed = if (algorithm.renderCapability == WidgetRenderCapability.CollectionCard) {
+            WidgetCollectionCardArtifact.parse(raw, algorithm)
+        } else {
+            WidgetSourceFragmentParser.parse(
+                raw,
+                expectedArtifactId = "render",
+                expectedFunctionName = "render",
+                expectedInputNames = listOf("runtime", "outcomes", "state"),
+            )
+        }
         return when (parsed) {
             is WidgetSourceFragmentParseResult.Invalid -> WidgetAuthoringArtifactValidation.Invalid(parsed.code)
             is WidgetSourceFragmentParseResult.Valid -> validator.validateRenderFunction(

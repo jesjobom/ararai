@@ -15,6 +15,7 @@ import com.jesjobom.ararai.widget.runtime.WidgetProgramValidationResult
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeContext
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeCoordinator
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeFailureCode
+import com.jesjobom.ararai.widget.runtime.WidgetToolOutcome
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -51,7 +52,14 @@ internal class RuntimeManagedWidgetProgramExecutor(
     )
 }
 
-internal enum class ManagedWidgetExecutionStatus { Completed, Coalesced, Disabled, Missing, Discarded }
+internal enum class ManagedWidgetExecutionStatus {
+    Completed,
+    RetryableFailure,
+    Coalesced,
+    Disabled,
+    Missing,
+    Discarded,
+}
 
 internal class ManagedWidgetExecutionCoordinator(
     private val repository: ManagedWidgetRepository,
@@ -143,7 +151,7 @@ internal class ManagedWidgetExecutionCoordinator(
             ),
         )
         is WidgetExecutionResult.Success -> {
-            val toolDiagnostic = execution.outcomes.mapNotNull { it.rejection }.toDiagnostic()
+            val toolDiagnostic = execution.outcomes.toDiagnostic()
             if (toolDiagnostic != null) {
                 commit(
                     lease,
@@ -157,6 +165,7 @@ internal class ManagedWidgetExecutionCoordinator(
                         diagnostic = toolDiagnostic,
                         plannedToolIds = execution.plannedTools.map { it.id }.distinct(),
                     ),
+                    retryable = execution.outcomes.any(WidgetToolOutcome::isRetryableFailure),
                 )
             } else {
                 commit(
@@ -177,8 +186,13 @@ internal class ManagedWidgetExecutionCoordinator(
     private suspend fun commit(
         lease: ManagedWidgetRunLease,
         completion: ManagedWidgetRunCompletion,
+        retryable: Boolean = false,
     ): ManagedWidgetExecutionStatus = when (repository.completeRun(lease, completion)) {
-        ManagedWidgetCommitResult.Stored -> ManagedWidgetExecutionStatus.Completed
+        ManagedWidgetCommitResult.Stored -> if (retryable) {
+            ManagedWidgetExecutionStatus.RetryableFailure
+        } else {
+            ManagedWidgetExecutionStatus.Completed
+        }
         ManagedWidgetCommitResult.Discarded -> ManagedWidgetExecutionStatus.Discarded
     }
 
@@ -274,9 +288,43 @@ private fun WidgetRuntimeFailureCode.disablesExecution(): Boolean = when (this) 
     -> false
 }
 
-private fun List<ApplicationToolRejection>.toDiagnostic(): WidgetRunDiagnostic? = when {
+private fun List<ApplicationToolRejection>.toRejectionDiagnostic(): WidgetRunDiagnostic? = when {
     isEmpty() -> null
     ApplicationToolRejection.Cancelled in this -> WidgetRunDiagnostic.Cancelled
     ApplicationToolRejection.TimedOut in this -> WidgetRunDiagnostic.ResourceLimit
     else -> WidgetRunDiagnostic.ToolUnavailable
+}
+
+/** A provider's typed failure is not a successful refresh, even if render produced a fallback card. */
+private fun List<WidgetToolOutcome>.toDiagnostic(): WidgetRunDiagnostic? {
+    val rejection = mapNotNull(WidgetToolOutcome::rejection).toRejectionDiagnostic()
+    if (rejection != null) return rejection
+    val reasons = mapNotNull { outcome ->
+        val payload = outcome.payload ?: return@mapNotNull null
+        val kind = payload.get("kind")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+        if (kind != "failure") return@mapNotNull null
+        payload.get("reason")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString ?: "Unknown"
+    }
+    return when {
+        reasons.isEmpty() -> null
+        "Cancelled" in reasons -> WidgetRunDiagnostic.Cancelled
+        "RateLimited" in reasons -> WidgetRunDiagnostic.ToolRateLimited
+        "SummaryTooLarge" in reasons -> WidgetRunDiagnostic.ToolResultTooLarge
+        "NoResults" in reasons -> WidgetRunDiagnostic.ToolNoResults
+        "TimedOut" in reasons -> WidgetRunDiagnostic.ResourceLimit
+        else -> WidgetRunDiagnostic.ToolUnavailable
+    }
+}
+
+private fun WidgetToolOutcome.isRetryableFailure(): Boolean {
+    val reason = payload?.get("reason")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+    val kind = payload?.get("kind")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+    return when {
+        rejection != null -> rejection in setOf(
+            ApplicationToolRejection.Unavailable,
+            ApplicationToolRejection.TimedOut,
+        )
+        kind == "failure" -> reason in setOf("Unavailable", "TimedOut", "RateLimited")
+        else -> false
+    }
 }

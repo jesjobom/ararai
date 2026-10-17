@@ -2,6 +2,7 @@ package com.jesjobom.ararai.widget.managed
 
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
 import android.util.Log
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
@@ -23,6 +24,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -56,8 +58,9 @@ class ManagedWidgetSchedulingTest {
         var work = currentWork()
         assertEquals(1, work.size)
         assertEquals(WorkInfo.State.ENQUEUED, work.single().state)
-        assertEquals(NetworkType.CONNECTED, work.single().constraints.requiredNetworkType)
+        assertEquals(NetworkType.NOT_REQUIRED, work.single().constraints.requiredNetworkType)
         assertTrue(managedWidgetWorkTag(WIDGET_ID) in work.single().tags)
+        assertTrue(work.single().tags.any { it.startsWith("managed-widget-schedule-v2:1:24:true:") })
 
         scheduler.reconcile(daily.copy(periodicIntervalHours = 6), revision)
         work = currentWork()
@@ -66,6 +69,49 @@ class ManagedWidgetSchedulingTest {
 
         scheduler.reconcile(daily.copy(enabled = false), revision)
         assertTrue(currentWork().all { it.state == WorkInfo.State.CANCELLED })
+    }
+
+    @Test
+    fun `unchanged startup reconciliation preserves the active job generation`() {
+        val scheduler = scheduler()
+        val definition = definition(interval = 1)
+        val revision = revision()
+
+        scheduler.reconcile(definition, revision)
+        val before = currentWork().single()
+        scheduler.reconcile(definition, revision)
+        val after = currentWork().single()
+
+        assertEquals(before.id, after.id)
+        assertEquals(before.generation, after.generation)
+    }
+
+    @Test
+    fun `changed interval revision or network requirement updates the existing job`() {
+        val scheduler = scheduler()
+        val revision = revision()
+        scheduler.reconcile(definition(interval = 1), revision)
+        var previous = currentWork().single()
+
+        scheduler.reconcile(definition(interval = 6), revision)
+        var changed = currentWork().single()
+        assertEquals(previous.id, changed.id)
+        assertEquals(previous.generation + 1, changed.generation)
+        previous = changed
+
+        val nextRevision = revision.copy(revision = 2, programDigest = "c".repeat(64))
+        scheduler.reconcile(definition(interval = 6).copy(activeRevision = 2), nextRevision)
+        changed = currentWork().single()
+        assertEquals(previous.id, changed.id)
+        assertEquals(previous.generation + 1, changed.generation)
+        previous = changed
+
+        WorkManagerManagedWidgetScheduler(workManager, emptySet())
+            .reconcile(definition(interval = 6).copy(activeRevision = 2), nextRevision)
+        changed = currentWork().single()
+        assertEquals(previous.id, changed.id)
+        assertEquals(previous.generation + 1, changed.generation)
+        assertEquals(NetworkType.NOT_REQUIRED, changed.constraints.requiredNetworkType)
     }
 
     @Test
@@ -139,6 +185,7 @@ class ManagedWidgetWorkerTest {
         application = ApplicationProvider.getApplicationContext()
         application.executions.clear()
         application.failure = null
+        application.outcome = ManagedWidgetWorkerOutcome.Completed
     }
 
     @Test
@@ -157,6 +204,35 @@ class ManagedWidgetWorkerTest {
 
         assertEquals(ListenableWorker.Result.failure().javaClass, result.javaClass)
         assertEquals(listOf(WIDGET_ID), application.executions)
+    }
+
+    @Test
+    fun `worker retries a controlled transient tool failure`() = runTest {
+        application.outcome = ManagedWidgetWorkerOutcome.Retry
+
+        val result = worker(WIDGET_ID).doWork()
+
+        assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
+        assertEquals(listOf(WIDGET_ID), application.executions)
+    }
+
+    @Test
+    fun `worker waits for UID network access before invoking a network tool`() = runTest {
+        val connectivity = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        shadowOf(connectivity).setActiveNetworkInfo(null)
+
+        val result = worker(WIDGET_ID, requiresNetwork = true).doWork()
+
+        assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
+        assertTrue(application.executions.isEmpty())
+    }
+
+    @Test
+    fun `network readiness retries a transient UID block without calling the tool early`() = runTest {
+        var checks = 0
+
+        assertTrue(awaitWidgetNetworkAccess({ ++checks == 3 }, maxChecks = 3, checkIntervalMillis = 1))
+        assertEquals(3, checks)
     }
 
     @Test(expected = CancellationException::class)
@@ -185,8 +261,11 @@ class ManagedWidgetWorkerTest {
         assertFalse(dependencies.any { it.contains("LocalLlm") || it.contains("Model") })
     }
 
-    private fun worker(widgetId: String?): ManagedWidgetWorker {
-        val input = Data.Builder().apply { widgetId?.let { putString(ManagedWidgetWorker.KEY_WIDGET_ID, it) } }.build()
+    private fun worker(widgetId: String?, requiresNetwork: Boolean = false): ManagedWidgetWorker {
+        val input = Data.Builder().apply {
+            widgetId?.let { putString(ManagedWidgetWorker.KEY_WIDGET_ID, it) }
+            putBoolean(ManagedWidgetWorker.KEY_REQUIRES_NETWORK, requiresNetwork)
+        }.build()
         return TestListenableWorkerBuilder<ManagedWidgetWorker>(application)
             .setInputData(input)
             .build()
@@ -197,10 +276,12 @@ class ManagedWidgetWorkerTest {
         ManagedWidgetExecutionProvider {
         val executions = mutableListOf<String>()
         var failure: RuntimeException? = null
+        var outcome = ManagedWidgetWorkerOutcome.Completed
 
-        override suspend fun executeManagedWidget(widgetId: String) {
+        override suspend fun executeManagedWidget(widgetId: String): ManagedWidgetWorkerOutcome {
             executions += widgetId
             failure?.let { throw it }
+            return outcome
         }
     }
 

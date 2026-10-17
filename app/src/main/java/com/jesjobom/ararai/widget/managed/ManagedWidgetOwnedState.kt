@@ -34,6 +34,9 @@ internal enum class WidgetRunDiagnostic {
     Cancelled,
     RuntimeUnavailable,
     ToolUnavailable,
+    ToolRateLimited,
+    ToolNoResults,
+    ToolResultTooLarge,
     LeaseExpired,
 }
 

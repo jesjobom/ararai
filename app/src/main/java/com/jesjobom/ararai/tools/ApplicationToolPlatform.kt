@@ -37,12 +37,19 @@ data class ApplicationToolContract(
     val consumers: Set<ApplicationToolConsumer>,
     val inputSchemaJson: String,
     val outputSchemaJson: String,
+    val authoringSummary: String? = null,
 ) {
     init {
         require(TOOL_ID_PATTERN.matches(id)) { "Invalid application tool id" }
         require(version > 0) { "Application tool version must be positive" }
         require(displayName.isNotBlank()) { "Application tool display name is required" }
         require(consumers.isNotEmpty()) { "Application tool must have an eligible consumer" }
+        val validSummary = authoringSummary?.let {
+            it.isNotBlank() && it.length <= 240 && it.none(Char::isISOControl)
+        } ?: true
+        require(validSummary) {
+            "Application tool authoring summary must be concise text"
+        }
         requireValidSchema(inputSchemaJson, "input")
         requireValidSchema(outputSchemaJson, "output")
     }

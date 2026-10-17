@@ -364,8 +364,15 @@ class ModelConfigParserTest {
         }
         chatModels.forEach { model ->
             assertEquals(emptySet<String>(), model.toolCapabilities.authoringToolNames)
-            assertEquals(emptySet<String>(), model.toolCapabilities.authoringProtocolNames)
         }
+        assertEquals(
+            emptySet<String>(),
+            catalog.models.single { it.id == "gemma-4-e2b-it-litert-lm" }.toolCapabilities.authoringProtocolNames,
+        )
+        assertEquals(
+            setOf(WIDGET_AUTHORING_PIPELINE_V1),
+            catalog.models.single { it.id == "gemma-4-e4b-it-litert-lm" }.toolCapabilities.authoringProtocolNames,
+        )
         val candidates = catalog.models.filter { it.supportsTask(ModelTask.Transcription) }
         assertEquals(2, candidates.size)
         assertEquals(

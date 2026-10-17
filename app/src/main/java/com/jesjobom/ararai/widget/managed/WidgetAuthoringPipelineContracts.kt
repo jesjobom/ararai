@@ -23,6 +23,7 @@ internal const val SUBMIT_WIDGET_ALGORITHM_TOOL = "submit_widget_algorithm"
 internal const val SUBMIT_WIDGET_CALL_FUNCTION_TOOL = "submit_widget_call_function"
 internal const val SUBMIT_WIDGET_PLAN_FUNCTION_TOOL = "submit_widget_plan_function"
 internal const val SUBMIT_WIDGET_RENDER_FUNCTION_TOOL = "submit_widget_render_function"
+internal const val SUBMIT_WIDGET_COLLECTION_CARD_TOOL = "submit_widget_collection_card"
 
 internal object WidgetAuthoringPipelinePolicy {
     const val MAX_TOOLS = WidgetRuntimePolicy.MAX_TOOL_CALLS
@@ -199,17 +200,29 @@ internal enum class WidgetAlgorithmStepKind(val wireName: String) {
     ToolCall("tool_call"),
 }
 
+internal enum class WidgetRenderCapability(val wireName: String) {
+    CollectionCard("collection_card"),
+    CustomSource("custom_source"),
+}
+
+internal enum class WidgetToolSelectionMode(val wireName: String) {
+    First("first"),
+    SeededRandom("seeded_random"),
+}
+
 internal data class WidgetAlgorithmStep(
     val id: String,
     val kind: WidgetAlgorithmStepKind,
     val objective: String,
     val dependencies: List<String>,
     val tool: WidgetToolCapability?,
+    val selectionMode: WidgetToolSelectionMode? = null,
 )
 
 internal data class WidgetAlgorithmArtifact(
     val steps: List<WidgetAlgorithmStep>,
     val presentationObjective: String,
+    val renderCapability: WidgetRenderCapability? = null,
 ) {
     val toolCallSteps: List<WidgetAlgorithmStep>
         get() = steps.filter { it.kind == WidgetAlgorithmStepKind.ToolCall }
@@ -224,6 +237,8 @@ internal object WidgetAlgorithmParser {
     fun parse(
         raw: String,
         envelope: WidgetFeasibilityArtifact,
+        requireRenderCapability: Boolean = false,
+        requirePageSelection: Boolean = false,
     ): WidgetAlgorithmParseResult = try {
         require(envelope.outcome == WidgetFeasibilityOutcome.Achievable)
         require(raw.utf8Size() <= WidgetAuthoringPipelinePolicy.MAX_ARTIFACT_BYTES)
@@ -231,14 +246,14 @@ internal object WidgetAlgorithmParser {
             raw,
             maxStringChars = WidgetAuthoringPipelinePolicy.MAX_TEXT_CHARS,
         ).requiredObject()
-        require(root.keySet().all { it in setOf("protocolVersion", "steps", "presentationObjective") })
+        require(root.keySet().all { it in setOf("protocolVersion", "steps", "presentationObjective", "renderCapability") })
         require(root.has("steps") && root.has("presentationObjective"))
         root.get("protocolVersion")?.let {
             require(root.requiredInt("protocolVersion") == WIDGET_AUTHORING_PROTOCOL_VERSION)
         }
         val selectedTools = envelope.tools.map { it.capability }.toSet()
-        val steps = root.requiredArray("steps").map { element ->
-            parseStep(element.requiredObject(), selectedTools)
+        val steps = root.requiredArray("steps").mapIndexed { index, element ->
+            parseStep(element.requiredObject(), selectedTools, envelope.runtimeValues, index == 0)
         }
         require(steps.isNotEmpty() && steps.size <= WidgetAuthoringPipelinePolicy.MAX_ALGORITHM_STEPS)
         require(steps.map { it.id }.toSet().size == steps.size)
@@ -247,9 +262,23 @@ internal object WidgetAlgorithmParser {
         require(calls.size <= WidgetAuthoringPipelinePolicy.MAX_TOOLS)
         require(calls.all { it.tool in selectedTools })
         require(calls.map { it.tool }.toSet() == selectedTools)
+        if (requirePageSelection) {
+            require(
+                calls.filter { it.tool?.id == "wikipedia_pages" && it.tool.version == 2 }
+                    .all { it.selectionMode != null },
+            )
+        }
         rejectLiveResultDependentCalls(steps)
+        val renderCapability = root.get("renderCapability")?.let { value ->
+            WidgetRenderCapability.entries.single { it.wireName == value.asString }
+        }
+        require(!requireRenderCapability || renderCapability != null)
+        require(renderCapability != WidgetRenderCapability.CollectionCard || calls.isNotEmpty())
+        if (requireRenderCapability && renderCapability == WidgetRenderCapability.CollectionCard) {
+            require(canUseCollectionCard(steps))
+        }
         WidgetAlgorithmParseResult.Valid(
-            WidgetAlgorithmArtifact(steps, root.requiredString("presentationObjective").boundedText()),
+            WidgetAlgorithmArtifact(steps, root.requiredString("presentationObjective").boundedText(), renderCapability),
         )
     } catch (_: RuntimeException) {
         WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm)
@@ -258,16 +287,23 @@ internal object WidgetAlgorithmParser {
     private fun parseStep(
         step: JsonObject,
         selectedTools: Set<WidgetToolCapability>,
+        selectedRuntimeValues: Set<WidgetRuntimeValue>,
+        isFirstStep: Boolean,
     ): WidgetAlgorithmStep {
         require(
             step.keySet().all {
-                it in setOf("id", "kind", "objective", "dependsOn", "toolId", "contractVersion", "runtimeInputs")
+                it in setOf("id", "kind", "objective", "dependsOn", "toolId", "contractVersion", "runtimeInputs", "selectionMode")
             },
         )
         val id = step.requiredString("id")
         require(ALGORITHM_STEP_ID_PATTERN.matches(id))
         val kind = WidgetAlgorithmStepKind.entries.single { it.wireName == step.requiredString("kind") }
-        val dependencies = step.requiredArray("dependsOn").map { it.asString }
+        val dependencies = if (step.has("dependsOn")) {
+            step.requiredArray("dependsOn").map { it.asString }
+        } else {
+            require(isFirstStep) { "Only the first step may omit an empty dependency list" }
+            emptyList()
+        }
         require(dependencies.toSet().size == dependencies.size)
         val tool = if (kind == WidgetAlgorithmStepKind.ToolCall) {
             val toolId = requireNotNull(step.strictNullableString("toolId", 64))
@@ -275,12 +311,18 @@ internal object WidgetAlgorithmParser {
         } else {
             null
         }
+        val selectionMode = step.get("selectionMode")?.let { value ->
+            WidgetToolSelectionMode.entries.single { it.wireName == value.asString }
+        }
+        require(selectionMode == null || (tool?.id == "wikipedia_pages" && tool.version == 2))
+        require(selectionMode != WidgetToolSelectionMode.SeededRandom || WidgetRuntimeValue.Seed in selectedRuntimeValues)
         return WidgetAlgorithmStep(
             id = id,
             kind = kind,
             objective = step.requiredString("objective").boundedText(),
             dependencies = dependencies,
             tool = tool,
+            selectionMode = selectionMode,
         )
     }
 
@@ -302,6 +344,21 @@ internal object WidgetAlgorithmParser {
         steps.filter { it.kind == WidgetAlgorithmStepKind.ToolCall }.forEach { step ->
             require(!dependsOnTool(step, mutableSetOf()))
         }
+    }
+
+    /** A collection card cannot evaluate multiple outcomes or transform a fetched result. */
+    private fun canUseCollectionCard(steps: List<WidgetAlgorithmStep>): Boolean {
+        if (steps.count { it.kind == WidgetAlgorithmStepKind.ToolCall } != 1) return false
+        val callIndex = steps.indexOfFirst { it.kind == WidgetAlgorithmStepKind.ToolCall }
+        if (steps.drop(callIndex + 1).any { it.kind == WidgetAlgorithmStepKind.Transform }) return false
+        val resultDependentIds = mutableSetOf<String>()
+        steps.forEach { step ->
+            if (step.kind == WidgetAlgorithmStepKind.ToolCall || step.dependencies.any(resultDependentIds::contains)) {
+                resultDependentIds += step.id
+                if (step.kind != WidgetAlgorithmStepKind.ToolCall) return false
+            }
+        }
+        return true
     }
 }
 
@@ -401,12 +458,14 @@ internal enum class WidgetAuthoringStageFailureCode(val diagnosticWireName: Stri
     InvalidSource("invalid_source"),
     InvalidRenderExecution("invalid_render_execution"),
     InvalidToolArguments("invalid_tool_arguments"),
+    InvalidToolSelection("invalid_tool_selection"),
     InvalidPlan("invalid_plan"),
     InvalidPresentation("invalid_presentation"),
     InvalidPresentationNodeType("invalid_presentation_node_type"),
     InvalidPresentationFields("invalid_presentation_fields"),
     InvalidPresentationTone("invalid_presentation_tone"),
     InvalidPresentationProvenance("invalid_presentation_provenance"),
+    InvalidPresentationSuccessHandling("invalid_presentation_success_handling"),
     InvalidPresentationEmptyHandling("invalid_presentation_empty_handling"),
     InvalidPresentationFailureHandling("invalid_presentation_failure_handling"),
     CapabilityExpansion("capability_expansion"),
@@ -472,9 +531,11 @@ internal data class WidgetAuthoringAttemptBudget(
 internal object WidgetAuthoringStageSchemas {
     val feasibility: String = """{"name":"$SUBMIT_WIDGET_FEASIBILITY_TOOL","description":"Submit one small feasibility decision. For achievable, message is a concise display title of at most 80 characters, not a copy of the instruction. The application derives protocol metadata, tool versions, runtime grants, presentation grants, enablement, and terminal normalization.","parameters":{"type":"object","additionalProperties":false,"properties":{"outcome":{"type":"string","enum":["achievable","unachievable","needs_clarification"]},"message":{"type":"string","minLength":1,"maxLength":512},"periodicIntervalHours":{"type":["integer","null"],"enum":[null,1,6,12,24]},"toolIds":{"type":"array","maxItems":4,"uniqueItems":true,"items":{"type":"string"}}},"required":["outcome","message","periodicIntervalHours","toolIds"]}}"""
 
-    val algorithm: String = """{"name":"$SUBMIT_WIDGET_ALGORITHM_TOOL","description":"Submit one bounded typed algorithm. Protocol metadata, runtime authority, and tool versions are application-derived. This captures data only.","parameters":{"type":"object","additionalProperties":false,"properties":{"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"kind":{"type":"string","enum":["runtime_input","transform","tool_call"]},"objective":{"type":"string","minLength":1,"maxLength":512},"dependsOn":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"toolId":{"type":["string","null"],"description":"Required only when kind is tool_call; otherwise omit."}},"required":["id","kind","objective","dependsOn"]}},"presentationObjective":{"type":"string","minLength":1,"maxLength":512}},"required":["steps","presentationObjective"]}}"""
+    val algorithm: String = """{"name":"$SUBMIT_WIDGET_ALGORITHM_TOOL","description":"Submit one bounded typed algorithm. Protocol metadata, runtime authority, and tool versions are application-derived. This captures data only.","parameters":{"type":"object","additionalProperties":false,"properties":{"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"kind":{"type":"string","enum":["runtime_input","transform","tool_call"]},"objective":{"type":"string","minLength":1,"maxLength":512},"dependsOn":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"selectionMode":{"type":"string","enum":["first","seeded_random"],"description":"Required for wikipedia_pages version 2 tool calls; omit for other steps."},"toolId":{"type":["string","null"],"description":"Required only when kind is tool_call; otherwise omit."}},"required":["id","kind","objective","dependsOn"]}},"presentationObjective":{"type":"string","minLength":1,"maxLength":512},"renderCapability":{"type":"string","enum":["collection_card","custom_source"]}},"required":["steps","presentationObjective","renderCapability"]}}"""
 
     fun sourceFragment(toolName: String): String = """{"name":"$toolName","description":"Submit one bounded JavaScript function source. Artifact identity and signature are fixed by the application. This captures source only and executes nothing.","parameters":{"type":"object","additionalProperties":false,"properties":{"source":{"type":"string","minLength":1,"maxLength":6144}},"required":["source"]}}"""
+
+    val collectionCard: String = """{"name":"$SUBMIT_WIDGET_COLLECTION_CARD_TOOL","description":"Submit one declarative collection card. Copy alias, array path and item property names from the supplied choices; only fallback is literal display text. Do not write JavaScript.","parameters":{"type":"object","additionalProperties":false,"properties":{"alias":{"type":"string","description":"Exact tool-result alias, not tool id"},"items":{"type":"string","description":"Exact array path relative to payload"},"title":{"type":"string","description":"Exact text property name on an array item, not display text"},"body":{"type":"string","description":"Optional text property name on an array item, not display text"},"url":{"type":"string","description":"Optional HTTPS URL property name on an array item"},"fallback":{"type":"string","minLength":1,"maxLength":256,"description":"Literal text for failure or empty array"},"selection":{"type":"string","enum":["first","seeded_random"]}},"required":["alias","items","title","fallback","selection"]}}"""
 }
 
 internal fun WidgetFeasibilityArtifact.toUntrustedProposal(source: String): UntrustedWidgetProposal = UntrustedWidgetProposal(

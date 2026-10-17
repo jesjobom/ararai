@@ -133,7 +133,20 @@ internal object WidgetAuthoringContextBuilder {
     ): WidgetAuthoringPrompt {
         require((currentDefinition == null) == (currentRevision == null))
         if (currentDefinition != null) require(currentDefinition.id == currentRevision?.widgetId)
-        val widgetToolContracts = toolContracts.filter { ApplicationToolConsumer.Widget in it.consumers }
+        // New drafts see only the latest version of each tool. A legacy version remains
+        // discoverable while editing a widget that actually uses it, and stays executable.
+        val currentTools = currentRevision?.let { revision ->
+            (WidgetProgramParser.parse(revision.manifestJson, revision.source) as? WidgetProgramValidationResult.Valid)
+                ?.program?.manifest?.capabilities?.tools.orEmpty()
+        }.orEmpty()
+        val widgetToolContracts = toolContracts
+            .filter { ApplicationToolConsumer.Widget in it.consumers }
+            .groupBy(ApplicationToolContract::id)
+            .values
+            .flatMap { versions ->
+                val latest = versions.maxBy(ApplicationToolContract::version)
+                versions.filter { it == latest || WidgetToolCapability(it.id, it.version) in currentTools }
+            }
         val root = JsonObject().apply {
             addProperty("widgetApiVersion", WidgetRuntimePolicy.WIDGET_API_VERSION)
             add("authoringTask", authoringTaskContext(isEdit = currentDefinition != null))
@@ -225,10 +238,11 @@ internal object WidgetAuthoringContextBuilder {
             "wikipediaExample",
             "For a historical event on a calendar date, the call function reads " +
                 "runtime.currentLocalDateTime() and passes its month/day plus runtime.language directly to " +
-                "wikipedia_on_this_day@1. Render checks outcomes.events.status, selects " +
-                "payload.events[runtime.seededIndex(payload.events.length)], and returns a card containing " +
-                "the event year and text plus an https_link whose sourceField is 'events.' + selectedIndex + " +
-                "'.canonicalUrl'. Use wikipedia_pages@1 instead for direct stable encyclopedic page lookup.",
+                "wikipedia_on_this_day@1. Render checks runtime.isSuccess(outcomes, alias), reads " +
+                "runtime.getArray(outcomes, alias, 'events'), selects an item with runtime.seededIndex, " +
+                "and uses runtime.linkFor for 'events.' + index + '.canonicalUrl'. " +
+                "Use wikipedia_pages@2 for a topic-based encyclopedic page introduction; " +
+                "it selects first or seeded_random from up to ten search candidates and returns one page.",
         )
     }
 
@@ -251,6 +265,7 @@ internal object WidgetAuthoringContextBuilder {
                         addProperty("id", contract.id)
                         addProperty("version", contract.version)
                         addProperty("displayName", contract.displayName)
+                        contract.authoringSummary?.let { addProperty("authoringSummary", it) }
                         addProperty("networkRequired", contract.category == ApplicationToolCategory.ExternalKnowledge)
                         add("inputSchema", JsonParser.parseString(contract.inputSchemaJson))
                         add("outputSchema", JsonParser.parseString(contract.outputSchemaJson))
@@ -424,9 +439,10 @@ private const val WIKIPEDIA_REFERENCE_SOURCE = """function plan(context) {
   return [{alias:'events',toolId:'wikipedia_on_this_day',contractVersion:1,arguments:{month:context.localMonth,day:context.localDay,language:context.language}}];
 }
 function render(context, outcomes, state) {
-  const result = outcomes.events;
-  if (!result || result.status !== 'success' || !result.payload.events.length) return {type:'text',text:'No event available',tone:'warning'};
-  const index = Math.abs(Number(context.seed)) % result.payload.events.length;
-  const event = result.payload.events[index];
-  return {type:'card',child:{type:'column',children:[{type:'row',children:[{type:'icon',name:'calendar'},{type:'value',text:String(event.year),tone:'neutral'}]},{type:'text',text:event.text,tone:'neutral'},{type:'https_link',label:'Read related article',url:event.canonicalUrl,sourceAlias:'events',sourceField:'events.' + index + '.canonicalUrl'}]}};
+  if (!context.isSuccess(outcomes, 'events')) return {type:'text',text:'No event available',tone:'warning'};
+  const events = context.getArray(outcomes, 'events', 'events');
+  if (!events.length) return {type:'text',text:'No event available',tone:'warning'};
+  const index = context.seededIndex(events.length);
+  const event = events[index];
+  return {type:'card',child:{type:'column',children:[{type:'row',children:[{type:'icon',name:'calendar'},{type:'value',text:String(event.year),tone:'neutral'}]},{type:'text',text:event.text,tone:'neutral'},context.linkFor(outcomes,'events','events.' + index + '.canonicalUrl','Read related article')]}};
 }"""

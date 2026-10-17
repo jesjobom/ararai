@@ -2,6 +2,9 @@
 
 package com.jesjobom.ararai.widget.managed
 
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+
 internal enum class WidgetAuthoringStageDisplayStatus {
     Pending,
     Queued,
@@ -33,7 +36,15 @@ internal data class WidgetAuthoringStageProjection(
     val status: WidgetAuthoringStageDisplayStatus,
     val acceptedCheckpoint: WidgetAuthoringCheckpoint?,
     val attempts: List<WidgetAuthoringAttemptDetails>,
+    val warnings: List<WidgetAuthoringWarning> = emptyList(),
 )
+
+internal enum class WidgetAuthoringWarning {
+    RandomSelectionMayUseFirst,
+    FirstSelectionMayUseRandom,
+    LastSelectionUnavailable,
+    TimeConditionNotEvident,
+}
 
 internal data class WidgetAuthoringWorkflowProjection(
     val sessionId: String,
@@ -75,6 +86,18 @@ internal object WidgetAuthoringWorkflowProjector {
                     status = displayStatus(snapshot, stage, checkpoint, attempts.lastOrNull()),
                     acceptedCheckpoint = checkpoint,
                     attempts = attempts.map { it.toDetails() },
+                    warnings = WidgetAuthoringWarningDetector.detect(
+                        snapshot.session.instruction,
+                        stage,
+                        if (
+                            stage == snapshot.session.currentStage &&
+                            snapshot.session.status == WidgetAuthoringSessionStatus.AwaitingReview
+                        ) {
+                            attempts.lastOrNull { it.status == WidgetAuthoringAttemptStatus.Succeeded }?.artifact
+                        } else {
+                            checkpoint?.takeIf { it.status == WidgetAuthoringCheckpointStatus.Accepted }?.artifact
+                        },
+                    ),
                 )
             },
             allowedActions = WidgetAuthoringWorkflowStateMachine.allowedActions(snapshot),
@@ -130,4 +153,75 @@ internal object WidgetAuthoringWorkflowProjector {
         failureCode = failureCode,
         capturedArtifact = artifact,
     )
+}
+
+/** Advisory only: uncertain prompt heuristics must never change stage validity or allowed actions. */
+internal object WidgetAuthoringWarningDetector {
+    private enum class RequestedSelection { Random, First, Last }
+
+    private val selectionWords = mapOf(
+        RequestedSelection.Random to Regex(
+            "\\b(?:aleat[oó]ri[oa]s?|rand[oô]mic[oa]s?|random)\\b",
+            RegexOption.IGNORE_CASE,
+        ),
+        RequestedSelection.First to Regex("\\b(?:primeir[oa]s?|first)\\b", RegexOption.IGNORE_CASE),
+        RequestedSelection.Last to Regex("\\b(?:[uú]ltim[oa]s?|last)\\b", RegexOption.IGNORE_CASE),
+    )
+    private val dayWords = Regex("\\bdia\\b|\\bday\\b", RegexOption.IGNORE_CASE)
+    private val nightWords = Regex("\\bnoite\\b|\\bnight\\b", RegexOption.IGNORE_CASE)
+
+    fun detect(instruction: String, stage: WidgetAuthoringStageKey, artifact: String?): List<WidgetAuthoringWarning> {
+        if (artifact == null) return emptyList()
+        return try {
+            val root = JsonParser.parseString(artifact).asJsonObject
+            when (stage) {
+                WidgetAuthoringStageKey.Algorithm -> detectAlgorithm(instruction, root)
+                is WidgetAuthoringStageKey.CallFunction -> detectCall(instruction, root)
+                else -> emptyList()
+            }
+        } catch (_: RuntimeException) {
+            emptyList()
+        }
+    }
+
+    private fun detectAlgorithm(instruction: String, root: JsonObject): List<WidgetAuthoringWarning> {
+        val steps = root.getAsJsonArray("steps")
+        val modes = steps?.mapNotNull { step ->
+            val value = step.asJsonObject
+            if (value.get("toolId")?.takeUnless { it.isJsonNull }?.asString != "wikipedia_pages") {
+                null
+            } else {
+                value.get("selectionMode")?.takeUnless { it.isJsonNull }?.asString
+            }
+        }.orEmpty()
+        val requested = selectionWords.filterValues { it.containsMatchIn(instruction) }.keys.singleOrNull()
+        return when (requested) {
+            RequestedSelection.Random -> if ("first" in modes) {
+                listOf(WidgetAuthoringWarning.RandomSelectionMayUseFirst)
+            } else {
+                emptyList()
+            }
+            RequestedSelection.First -> if ("seeded_random" in modes) {
+                listOf(WidgetAuthoringWarning.FirstSelectionMayUseRandom)
+            } else {
+                emptyList()
+            }
+            RequestedSelection.Last -> if (modes.isNotEmpty()) {
+                listOf(WidgetAuthoringWarning.LastSelectionUnavailable)
+            } else {
+                emptyList()
+            }
+            null -> emptyList()
+        }
+    }
+
+    private fun detectCall(instruction: String, root: JsonObject): List<WidgetAuthoringWarning> {
+        val source = root.get("source")?.takeUnless { it.isJsonNull }?.asString
+        val mentionsTimeCondition = dayWords.containsMatchIn(instruction) && nightWords.containsMatchIn(instruction)
+        return if (mentionsTimeCondition && source != null && !source.contains("currentLocalDateTime")) {
+            listOf(WidgetAuthoringWarning.TimeConditionNotEvident)
+        } else {
+            emptyList()
+        }
+    }
 }

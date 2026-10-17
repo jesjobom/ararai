@@ -187,6 +187,7 @@ internal class ManagedWidgetsController(
                 source = parsed.program.source,
                 programDigest = revision.programDigest,
                 consentDigest = consentDigest(revision.programDigest, summary),
+                initialPrompt = revision.initialPrompt,
             ),
         )
     }
@@ -257,11 +258,8 @@ internal class ManagedWidgetsController(
             toolContracts = services.toolRegistry.descriptors(),
         )
         val trace = WidgetProbeTrace()
-        // The probe characterizes the selected candidate exactly like the
-        // diagnostic harness: the static catalog does not grant the staged
-        // authoring protocol yet, so load with it enabled here. Otherwise the
-        // engine's tool gate rejects every authoring round instantly
-        // (tools_unsupported) and the probe measures nothing.
+        // This non-persistent probe intentionally characterizes the selected
+        // candidate independently of production authoring eligibility.
         val characterizedModel = model.forAuthoringCharacterization()
         val pipeline = ManagedWidgetAuthoringPipeline(
             modelController = WidgetAuthoringPipelineModelController(

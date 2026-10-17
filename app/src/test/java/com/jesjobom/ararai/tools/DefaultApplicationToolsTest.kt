@@ -51,6 +51,17 @@ class DefaultApplicationToolsTest {
             )
         }
         assertEquals(emptySet<String>(), registry.availableToolIds(ApplicationToolConsumer.Widget))
+        val descriptors = registry.descriptors().associateBy(ApplicationToolContract::id)
+        val pagesSummary = descriptors.getValue(WIKIPEDIA_PAGES_TOOL_NAME).authoringSummary
+        val daySummary = descriptors.getValue(WIKIPEDIA_ON_THIS_DAY_TOOL_NAME).authoringSummary
+        assertEquals(
+            true,
+            pagesSummary?.contains("not verified historical events"),
+        )
+        assertEquals(
+            true,
+            daySummary?.contains("No topic query"),
+        )
     }
 
     @Test

@@ -114,6 +114,16 @@ class ManagedWidgetRepositoryTest {
     }
 
     @Test
+    fun `confirmed revision retains original request without changing the program digest`() {
+        val repository = repository()
+        val created = repository.createConfirmed(fixture().copy(initialPrompt = "Find a Wikipedia page about Brazil"))
+
+        val revision = repository.activeRevision(created.id)
+        assertEquals("Find a Wikipedia page about Brazil", revision?.initialPrompt)
+        assertEquals(DIGEST_A, revision?.programDigest)
+    }
+
+    @Test
     fun `confirmed edit appends a revision and atomically replaces active consent`() {
         val repository = repository()
         val created = repository.createConfirmed(fixture())
@@ -169,6 +179,7 @@ class ManagedWidgetRepositoryTest {
         assertEquals(MANAGED_WIDGET_DATABASE_VERSION, repository.writableDatabase.version)
         assertEquals("legacy-widget", repository.listDefinitions().single().id)
         assertEquals(SOURCE, repository.listRevisions("legacy-widget").single().source)
+        assertEquals(null, repository.listRevisions("legacy-widget").single().initialPrompt)
         assertEquals("{\"type\":\"text\"}", repository.cachedPresentation("legacy-widget")?.presentationJson)
         assertEquals("legacy-run", repository.listRuns("legacy-widget").single().id)
         val observation = repository.listObservations("legacy-widget").single().value as WidgetObservationValue.Text

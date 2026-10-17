@@ -3,6 +3,7 @@
 package com.jesjobom.ararai.widget.managed
 
 import com.google.gson.JsonArray
+import com.google.gson.JsonElement
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -30,6 +31,31 @@ internal sealed interface WidgetAuthoringPipelineResult {
         val code: WidgetAuthoringStageFailureCode,
     ) : WidgetAuthoringPipelineResult
     data object TimedOut : WidgetAuthoringPipelineResult
+}
+
+internal const val WIDGET_FEASIBILITY_OBJECTIVE =
+    "Decide whether available tools can supply the requested data and the bounded runtime can perform the " +
+        "required logic. Do not reject filtering or conditional display merely because collection_card is limited; " +
+        "custom_source is available. Preserve every essential constraint. If required data is unavailable, " +
+        "return unachievable or needs_clarification rather than substitute a different request."
+
+internal const val WIDGET_ALGORITHM_OBJECTIVE =
+    "Preserve every essential user constraint in the ordered steps. " +
+        "Represent post-result operations as transform steps depending on the tool call. " +
+        "Choose collection_card only for one unmodified item from one tool result; " +
+        "choose custom_source for filtering, comparison, conditional selection after results, " +
+        "multiple results, or other layouts. A runtime-conditioned query before the call can still use collection_card. " +
+        "Tool calls may not depend on live tool results."
+
+internal fun algorithmCaptureSchema(feasibility: WidgetFeasibilityArtifact): String {
+    if (feasibility.tools.any { it.capability.id == "wikipedia_pages" && it.capability.version == 2 }) {
+        return WidgetAuthoringStageSchemas.algorithm
+    }
+    return JsonParser.parseString(WidgetAuthoringStageSchemas.algorithm).asJsonObject.apply {
+        getAsJsonObject("parameters").getAsJsonObject("properties")
+            .getAsJsonObject("steps").getAsJsonObject("items")
+            .getAsJsonObject("properties").remove("selectionMode")
+    }.toString()
 }
 
 internal class ManagedWidgetAuthoringPipeline(
@@ -97,7 +123,7 @@ internal class ManagedWidgetAuthoringPipeline(
             stageProgress = WidgetAuthoringProgress.AnalyzingFeasibility,
             toolName = SUBMIT_WIDGET_FEASIBILITY_TOOL,
             schema = WidgetAuthoringStageSchemas.feasibility,
-            objective = "Decide feasibility and select the minimum fixed capability envelope for the user's widget.",
+            objective = WIDGET_FEASIBILITY_OBJECTIVE,
             baseContext = baseContext(prompt),
             budget = budget,
             generationRecovery = generationRecovery,
@@ -127,8 +153,8 @@ internal class ManagedWidgetAuthoringPipeline(
             stage = WidgetAuthoringStage.Algorithm,
             stageProgress = WidgetAuthoringProgress.DesigningAlgorithm,
             toolName = SUBMIT_WIDGET_ALGORITHM_TOOL,
-            schema = WidgetAuthoringStageSchemas.algorithm,
-            objective = "Design an ordered typed algorithm inside the frozen capability envelope. Tool calls may not depend on live tool results.",
+            schema = algorithmCaptureSchema(feasibility),
+            objective = WIDGET_ALGORITHM_OBJECTIVE,
             baseContext = algorithmContext(prompt, feasibility),
             budget = budget,
             generationRecovery = generationRecovery,
@@ -157,7 +183,14 @@ internal class ManagedWidgetAuthoringPipeline(
                 generationRecovery = generationRecovery,
                 onProgress = onProgress,
             ) { raw ->
-                when (val validated = stageValidators.callFunction(raw, step, feasibility, runtimeContext)) {
+                when (
+                    val validated = stageValidators.callFunction(
+                        raw,
+                        step,
+                        feasibility,
+                        runtimeContext,
+                    )
+                ) {
                     is WidgetAuthoringArtifactValidation.Valid -> StageValidation.Valid(validated.artifact)
                     is WidgetAuthoringArtifactValidation.Invalid -> StageValidation.Invalid(validated.code)
                 }
@@ -186,14 +219,15 @@ internal class ManagedWidgetAuthoringPipeline(
         activeArtifacts += planFunction
 
         onProgress(WidgetAuthoringProgress.GeneratingPresentation)
+        val renderRequest = renderRoundRequest(prompt, feasibility, algorithm, callFunctions)
         val renderFunction = captureValidated(
             model = model,
             stage = WidgetAuthoringStage.RenderFunction,
             stageProgress = WidgetAuthoringProgress.GeneratingPresentation,
-            toolName = SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
-            schema = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_RENDER_FUNCTION_TOOL),
-            objective = renderFunctionObjective(callFunctions),
-            baseContext = renderContext(prompt, feasibility, algorithm),
+            toolName = renderRequest.toolName,
+            schema = renderRequest.toolDescriptionJson,
+            objective = renderRequest.objective,
+            baseContext = renderRequest.contextJson,
             budget = budget,
             generationRecovery = generationRecovery,
             onProgress = onProgress,
@@ -401,6 +435,12 @@ private fun compactFeasibilityContext(prompt: WidgetAuthoringPrompt): String {
             "supportedRuntimeValues",
             "supportedPresentation",
         ).forEach { name -> api.get(name)?.let { add(name, it.deepCopy()) } }
+        addProperty(
+            "renderModes",
+            "collection_card directly shows one first or seeded-random item from one result array. " +
+                "custom_source supports bounded filtering, comparisons, and conditional display over returned data only. " +
+                "If no tool supplies required data, report unachievable rather than substitute data.",
+        )
         api.getAsJsonObject("programApi")
             ?.get("randomSelection")
             ?.let { add("randomSelection", it.deepCopy()) }
@@ -411,7 +451,7 @@ private fun compactFeasibilityContext(prompt: WidgetAuthoringPrompt): String {
                     val tool = element.asJsonObject
                     add(
                         JsonObject().apply {
-                            listOf("id", "version", "displayName", "networkRequired").forEach { name ->
+                            listOf("id", "version", "displayName", "authoringSummary", "networkRequired").forEach { name ->
                                 tool.get(name)?.let { add(name, it.deepCopy()) }
                             }
                             add("inputFields", tool.schemaFieldNames("inputSchema"))
@@ -421,7 +461,6 @@ private fun compactFeasibilityContext(prompt: WidgetAuthoringPrompt): String {
                 }
             },
         )
-        api.get("wikipediaBehaviorGuidance")?.let { add("wikipediaBehaviorGuidance", it.deepCopy()) }
         api.get("currentWidget")?.let { current ->
             add(
                 "currentWidget",
@@ -456,7 +495,48 @@ internal fun algorithmContext(
     JsonObject().apply {
         addProperty("userInstruction", prompt.userInstruction)
         add("feasibility", feasibility.toJson())
-        add("widgetApi", JsonParser.parseString(prompt.apiContextJson))
+        if (feasibility.tools.none { it.capability.id == "wikipedia_pages" && it.capability.version == 2 }) {
+            addProperty(
+                "selectionPolicy",
+                "Do not set selectionMode on a tool call. For a random item from a returned array, " +
+                    "select it after the tool result in custom_source; this does not change the tool arguments.",
+            )
+        }
+        val widgetApi = JsonParser.parseString(prompt.apiContextJson).asJsonObject.deepCopy()
+        widgetApi.remove("programApi")
+        widgetApi.remove("wikipediaBehaviorGuidance")
+        val selectedTools = feasibility.tools.map { it.capability }.toSet()
+        val tools = JsonArray()
+        widgetApi.getAsJsonArray("tools")?.forEach { item ->
+            val descriptor = item.asJsonObject
+            val capability = WidgetToolCapability(
+                descriptor.get("id").asString,
+                descriptor.get("version").asInt,
+            )
+            if (capability !in selectedTools) return@forEach
+            val schema = descriptor.remove("outputSchema")?.asJsonObject
+            if (schema != null) descriptor.add("resultFields", conciseResultFields(schema))
+            tools.add(descriptor)
+        }
+        widgetApi.add("tools", tools)
+        add("widgetApi", widgetApi)
+        add(
+            "renderCapabilities",
+            JsonArray().apply {
+                add(
+                    JsonObject().apply {
+                        addProperty("id", WidgetRenderCapability.CollectionCard.wireName)
+                        addProperty("summary", "One unmodified item from one tool-result array, selected first or seeded-random; fixed title, body, link and fallback. No post-result filtering or conditional selection.")
+                    },
+                )
+                add(
+                    JsonObject().apply {
+                        addProperty("id", WidgetRenderCapability.CustomSource.wireName)
+                        addProperty("summary", "Bounded deterministic JavaScript render function for filtering, comparisons, conditional selection, multiple results, or other layouts over returned data only.")
+                    },
+                )
+            },
+        )
     },
 )
 
@@ -471,6 +551,14 @@ internal fun callContext(
         add("runtimeApi", runtimeApi(feasibility.runtimeValues))
         add("algorithm", algorithm.toJson())
         add("currentStep", step.toJson())
+        if (step.selectionMode != null) {
+            addProperty(
+                "selectionContract",
+                "The algorithm froze selectionMode=${step.selectionMode.wireName}. Return that exact selection " +
+                    "in the wikipedia_pages tool call; seeded_random requires seed=runtime.seed, first omits seed. " +
+                    "The tool returns only one page, so card selection cannot change which page was fetched.",
+            )
+        }
         val tool = requireNotNull(step.tool)
         val contract = JsonParser.parseString(prompt.apiContextJson).asJsonObject
             .getAsJsonArray("tools")
@@ -478,7 +566,13 @@ internal fun callContext(
                 item.asJsonObject.get("id").asString == tool.id &&
                     item.asJsonObject.get("version").asInt == tool.version
             }
-        add("toolContract", contract.deepCopy())
+        add("toolContract", contract.asJsonObject.deepCopy().apply { remove("outputSchema") })
+        addProperty(
+            "callFunctionReturn",
+            "Return only the properties of toolContract.inputSchema as the function result. " +
+                "Do not return alias, toolId, contractVersion, args, or an arguments wrapper; " +
+                "the application builds the complete tool call.",
+        )
     },
 )
 
@@ -523,46 +617,121 @@ internal fun renderContext(
             "presentationCapabilities",
             JsonArray().apply { feasibility.presentation.map { it.wireName }.sorted().forEach(::add) },
         )
-        add("presentationContract", renderPresentationContract())
-        val allTools = JsonParser.parseString(prompt.apiContextJson).asJsonObject.getAsJsonArray("tools")
-        add(
-            "toolResults",
-            JsonArray().apply {
-                algorithm.toolCallSteps.forEach { step ->
-                    val tool = requireNotNull(step.tool)
-                    val descriptor = allTools.single { item ->
-                        item.asJsonObject.get("id").asString == tool.id &&
-                            item.asJsonObject.get("version").asInt == tool.version
-                    }.asJsonObject
-                    add(
-                        JsonObject().apply {
-                            addProperty("alias", step.id)
-                            addProperty("toolId", tool.id)
-                            addProperty("version", tool.version)
-                            add("outputSchema", descriptor.get("outputSchema").deepCopy())
-                        },
-                    )
-                }
-            },
+        add("toolResults", renderToolResults(prompt, algorithm))
+    },
+)
+
+internal fun renderRoundRequest(
+    prompt: WidgetAuthoringPrompt,
+    feasibility: WidgetFeasibilityArtifact,
+    algorithm: WidgetAlgorithmArtifact,
+    callFunctions: List<WidgetSourceFragmentArtifact>,
+): WidgetAuthoringRoundRequest = if (algorithm.renderCapability == WidgetRenderCapability.CollectionCard) {
+    WidgetAuthoringRoundRequest(
+        WidgetAuthoringStage.RenderFunction,
+        SUBMIT_WIDGET_COLLECTION_CARD_TOOL,
+        collectionCardSchema(prompt, algorithm),
+        collectionCardObjective(),
+        collectionCardContext(prompt, algorithm),
+    )
+} else {
+    WidgetAuthoringRoundRequest(
+        WidgetAuthoringStage.RenderFunction,
+        SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
+        WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_RENDER_FUNCTION_TOOL),
+        renderFunctionObjective(callFunctions),
+        renderContext(prompt, feasibility, algorithm),
+    )
+}
+
+internal fun collectionCardContext(prompt: WidgetAuthoringPrompt, algorithm: WidgetAlgorithmArtifact): String = StrictJson.canonical(
+    JsonObject().apply {
+        addProperty("userInstruction", prompt.userInstruction)
+        add("toolResults", renderToolResults(prompt, algorithm))
+        addProperty(
+            "selection",
+            "first selects index 0; seeded_random selects a deterministic seeded index on each execution. " +
+                "Choose the mode requested by the user.",
+        )
+        addProperty(
+            "fields",
+            "Copy alias, items, title, optional body, and optional url from toolResults alias/path/itemFields. " +
+                "These are property names, never display text or sample values. Only fallback is literal text. " +
+                "For example, itemFields ['text:string', 'canonicalUrl:string'] means title='text' and " +
+                "url='canonicalUrl'. The application handles selection, failure and links.",
         )
     },
 )
 
+internal fun collectionCardSchema(prompt: WidgetAuthoringPrompt, algorithm: WidgetAlgorithmArtifact): String {
+    val results = renderToolResults(prompt, algorithm)
+    val arrays = results.flatMap { result ->
+        result.asJsonObject.getAsJsonArray("resultFields").filter { field ->
+            field.asJsonObject.get("type").asString == "array"
+        }
+    }
+    val itemFields = arrays.flatMap { field ->
+        field.asJsonObject.getAsJsonArray("itemFields")?.map { it.asString } ?: emptyList()
+    }.filter { it.endsWith(":string") }.map { it.substringBeforeLast(':') }.distinct()
+    val schema = JsonParser.parseString(WidgetAuthoringStageSchemas.collectionCard).asJsonObject
+    val properties = schema.getAsJsonObject("parameters").getAsJsonObject("properties")
+    fun restrict(name: String, values: List<String>) {
+        if (values.isNotEmpty()) {
+            properties.getAsJsonObject(name).add("enum", JsonArray().apply { values.forEach(::add) })
+        }
+    }
+    restrict("alias", results.map { it.asJsonObject.get("alias").asString })
+    restrict("items", arrays.map { it.asJsonObject.get("path").asString }.distinct())
+    listOf("title", "body", "url").forEach { restrict(it, itemFields) }
+    return schema.toString()
+}
+
+private fun renderToolResults(prompt: WidgetAuthoringPrompt, algorithm: WidgetAlgorithmArtifact): JsonArray {
+    val allTools = JsonParser.parseString(prompt.apiContextJson).asJsonObject.getAsJsonArray("tools")
+    return JsonArray().apply {
+        algorithm.toolCallSteps.forEach { step ->
+            val tool = requireNotNull(step.tool)
+            val descriptor = allTools.single { item ->
+                item.asJsonObject.get("id").asString == tool.id &&
+                    item.asJsonObject.get("version").asInt == tool.version
+            }.asJsonObject
+            add(
+                JsonObject().apply {
+                    addProperty("alias", step.id)
+                    addProperty("toolId", tool.id)
+                    addProperty("version", tool.version)
+                    add("resultFields", conciseResultFields(descriptor.getAsJsonObject("outputSchema")))
+                },
+            )
+        }
+    }
+}
+
 private fun renderApi(): JsonObject = JsonObject().apply {
     addProperty("entrypoint", "function render(runtime, outcomes, state) -> one presentation node")
-    addProperty("outcomesContainer", "plain JavaScript object; it is not a Map")
     addProperty(
-        "outcomeAccess",
-        "Read a result only with outcomes[alias], where alias is copied exactly from toolResults[].alias; " +
-            "never call outcomes.get().",
+        "outcomes",
+        "outcomes is a plain JavaScript object keyed by toolResults[].alias, not a Map; it has no get() method. " +
+            "outcomes[alias] is {status:'success',payload:<tool result>} or {status:'failure',reason:<code>}. " +
+            "Pass the entire outcomes object and alias string to runtime helpers. " +
+            "Field paths are relative to payload.",
     )
     addProperty(
-        "outcomeShape",
-        "A result is {status:'success',payload:<tool result>} or {status:'failure',reason:<code>}.",
-    )
-    addProperty(
-        "aliasBinding",
-        "Every outcome lookup and https_link.sourceAlias must use the same alias selected from toolResults[].alias.",
+        "customSource",
+        "For first/random selection call runtime.pickArrayItem(outcomes, alias, arrayPath, 'first' or " +
+            "'seeded_random'); it returns {item,path} or null on failure/empty. Never use Math.random. " +
+            "For comparisons check runtime.isSuccess(outcomes,alias), then " +
+            "runtime.getArray(outcomes,alias,arrayPath), and use an indexed loop. " +
+            "Return runtime.card('No results') for failure/empty. For success, call " +
+            "runtime.card([title, body, runtime.linkFor(outcomes, alias, selectedPath+'.'+urlField, title)]). " +
+            "card takes exactly ONE argument: a string or an array of display strings and linkFor nodes. " +
+            "It returns the complete presentation node, not a mutable builder; never call " +
+            "card.addText or card.addLinkFor. outcomes has no getArray method; use " +
+            "runtime.getArray(outcomes, alias, arrayPath). Include both title and body/description when relevant. " +
+            "Formatting a title must not replace a requested body or description. " +
+            "card accepts display strings and linkFor nodes; do not create raw {type:'card'} or " +
+            "{type:'https_link'} objects. linkFor supplies the exact URL and provenance path. " +
+            "Do not call runtime.collectionCard for comparisons. No arrow functions or runtime.textNode.",
     )
     addProperty("state", "state.observations is a bounded array of this widget's typed observations")
     addProperty(
@@ -572,32 +741,50 @@ private fun renderApi(): JsonObject = JsonObject().apply {
     )
 }
 
-private fun renderPresentationContract(): JsonObject = JsonObject().apply {
-    addProperty("root", "{type:'card',child:N}")
-    add(
-        "containerNodes",
-        JsonArray().apply {
-            add("{type:'column',children:[N]}")
-            add("{type:'row',children:[N]}")
-        },
-    )
-    add(
-        "contentNodes",
-        JsonArray().apply {
-            add("{type:'text',text:'...',tone:T}")
-            add("{type:'value',text:'...',tone:T}")
-            add("{type:'icon',name:'info'}")
-            add("{type:'https_link',label:'...',url:U,sourceAlias:A,sourceField:P}")
-        },
-    )
-    add(
-        "tones",
-        JsonArray().apply {
-            listOf("neutral", "muted", "positive", "warning").forEach(::add)
-        },
-    )
-    addProperty("outcomes", "Check status before payload; return a valid fallback for failure and empty arrays")
-    addProperty("provenance", "Copy sourceAlias and sourceField from the exact tool result")
+private fun conciseResultFields(schema: JsonObject): JsonArray = JsonArray().also { fields ->
+    fun collect(properties: JsonObject?, prefix: String, depth: Int) {
+        if (properties == null || depth > 3) return
+        properties.entrySet().forEach { (name, value) ->
+            if (name == "kind" || name == "reason") return@forEach
+            val field = value.takeIf(JsonElement::isJsonObject)?.asJsonObject ?: return@forEach
+            val path = if (prefix.isEmpty()) name else "$prefix.$name"
+            val type = field.get("type")?.takeIf { it.isJsonPrimitive }?.asString ?: "unknown"
+            when (type) {
+                "object" -> collect(field.getAsJsonObject("properties"), path, depth + 1)
+                else -> fields.add(
+                    JsonObject().apply {
+                        addProperty("path", path)
+                        addProperty("type", type)
+                        if (type == "array") {
+                            val itemProperties = field.getAsJsonObject("items")?.getAsJsonObject("properties")
+                            if (itemProperties != null) {
+                                add(
+                                    "itemFields",
+                                    JsonArray().apply {
+                                        itemProperties.entrySet().forEach { (itemName, itemValue) ->
+                                            val itemType = itemValue.takeIf(JsonElement::isJsonObject)
+                                                ?.asJsonObject?.get("type")?.takeIf(JsonElement::isJsonPrimitive)?.asString
+                                                ?: "unknown"
+                                            add("$itemName:$itemType")
+                                        }
+                                    },
+                                )
+                                val meanings = JsonObject().apply {
+                                    itemProperties.entrySet().forEach { (itemName, itemValue) ->
+                                        itemValue.takeIf(JsonElement::isJsonObject)?.asJsonObject
+                                            ?.get("description")?.takeIf(JsonElement::isJsonPrimitive)
+                                            ?.asString?.let { addProperty(itemName, it) }
+                                    }
+                                }
+                                if (meanings.size() > 0) add("itemFieldMeanings", meanings)
+                            }
+                        }
+                    },
+                )
+            }
+        }
+    }
+    collect(schema.getAsJsonObject("properties"), "", 1)
 }
 
 private fun runtimeApi(values: Set<WidgetRuntimeValue>): JsonObject = JsonObject().apply {
@@ -639,6 +826,7 @@ private fun WidgetAlgorithmArtifact.toJson(): JsonObject = JsonObject().apply {
     addProperty("protocolVersion", WIDGET_AUTHORING_PROTOCOL_VERSION)
     add("steps", JsonArray().apply { steps.forEach { add(it.toJson()) } })
     addProperty("presentationObjective", presentationObjective)
+    renderCapability?.let { addProperty("renderCapability", it.wireName) }
 }
 
 private fun WidgetAlgorithmStep.toJson(): JsonObject = JsonObject().apply {
@@ -648,6 +836,7 @@ private fun WidgetAlgorithmStep.toJson(): JsonObject = JsonObject().apply {
     add("dependsOn", JsonArray().apply { dependencies.forEach(::add) })
     add("toolId", tool?.id?.let(::JsonPrimitive) ?: JsonNull.INSTANCE)
     add("contractVersion", tool?.version?.let(::JsonPrimitive) ?: JsonNull.INSTANCE)
+    selectionMode?.let { addProperty("selectionMode", it.wireName) }
 }
 
 private fun WidgetDraftFailureCode.toPipelineFailure(): WidgetAuthoringStageFailureCode = when (this) {

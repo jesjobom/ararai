@@ -1,17 +1,21 @@
 package com.jesjobom.ararai.widget.managed
 
 import android.content.Context
+import android.net.ConnectivityManager
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.jesjobom.ararai.widget.runtime.WidgetProgramParser
 import com.jesjobom.ararai.widget.runtime.WidgetProgramValidationResult
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
 
 internal interface ManagedWidgetScheduler {
@@ -54,22 +58,42 @@ internal class WorkManagerManagedWidgetScheduler(
             return
         }
         val requiresNetwork = program.program.manifest.capabilities.tools.any { it.id in networkToolIds }
+        val workName = managedWidgetWorkName(definition.id)
+        val scheduleTag = scheduleTag(revision, interval, requiresNetwork)
+        val activeWork = workManager.getWorkInfosForUniqueWork(workName).get().filter { work ->
+            work.state in setOf(WorkInfo.State.ENQUEUED, WorkInfo.State.RUNNING, WorkInfo.State.BLOCKED)
+        }
+        // UPDATE advances the generation and can stop a worker that cold-started this process.
+        if (activeWork.size == 1 && scheduleTag in activeWork.single().tags) return
         val request = PeriodicWorkRequestBuilder<ManagedWidgetWorker>(interval, TimeUnit.HOURS)
-            .setInputData(Data.Builder().putString(ManagedWidgetWorker.KEY_WIDGET_ID, definition.id).build())
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(if (requiresNetwork) NetworkType.CONNECTED else NetworkType.NOT_REQUIRED)
+            .setInputData(
+                Data.Builder()
+                    .putString(ManagedWidgetWorker.KEY_WIDGET_ID, definition.id)
+                    .putBoolean(ManagedWidgetWorker.KEY_REQUIRES_NETWORK, requiresNetwork)
                     .build(),
             )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
+            // Samsung may block a cached UID's network while CONNECTED prevents its job from starting.
+            // Let the worker start, then wait for this UID's network access before calling any tool.
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.NOT_REQUIRED).build())
             .addTag(MANAGED_WIDGET_PERIODIC_WORK_TAG)
             .addTag(managedWidgetWorkTag(definition.id))
+            .addTag(scheduleTag)
             .build()
         workManager.enqueueUniquePeriodicWork(
-            managedWidgetWorkName(definition.id),
+            workName,
             ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
     }
+
+    private fun scheduleTag(revision: WidgetProgramRevision, interval: Long, requiresNetwork: Boolean): String = listOf(
+        "managed-widget-schedule-v2",
+        revision.revision,
+        interval,
+        requiresNetwork,
+        revision.programDigest,
+    ).joinToString(":")
 
     override fun cancel(widgetId: String) {
         requireValidWidgetId(widgetId)
@@ -89,8 +113,10 @@ internal class WorkManagerManagedWidgetScheduler(
 }
 
 interface ManagedWidgetExecutionProvider {
-    suspend fun executeManagedWidget(widgetId: String)
+    suspend fun executeManagedWidget(widgetId: String): ManagedWidgetWorkerOutcome
 }
+
+enum class ManagedWidgetWorkerOutcome { Completed, Retry }
 
 internal class ManagedWidgetWorker(
     appContext: Context,
@@ -102,8 +128,13 @@ internal class ManagedWidgetWorker(
             ?: return Result.failure()
         val provider = applicationContext as? ManagedWidgetExecutionProvider ?: return Result.failure()
         return try {
-            provider.executeManagedWidget(widgetId)
-            Result.success()
+            if (inputData.getBoolean(KEY_REQUIRES_NETWORK, false) && !awaitWidgetNetworkAccess(::networkAvailable)) {
+                return Result.retry()
+            }
+            when (provider.executeManagedWidget(widgetId)) {
+                ManagedWidgetWorkerOutcome.Completed -> Result.success()
+                ManagedWidgetWorkerOutcome.Retry -> Result.retry()
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: RuntimeException) {
@@ -113,7 +144,27 @@ internal class ManagedWidgetWorker(
 
     companion object {
         const val KEY_WIDGET_ID = "widget_id"
+        const val KEY_REQUIRES_NETWORK = "requires_network"
     }
+
+    @Suppress("DEPRECATION")
+    private fun networkAvailable(): Boolean {
+        val connectivity = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        return connectivity?.activeNetworkInfo?.isConnected == true
+    }
+}
+
+/** The UID can remain network-blocked briefly after JobScheduler starts its background process. */
+internal suspend fun awaitWidgetNetworkAccess(
+    isAvailable: () -> Boolean,
+    maxChecks: Int = 20,
+    checkIntervalMillis: Long = 250L,
+): Boolean {
+    repeat(maxChecks) {
+        if (isAvailable()) return true
+        delay(checkIntervalMillis)
+    }
+    return isAvailable()
 }
 
 internal class ManagedWidgetManualRefresh(

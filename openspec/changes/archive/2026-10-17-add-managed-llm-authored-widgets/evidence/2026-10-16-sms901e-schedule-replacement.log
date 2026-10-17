@@ -1,0 +1,26 @@
+SM-S901E physical schedule-replacement probe — 2026-10-16 22:20 EDT
+Installed application: debug 202610151514 (target app was not reinstalled)
+Test delivery: a single opt-in instrumentation class was built and installed as
+the separate test package; the protected full connectedAndroidTest suite was
+not run. The class and test package were removed after this check.
+
+The test copied the validated source and manifest of an existing confirmed
+hourly Wikipedia widget into one temporary widget, without a model generation.
+It enabled one 1-hour periodic job, activated revision 2 with a 6-hour
+interval, then deleted the temporary widget in a finally block.
+
+INSTRUMENTATION_RESULT: OK (1 test)
+ArarAIScheduleProbe: replacement=passed before=0 after=1
+ArarAIScheduleProbe: cleanup=passed originals=11
+
+Assertions: exactly one active unique WorkManager work before and after the
+replacement; the WorkSpec ID was retained; its generation advanced 0 -> 1;
+the schedule tag changed from interval 1 to interval 6; the replacement's
+active revision and interval were 2 and 6 hours. After deletion no active work
+remained for the temporary widget. Post-probe app database comparison found
+the eleven original definitions, revisions, and cached presentations identical
+to the pre-probe snapshot. Eight original periodic WorkSpecs remained active,
+each with a matching SystemJob. No ArarAI.LiteRtLm log event was observed
+during the probe or a checked unattended-success window at 21:11; the
+worker/provider path reaches the coordinator and QuickJS without requesting a
+model load.

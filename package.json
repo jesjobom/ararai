@@ -5,6 +5,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "test:widget-runtime-helpers": "node --test tests/widget-runtime-helpers.test.mjs",
     "test:firestore-rules": "node --test tests/firestore-rules.test.mjs",
     "test:firestore-rules:emulator": "firebase emulators:exec --project ararai-report-test --only firestore \"npm run test:firestore-rules\""
   },

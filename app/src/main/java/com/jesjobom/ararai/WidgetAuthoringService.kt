@@ -16,7 +16,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import com.jesjobom.ararai.model.ModelStartupState
-import com.jesjobom.ararai.model.WIDGET_AUTHORING_PIPELINE_V1
 import com.jesjobom.ararai.widget.managed.AcceptWidgetAuthoringStageResult
 import com.jesjobom.ararai.widget.managed.AndroidWidgetAuthoringDeviceState
 import com.jesjobom.ararai.widget.managed.RunWidgetAuthoringStageResult
@@ -30,7 +29,6 @@ import com.jesjobom.ararai.widget.managed.WidgetAuthoringNotificationAction
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringNotificationProjector
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringProgress
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringSessionSnapshot
-import com.jesjobom.ararai.widget.managed.forAuthoringCharacterization
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -109,6 +107,9 @@ class WidgetAuthoringService : Service() {
     }
 
     private fun handleForegroundRefresh(startId: Int) {
+        // A queued foreground start must be acknowledged before inspecting mutable
+        // workflow state. The attempt may already have completed by delivery time.
+        startInForeground(workflowPresenter.startingNotification())
         val snapshot = workflow.activeSession.value
         val legacyState = controller.state.value
         val notification = when {
@@ -166,17 +167,9 @@ class WidgetAuthoringService : Service() {
             return
         }
         serviceScope.launch {
-            val executionModel = if (
-                available.model.toolCapabilities.supportsAuthoringProtocol(WIDGET_AUTHORING_PIPELINE_V1) ||
-                !BuildConfig.DEBUG
-            ) {
-                available.model
-            } else {
-                available.model.forAuthoringCharacterization()
-            }
             runCatching {
                 workflow.retryCurrent(
-                    model = executionModel,
+                    model = available.model,
                     inference = WidgetAuthoringInferenceCodec.decode(snapshot.session.inferenceConfigJson),
                     modelArtifactDigest = item.config.sha256,
                     actionId = intent.requireActionId(),
@@ -275,6 +268,7 @@ internal class WidgetAuthoringNotificationPresenter(
 ) : WidgetAuthoringJobPresenter {
     private val appContext = context.applicationContext
     private val notificationManager = NotificationManagerCompat.from(appContext)
+    private var foregroundRequested = false
 
     init {
         createNotificationChannel()
@@ -290,6 +284,7 @@ internal class WidgetAuthoringNotificationPresenter(
                     appContext,
                     WidgetAuthoringService.refreshIntent(appContext),
                 )
+                foregroundRequested = true
                 notificationManager.notifyIfAllowed(
                     appContext,
                     WidgetAuthoringService.NOTIFICATION_ID,
@@ -300,7 +295,14 @@ internal class WidgetAuthoringNotificationPresenter(
             is WidgetAuthoringJobState.Failed,
             is WidgetAuthoringJobState.Cancelled,
             -> {
-                appContext.stopService(android.content.Intent(appContext, WidgetAuthoringService::class.java))
+                if (foregroundRequested) {
+                    // Do not stop a pending start before onStartCommand can promote it.
+                    androidx.core.content.ContextCompat.startForegroundService(
+                        appContext,
+                        WidgetAuthoringService.refreshIntent(appContext),
+                    )
+                    foregroundRequested = false
+                }
                 notificationManager.cancel(WidgetAuthoringService.NOTIFICATION_ID)
             }
         }
@@ -436,7 +438,12 @@ internal class ResumableWidgetAuthoringNotificationPresenter(
 
     private fun stopOwnedService() {
         if (!serviceStarted) return
-        appContext.stopService(Intent(appContext, WidgetAuthoringService::class.java))
+        // Let the service acknowledge the pending foreground start, then detach
+        // or remove itself after reading the latest durable session state.
+        androidx.core.content.ContextCompat.startForegroundService(
+            appContext,
+            WidgetAuthoringService.refreshIntent(appContext),
+        )
         serviceStarted = false
     }
 

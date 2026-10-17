@@ -145,6 +145,24 @@ class WidgetExecutionProtocolTest {
     }
 
     @Test
+    fun `accepts an exact five segment result path for a nested collection`() {
+        val url = "https://en.wikipedia.org/wiki/Past_event"
+        val payload = com.google.gson.JsonParser.parseString(
+            """{"data":{"history":{"events":[{"link":"$url"}]}}}""",
+        ).asJsonObject
+
+        val result = WidgetPresentationParser.parse(
+            linkJson(url, "data.history.events.0.link"),
+            capabilities,
+            grant,
+            listOf(WidgetToolOutcome("today", payload, null)),
+            limits,
+        )
+
+        assertTrue(result is WidgetPresentationNode.HttpsLink)
+    }
+
+    @Test
     fun `rejects unsafe or unproven links and executable fields`() {
         val payload = JsonObject().apply { addProperty("url", "https://example.test") }
         val outcomes = listOf(WidgetToolOutcome("today", payload, null))
@@ -177,6 +195,21 @@ class WidgetExecutionProtocolTest {
         val child = """{"type":"text","text":"x","tone":"neutral"}"""
         assertInvalidPresentation(List(33) { child }.joinToString(",", "{\"type\":\"row\",\"children\":[", "]}"))
         assertInvalidPresentation(" ".repeat(limits.maxOutputBytes + 1))
+    }
+
+    @Test
+    fun `accepts a complete page introduction longer than the old card text limit`() {
+        val fullLead = "A".repeat(3_811)
+
+        val parsed = WidgetPresentationParser.parse(
+            """{"type":"text","text":"$fullLead","tone":"neutral"}""",
+            capabilities,
+            grant,
+            emptyList(),
+            limits,
+        )
+
+        assertEquals(WidgetPresentationNode.Text(fullLead, "neutral"), parsed)
     }
 
     @Test

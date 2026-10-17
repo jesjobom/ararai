@@ -13,6 +13,7 @@ if [[ "$gradle_java_major" != "17" ]]; then
 fi
 
 npm ci --include=dev --ignore-scripts
+npm run test:widget-runtime-helpers
 scripts/run-firestore-rules-tests.sh
 scripts/run-quickjs-host-tests.sh
 ./gradlew spotlessCheck detekt

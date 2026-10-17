@@ -588,7 +588,8 @@ internal class WidgetToolCallingDiagnosticRunner(
             stage = WidgetAuthoringStage.Feasibility,
             toolName = SUBMIT_WIDGET_FEASIBILITY_TOOL,
             toolDescriptionJson = WidgetAuthoringStageSchemas.feasibility,
-            objective = "Decide feasibility and select the minimum fixed capability envelope for the user's widget.",
+            objective = "Decide feasibility and select the minimum fixed capability envelope. " +
+                "Preserve every essential user constraint; if available tools cannot satisfy one, return unachievable or needs_clarification.",
             contextJson = context,
         )
         return runStageProbeCase(mode.wireName, round, rawTrace) { null }
@@ -876,6 +877,7 @@ internal class WidgetToolCallingDiagnosticRunner(
                     WidgetAuthoringStageSchemas.algorithm,
                     WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_CALL_FUNCTION_TOOL),
                     WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_RENDER_FUNCTION_TOOL),
+                    WidgetAuthoringStageSchemas.collectionCard,
                 ).joinToString("\n"),
             ),
             captures = captureMetrics.snapshot(),
@@ -1158,6 +1160,7 @@ private fun String.diagnosticStage(): WidgetAuthoringStage = when (this) {
     SUBMIT_WIDGET_CALL_FUNCTION_TOOL -> WidgetAuthoringStage.CallFunction
     SUBMIT_WIDGET_PLAN_FUNCTION_TOOL -> WidgetAuthoringStage.PlanFunction
     SUBMIT_WIDGET_RENDER_FUNCTION_TOOL -> WidgetAuthoringStage.RenderFunction
+    SUBMIT_WIDGET_COLLECTION_CARD_TOOL -> WidgetAuthoringStage.RenderFunction
     else -> error("Unexpected diagnostic tool")
 }
 
@@ -1178,11 +1181,8 @@ internal const val DIAGNOSTIC_NO_TOOL_CALL = "no_tool_call"
 internal const val DIAGNOSTIC_GENERATION_EXPECTED = "generation_rejected"
 
 /**
- * Characterization harnesses (diagnostic probes and the background authoring
- * probe) load the selected candidate with the staged authoring protocol
- * capability even though the static catalog does not grant it yet. Without
- * it, the engine's tool-support gate rejects every ephemeral authoring-tool
- * request before generation starts (tools_unsupported).
+ * Non-persistent characterization probes can exercise an unverified model's
+ * stage-tool transport without granting it production widget authorship.
  */
 internal fun LocalModel.forAuthoringCharacterization(): LocalModel = copy(
     toolCapabilities = toolCapabilities.copy(

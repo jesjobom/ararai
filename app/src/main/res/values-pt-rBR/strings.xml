@@ -434,6 +434,9 @@
     <string name="widget_runtime_values">Valores de execução: %1$s</string>
     <string name="widget_presentation_scope">Apresentação: %1$s</string>
     <string name="widget_source">Código JavaScript</string>
+    <string name="widget_initial_prompt">Pedido inicial</string>
+    <string name="widget_authoring_saved_prompt_hint">Este pedido está salvo na autoria atual e não pode ser editado. Inicie um novo pedido para escrever outro prompt.</string>
+    <string name="widget_authoring_start_new_request">Iniciar novo pedido</string>
     <string name="widget_run_history">Histórico de execuções</string>
     <string name="widget_run_entry">%1$s · revisão %2$d · %3$s</string>
     <string name="widget_no_runs">Nenhum histórico de execução.</string>
@@ -452,7 +455,7 @@
     <string name="widget_authoring_prompt_hint">Por exemplo: mostre um evento histórico real de hoje, escolhido de forma determinística entre os eventos da Wikipédia.</string>
     <string name="widget_authoring_generate">Gerar rascunho</string>
     <string name="widget_authoring_generating">O modelo local está gerando e validando um rascunho…</string>
-    <string name="widget_authoring_model_unavailable">O modelo baixado selecionado ainda não foi verificado para o protocolo de criação de widgets por etapas. Os outros recursos do modelo e os widgets existentes continuam disponíveis.</string>
+    <string name="widget_authoring_model_unavailable">A criação de widgets exige o modelo Gemma 4 E4B baixado. Outros recursos e os widgets existentes continuam disponíveis com este modelo.</string>
     <string name="widget_authoring_no_proposal">O modelo não retornou exatamente uma proposta. Ajuste a descrição e tente novamente.</string>
     <string name="widget_authoring_invalid_proposal_format">O modelo retornou uma proposta incompleta ou em formato não compatível. Nada foi salvo nem executado.</string>
     <string name="widget_authoring_invalid_program">O JavaScript proposto era inválido ou incompatível com a execução segura de widgets. Nada foi salvo nem executado.</string>
@@ -490,13 +493,15 @@
     <string name="widget_authoring_request_rejected">O LiteRT-LM rejeitou a solicitação de criação antes de entregar uma proposta. Nada foi salvo.</string>
     <string name="widget_authoring_runtime_failed">O LiteRT-LM interrompeu a geração antes de entregar uma proposta de widget. Nada foi salvo; tente novamente.</string>
     <string name="widget_authoring_workflow_start">Iniciar autoria por etapas</string>
-    <string name="widget_authoring_workflow_diagnostic_notice">Somente caracterização de debug: este modelo não está habilitado para autoria em produção. Cada etapa ainda exige revisão explícita.</string>
-    <string name="widget_authoring_workflow_diagnostic_start">Iniciar diagnóstico resumível</string>
     <string name="widget_authoring_workflow_saved">O progresso é salvo após cada tentativa. Revise cada resultado antes de continuar.</string>
     <string name="widget_authoring_workflow_run_stage">Executar esta etapa</string>
     <string name="widget_authoring_workflow_continue">Aceitar e continuar</string>
     <string name="widget_authoring_workflow_retry">Tentar esta etapa novamente</string>
     <string name="widget_authoring_workflow_reprocess">Reprocessar etapa</string>
+    <string name="widget_authoring_warning_random_selection">Aviso: o pedido parece solicitar uma página aleatória, mas este algoritmo seleciona o primeiro resultado. Revise ou reprocesse a etapa. Você ainda pode continuar.</string>
+    <string name="widget_authoring_warning_first_selection">Aviso: o pedido parece solicitar a primeira página, mas este algoritmo seleciona aleatoriamente. Revise ou reprocesse a etapa. Você ainda pode continuar.</string>
+    <string name="widget_authoring_warning_last_selection">Aviso: o pedido parece solicitar a última página, mas esta ferramenta da Wikipedia não oferece seleção do último resultado. Revise o resultado ou ajuste o pedido. Você ainda pode continuar.</string>
+    <string name="widget_authoring_warning_time_condition">Aviso: o pedido menciona dia e noite, mas esta chamada de ferramenta não parece consultar a hora local. Revise ou reprocesse a etapa. Você ainda pode continuar.</string>
     <string name="widget_authoring_workflow_discard">Descartar autoria</string>
     <string name="widget_authoring_workflow_attempt_running">Uma tentativa de etapa está em execução. Você pode sair desta tela ou cancelar apenas esta tentativa.</string>
     <string name="widget_authoring_workflow_configuration_changed">O workflow salvo usa outro modelo, artefato, configuração de inferência ou contrato de ferramentas. Restaure essa configuração ou descarte o workflow.</string>

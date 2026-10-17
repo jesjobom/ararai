@@ -33,7 +33,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.jesjobom.ararai.BuildConfig
 import com.jesjobom.ararai.R
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
@@ -50,11 +49,11 @@ import com.jesjobom.ararai.widget.managed.WidgetAuthoringStageDisplayStatus
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringStageKey
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringStageProjection
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringUserAction
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringWarning
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringWorkflowCoordinator
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringWorkflowProjector
 import com.jesjobom.ararai.widget.managed.WidgetConfirmationMode
 import com.jesjobom.ararai.widget.managed.WidgetConfirmationResult
-import com.jesjobom.ararai.widget.managed.forAuthoringCharacterization
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -89,23 +88,7 @@ internal fun ResumableManagedWidgetAuthoringRoute(
         inference != null &&
         modelArtifactSha256 != null &&
         model.toolCapabilities.supportsAuthoringProtocol(WIDGET_AUTHORING_PIPELINE_V1)
-    val diagnosticConfigurationAvailable = BuildConfig.DEBUG &&
-        model != null &&
-        inference != null &&
-        modelArtifactSha256 != null &&
-        !model.toolCapabilities.supportsAuthoringProtocol(WIDGET_AUTHORING_PIPELINE_V1)
-    val workflowModel = model?.let { selected ->
-        if (
-            selected.toolCapabilities.supportsAuthoringProtocol(WIDGET_AUTHORING_PIPELINE_V1) ||
-            !BuildConfig.DEBUG ||
-            snapshot == null
-        ) {
-            selected
-        } else {
-            selected.forAuthoringCharacterization()
-        }
-    }
-    val configurationAvailable = workflowModel != null && inference != null && modelArtifactSha256 != null
+    val configurationAvailable = productionConfigurationAvailable
 
     fun runAction(block: suspend () -> Unit) {
         if (working) return
@@ -125,7 +108,9 @@ internal fun ResumableManagedWidgetAuthoringRoute(
     }
 
     fun submitInitial() {
-        val selectedModel = workflowModel ?: return
+        val selectedModel = model?.takeIf {
+            it.toolCapabilities.supportsAuthoringProtocol(WIDGET_AUTHORING_PIPELINE_V1)
+        } ?: return
         val selectedInference = inference ?: return
         val digest = modelArtifactSha256 ?: return
         runAction {
@@ -146,9 +131,9 @@ internal fun ResumableManagedWidgetAuthoringRoute(
         }
     }
 
-    fun begin(characterizeForDiagnostic: Boolean = false) {
-        val selectedModel = model?.let { selected ->
-            if (characterizeForDiagnostic) selected.forAuthoringCharacterization() else selected
+    fun begin() {
+        val selectedModel = model?.takeIf {
+            it.toolCapabilities.supportsAuthoringProtocol(WIDGET_AUTHORING_PIPELINE_V1)
         } ?: return
         val selectedInference = inference ?: return
         val digest = modelArtifactSha256 ?: return
@@ -189,7 +174,9 @@ internal fun ResumableManagedWidgetAuthoringRoute(
     }
 
     fun retry() {
-        val selectedModel = workflowModel ?: return
+        val selectedModel = model?.takeIf {
+            it.toolCapabilities.supportsAuthoringProtocol(WIDGET_AUTHORING_PIPELINE_V1)
+        } ?: return
         val selectedInference = inference ?: return
         val digest = modelArtifactSha256 ?: return
         runAction {
@@ -211,7 +198,9 @@ internal fun ResumableManagedWidgetAuthoringRoute(
     }
 
     fun reprocess(stage: WidgetAuthoringStageKey) {
-        val selectedModel = workflowModel ?: return
+        val selectedModel = model?.takeIf {
+            it.toolCapabilities.supportsAuthoringProtocol(WIDGET_AUTHORING_PIPELINE_V1)
+        } ?: return
         val selectedInference = inference ?: return
         val digest = modelArtifactSha256 ?: return
         runAction {
@@ -298,25 +287,35 @@ internal fun ResumableManagedWidgetAuthoringRoute(
                 ) {
                     Text(stringResource(R.string.widget_authoring_workflow_start))
                 }
-                if (diagnosticConfigurationAvailable) {
+                if (model != null && !productionConfigurationAvailable) {
                     Text(
-                        stringResource(R.string.widget_authoring_workflow_diagnostic_notice),
+                        stringResource(R.string.widget_authoring_model_unavailable),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    OutlinedButton(
-                        onClick = { begin(characterizeForDiagnostic = true) },
-                        enabled = instruction.isNotBlank() && !working,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.widget_authoring_workflow_diagnostic_start))
-                    }
                 }
             } else if (projection != null) {
                 Text(
                     stringResource(R.string.widget_authoring_workflow_saved),
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                snapshot?.session?.instruction?.let { prompt ->
+                    Text(stringResource(R.string.widget_initial_prompt), style = MaterialTheme.typography.titleMedium)
+                    SelectionContainer { Text(prompt) }
+                    Text(
+                        stringResource(R.string.widget_authoring_saved_prompt_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (WidgetAuthoringUserAction.Discard in projection.allowedActions) {
+                        OutlinedButton(
+                            onClick = { discardConfirmation = true },
+                            enabled = !working && !attemptActive,
+                        ) {
+                            Text(stringResource(R.string.widget_authoring_start_new_request))
+                        }
+                    }
+                }
                 projection.stages.forEach { stage ->
                     AuthoringStageCard(
                         stage = stage,
@@ -348,11 +347,6 @@ internal fun ResumableManagedWidgetAuthoringRoute(
                         Button(onClick = ::retry, enabled = configurationAvailable && !working) {
                             Text(stringResource(R.string.widget_authoring_workflow_retry))
                         }
-                    }
-                }
-                if (!attemptActive && WidgetAuthoringUserAction.Discard in projection.allowedActions) {
-                    TextButton(onClick = { discardConfirmation = true }, enabled = !working) {
-                        Text(stringResource(R.string.widget_authoring_workflow_discard))
                     }
                 }
             }
@@ -441,6 +435,24 @@ internal fun AuthoringStageCard(
         ) {
             Text(stageLabel, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(statusLabel, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            stage.warnings.forEach { warning ->
+                Text(
+                    stringResource(
+                        when (warning) {
+                            WidgetAuthoringWarning.RandomSelectionMayUseFirst ->
+                                R.string.widget_authoring_warning_random_selection
+                            WidgetAuthoringWarning.FirstSelectionMayUseRandom ->
+                                R.string.widget_authoring_warning_first_selection
+                            WidgetAuthoringWarning.LastSelectionUnavailable ->
+                                R.string.widget_authoring_warning_last_selection
+                            WidgetAuthoringWarning.TimeConditionNotEvident ->
+                                R.string.widget_authoring_warning_time_condition
+                        },
+                    ),
+                    color = MaterialTheme.colorScheme.tertiary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             stage.attempts.forEach { AttemptDetails(it) }
             if (reprocessEnabled) {
                 OutlinedButton(onClick = onReprocess) {

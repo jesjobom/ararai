@@ -1,0 +1,9 @@
+2026-10-13 SM-S901E widget authoring diagnosis (sanitized)
+Installed APK at test time: lastUpdateTime=2026-10-12 15:26:47 device local.
+Session started: 2026-10-13T01:21:20.856Z.
+Feasibility attempt 1: 01:21:31.074Z-01:22:32.215Z, Interrupted, RuntimeUnavailable.
+Android ApplicationExitInfo: 2026-10-12 21:22:25.249 device local (01:22:25.249Z), reason=LOW_MEMORY, process=com.jesjobom.ararai.
+Feasibility attempt 2: 01:22:48.859Z-01:23:22.367Z, Succeeded; accepted at 01:24:54.758Z.
+Algorithm attempts 1-3: 01:24:56.051Z, 01:24:58.535Z, 01:25:00.539Z; all Failed/InvalidSchema without artifact or model generation.
+Code inspection: stage request objective was 613 characters after a redundant wikipedia_pages@2 suffix; WidgetAuthoringRoundRequest requires objective.length <= 512. The selected tool was wikipedia_on_this_day@1, so the suffix was also irrelevant to this session.
+Correction: remove redundant suffix and cover the persisted-feasibility-to-algorithm transition with a stage-runner regression test that asserts model generation is reached.

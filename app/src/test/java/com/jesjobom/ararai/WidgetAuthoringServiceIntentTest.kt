@@ -2,9 +2,13 @@ package com.jesjobom.ararai
 
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
+import com.jesjobom.ararai.model.InferenceConfig
+import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.widget.managed.WIDGET_AUTHORING_PROTOCOL_VERSION
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringAttempt
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringCheckpoint
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobRequest
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobState
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringNotificationAction
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringSession
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringSessionSnapshot
@@ -12,10 +16,12 @@ import com.jesjobom.ararai.widget.managed.WidgetAuthoringSessionStatus
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringStageKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -62,6 +68,40 @@ class WidgetAuthoringServiceIntentTest {
             WidgetAuthoringForegroundDisposition.RemoveAndStop,
             widgetAuthoringForegroundDisposition(null, null),
         )
+    }
+
+    @Test
+    fun `resumable presenter refreshes instead of stopping a pending foreground start`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val presenter = ResumableWidgetAuthoringNotificationPresenter(context)
+        val services = Shadows.shadowOf(context)
+
+        presenter.onStateChanged(snapshot(revision = 4, status = WidgetAuthoringSessionStatus.AttemptRunning))
+        presenter.onStateChanged(snapshot(revision = 5, status = WidgetAuthoringSessionStatus.AwaitingReview))
+
+        assertEquals(WidgetAuthoringService.ACTION_REFRESH, services.nextStartedService.action)
+        assertEquals(WidgetAuthoringService.ACTION_REFRESH, services.nextStartedService.action)
+        assertNull(services.nextStoppedService)
+    }
+
+    @Test
+    fun `legacy presenter refreshes instead of stopping a pending foreground start`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val presenter = WidgetAuthoringNotificationPresenter(context)
+        val services = Shadows.shadowOf(context)
+        val request = WidgetAuthoringJobRequest(
+            model = LocalModel("test", "Test", "/model"),
+            inference = InferenceConfig(contextTokens = 2048, temperature = 0.7f, topP = 0.9f),
+            instruction = "Create widget",
+            widgetId = null,
+        )
+
+        presenter.onStateChanged(WidgetAuthoringJobState.Queued(request))
+        presenter.onStateChanged(WidgetAuthoringJobState.Cancelled(request))
+
+        assertEquals(WidgetAuthoringService.ACTION_REFRESH, services.nextStartedService.action)
+        assertEquals(WidgetAuthoringService.ACTION_REFRESH, services.nextStartedService.action)
+        assertNull(services.nextStoppedService)
     }
 
     private fun snapshot(

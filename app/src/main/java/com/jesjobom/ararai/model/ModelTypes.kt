@@ -55,6 +55,7 @@ internal val WIDGET_AUTHORING_PIPELINE_V1_TOOL_NAMES = setOf(
     "submit_widget_call_function",
     "submit_widget_plan_function",
     "submit_widget_render_function",
+    "submit_widget_collection_card",
 )
 
 enum class ModelRuntime(

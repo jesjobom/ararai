@@ -8,11 +8,14 @@ import androidx.test.core.app.ApplicationProvider
 import com.jesjobom.ararai.engine.GenerationEvent
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptRequest
+import com.jesjobom.ararai.knowledge.WikipediaOnThisDayTool
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelToolCapabilities
 import com.jesjobom.ararai.model.WIDGET_AUTHORING_PIPELINE_V1
+import com.jesjobom.ararai.tools.ApplicationToolOperationalState
 import com.jesjobom.ararai.tools.ApplicationToolRegistry
+import com.jesjobom.ararai.tools.wikipediaOnThisDayApplicationTool
 import com.jesjobom.ararai.widget.runtime.WidgetJavaScriptEngine
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeContext
 import com.jesjobom.ararai.widget.runtime.WidgetToolCapability
@@ -136,6 +139,38 @@ class WidgetAuthoringStageRunnerTest {
         val failed = result.attempts.single { it.id == algorithm.attempt.id }
         assertEquals(WidgetAuthoringAttemptStatus.Failed, failed.status)
         assertEquals(WidgetAuthoringStageFailureCode.InvalidSchema, failed.failureCode)
+    }
+
+    @Test
+    fun `accepted date feasibility reaches algorithm generation without a local schema failure`() = runTest {
+        val registry = ApplicationToolRegistry(
+            listOf(
+                wikipediaOnThisDayApplicationTool(
+                    WikipediaOnThisDayTool { error("Provider must not run during authoring") },
+                ) { ApplicationToolOperationalState(enabled = true, ready = true) },
+            ),
+        )
+        val engine = CapturingEngine("{}")
+        val fixture = fixture(engine, registry = registry)
+        val snapshot = fixture.acceptFeasibility(
+            """{"message":"Daily Wikipedia events for today, showing the oldest event from the list.","outcome":"achievable","periodicIntervalHours":24.0,"toolIds":["wikipedia_on_this_day"]}""",
+        )
+        fixture.repository.startAttempt(
+            StartWidgetAuthoringAttempt(
+                snapshot.session.id,
+                snapshot.session.revision,
+                "start-algorithm",
+                WidgetAuthoringStageKey.Algorithm,
+                WidgetAuthoringAttemptKind.Initial,
+                authoringUpstreamDigest(snapshot, WidgetAuthoringStageKey.Algorithm),
+            ),
+        )
+        val prompt = WidgetAuthoringContextBuilder.build(snapshot.session.instruction, registry.descriptors())
+
+        fixture.runner.run(MODEL, INFERENCE, prompt, RUNTIME)
+
+        assertEquals(1, engine.generationCount)
+        assertEquals(SUBMIT_WIDGET_ALGORITHM_TOOL, engine.requests.single().advertisedToolNames.single())
     }
 
     @Test
@@ -309,9 +344,34 @@ class WidgetAuthoringStageRunnerTest {
         )
 
         assertTrue(objective.contains("function buildCallGetEvent(runtime)"))
-        assertTrue(objective.contains("return only the arguments object"))
-        assertTrue(objective.contains("tool 'wikipedia_on_this_day' version 1"))
-        assertTrue(objective.contains("application adds alias, toolId, and contractVersion"))
+        assertTrue(objective.contains("Return the bare inputSchema arguments object for 'wikipedia_on_this_day' v1"))
+        assertTrue(objective.contains("the app adds alias, toolId and contractVersion"))
+        assertTrue(objective.contains("Never wrap it in args or arguments"))
+    }
+
+    @Test
+    fun `call function objective with seeded selection fits stage request limit`() {
+        val step = WidgetAlgorithmStep(
+            id = "step_wikipedia_search",
+            kind = WidgetAlgorithmStepKind.ToolCall,
+            objective = "Search Wikipedia based on local time",
+            dependencies = listOf("step_time_check"),
+            tool = WidgetToolCapability("wikipedia_pages", 2),
+            selectionMode = WidgetToolSelectionMode.SeededRandom,
+        )
+        val objective = callFunctionObjective(step)
+
+        assertTrue(objective.contains("seed=runtime.seed"))
+        assertTrue(objective.contains("runtime.currentLocalDateTime()"))
+        assertTrue(objective.contains("transform steps do not execute"))
+        assertTrue(objective.length <= WidgetAuthoringPipelinePolicy.MAX_TEXT_CHARS)
+        WidgetAuthoringRoundRequest(
+            WidgetAuthoringStage.CallFunction,
+            SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
+            WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_CALL_FUNCTION_TOOL),
+            objective,
+            "{}",
+        )
     }
 
     @Test
@@ -342,12 +402,12 @@ class WidgetAuthoringStageRunnerTest {
         assertTrue(plan.contains("buildCallGetEvent(runtime)"))
         assertTrue(plan.contains("No model artifact or protocol metadata"))
         assertTrue(render.contains("function render(runtime, outcomes, state)"))
-        assertTrue(render.contains("aliases only from toolResults[].alias"))
-        assertTrue(render.contains("use outcomes[alias]"))
-        assertTrue(render.contains("never outcomes.get()"))
+        assertTrue(render.contains("runtime.pickArrayItem(outcomes,alias,path,mode)"))
+        assertTrue(render.contains("runtime.getArray(outcomes,alias,path)"))
+        assertTrue(render.contains("indexed loop"))
+        assertTrue(render.contains("No Math.random, collectionCard"))
+        assertTrue(render.contains("arrow functions"))
         assertFalse(render.contains("get_event"))
-        assertTrue(render.contains("presentationContract"))
-        assertTrue(render.contains("never use type:'text/value'"))
         assertTrue(render.length <= WidgetAuthoringPipelinePolicy.MAX_TEXT_CHARS)
 
         listOf("fetch_wikipedia_events", "a".repeat(32)).forEach { alias ->
@@ -369,6 +429,7 @@ class WidgetAuthoringStageRunnerTest {
         engine: CapturingEngine,
         recoveryReady: Boolean = true,
         initialize: Boolean = true,
+        registry: ApplicationToolRegistry = ApplicationToolRegistry(emptyList()),
         javascript: WidgetJavaScriptEngine = WidgetJavaScriptEngine { _, _, _, _ ->
             error("JavaScript must not run for feasibility")
         },
@@ -376,7 +437,6 @@ class WidgetAuthoringStageRunnerTest {
         val dispatcher = UnconfinedTestDispatcher()
         val repository = DispatcherWidgetAuthoringWorkflowRepository(store, dispatcher)
         if (initialize) repository.initialize() else repository.initialize()
-        val registry = ApplicationToolRegistry(emptyList())
         val validator = WidgetAuthoringPipelineValidator(
             registry,
             javascript,

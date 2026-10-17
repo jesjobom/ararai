@@ -34,6 +34,7 @@ import com.jesjobom.ararai.widget.runtime.WidgetScriptResult
 import com.jesjobom.ararai.widget.runtime.WidgetToolCapability
 import com.jesjobom.ararai.widget.runtime.WidgetToolOutcome
 import com.jesjobom.ararai.widget.runtime.requiredArray
+import com.jesjobom.ararai.widget.runtime.requiredLong
 import com.jesjobom.ararai.widget.runtime.requiredObject
 import com.jesjobom.ararai.widget.runtime.requiredString
 import com.jesjobom.ararai.widget.runtime.toJson
@@ -80,6 +81,55 @@ internal class WidgetAuthoringPipelineValidator(
                 return WidgetAuthoringStageFailureCode.InvalidToolArguments
             }
         }
+        if (step.selectionMode != null) {
+            validateToolSelection(artifact, step, feasibility, runtimeContext)?.let { return it }
+        }
+        return null
+    }
+
+    private suspend fun validateToolSelection(
+        artifact: WidgetSourceFragmentArtifact,
+        step: WidgetAlgorithmStep,
+        feasibility: WidgetFeasibilityArtifact,
+        runtimeContext: WidgetRuntimeContext,
+    ): WidgetAuthoringStageFailureCode? {
+        val mode = requireNotNull(step.selectionMode)
+        if (mode == WidgetToolSelectionMode.SeededRandom &&
+            (WidgetRuntimeValue.Seed !in feasibility.runtimeValues || runtimeContext.seed == null)
+        ) {
+            return WidgetAuthoringStageFailureCode.InvalidToolSelection
+        }
+        for (seed in listOf(1L, 2L)) {
+            currentCoroutineContext().ensureActive()
+            val fixture = runtimeContext.copy(seed = seed)
+            val output = when (
+                val result = call(artifact.source, artifact.functionName, listOf(fixture.toJson(feasibility.runtimeValues)))
+            ) {
+                is WidgetScriptResult.Success -> result.outputJson
+                is WidgetScriptResult.Failure -> return result.code.validationFailure(
+                    WidgetAuthoringStageFailureCode.InvalidSource,
+                )
+            }
+            val argumentsJson = when (val normalized = normalizeCallArguments(output, step, feasibility)) {
+                is CallArgumentsNormalization.Valid -> normalized.argumentsJson
+                is CallArgumentsNormalization.Invalid -> return normalized.code
+            }
+            val tool = requireNotNull(step.tool)
+            if (registry.validateWidgetDraftCall(tool.id, tool.version, argumentsJson) is WidgetDraftToolValidation.Invalid) {
+                return WidgetAuthoringStageFailureCode.InvalidToolArguments
+            }
+            val arguments = runCatching { StrictJson.parse(argumentsJson).requiredObject() }.getOrNull()
+                ?: return WidgetAuthoringStageFailureCode.InvalidToolArguments
+            val selection = runCatching { arguments.requiredString("selection") }.getOrNull()
+            val selectedSeed = runCatching { arguments.requiredLong("seed") }.getOrNull()
+            val matchesSelection = when (mode) {
+                WidgetToolSelectionMode.First -> selection == mode.wireName && !arguments.has("seed")
+                WidgetToolSelectionMode.SeededRandom -> selection == mode.wireName && selectedSeed == seed
+            }
+            if (!matchesSelection) {
+                return WidgetAuthoringStageFailureCode.InvalidToolSelection
+            }
+        }
         return null
     }
 
@@ -90,6 +140,16 @@ internal class WidgetAuthoringPipelineValidator(
         feasibility: WidgetFeasibilityArtifact,
         runtimeContext: WidgetRuntimeContext,
     ): WidgetAuthoringStageFailureCode? {
+        algorithm.toolCallSteps.singleOrNull()?.takeIf { step ->
+            step.selectionMode != null
+        }?.let { step ->
+            validateCallFunction(
+                callFunctions.single(),
+                step,
+                feasibility,
+                runtimeContext,
+            )?.let { return it }
+        }
         val source = joinSource(callFunctions + planFunction)
         val expectedSteps = algorithm.toolCallSteps
         for (fixture in runtimeFixtures(runtimeContext)) {
@@ -143,6 +203,7 @@ internal class WidgetAuthoringPipelineValidator(
                 WidgetAuthoringStageFailureCode.InvalidPresentationFailureHandling,
             ),
         )
+        var successfulPresentation: com.jesjobom.ararai.widget.runtime.WidgetPresentationNode? = null
         for (fixture in fixtureSets) {
             val output = when (
                 val result = call(
@@ -172,7 +233,11 @@ internal class WidgetAuthoringPipelineValidator(
             } else {
                 WidgetAuthoringStageFailureCode.InvalidPresentation
             }
-            checkNotNull(parsed)
+            if (successfulPresentation == null) {
+                successfulPresentation = parsed
+            } else if (algorithm.toolCallSteps.isNotEmpty() && successfulPresentation == parsed) {
+                return WidgetAuthoringStageFailureCode.InvalidPresentationSuccessHandling
+            }
         }
         return null
     }

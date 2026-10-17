@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -305,6 +306,10 @@ internal fun ManagedWidgetDetailScreen(
                     )
                     WidgetPermissionSection(state)
                     WidgetRunHistory(state.runs)
+                    state.revision.initialPrompt?.let { prompt ->
+                        Text(stringResource(R.string.widget_initial_prompt), style = MaterialTheme.typography.titleMedium)
+                        SelectionContainer { Text(prompt, style = MaterialTheme.typography.bodyMedium) }
+                    }
                     Text(stringResource(R.string.widget_source), style = MaterialTheme.typography.titleMedium)
                     Text(state.revision.source, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                 }

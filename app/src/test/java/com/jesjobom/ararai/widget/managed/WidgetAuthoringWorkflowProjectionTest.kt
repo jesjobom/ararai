@@ -6,6 +6,98 @@ import org.junit.Test
 
 class WidgetAuthoringWorkflowProjectionTest {
     @Test
+    fun `warning on review candidate does not block continuing`() {
+        val algorithm = attempt(
+            stage = WidgetAuthoringStageKey.Algorithm,
+            status = WidgetAuthoringAttemptStatus.Succeeded,
+            artifact = """{"steps":[{"kind":"tool_call","toolId":"wikipedia_pages","selectionMode":"first"}]}""",
+        )
+        val projection = WidgetAuthoringWorkflowProjector.project(
+            snapshot(
+                status = WidgetAuthoringSessionStatus.AwaitingReview,
+                currentStage = WidgetAuthoringStageKey.Algorithm,
+                attempts = listOf(algorithm),
+                checkpoints = emptyList(),
+                instruction = "Mostre uma página aleatória da Wikipedia",
+            ),
+        )
+
+        assertEquals(
+            listOf(WidgetAuthoringWarning.RandomSelectionMayUseFirst),
+            projection.stages.single { it.stage == WidgetAuthoringStageKey.Algorithm }.warnings,
+        )
+        assertEquals(
+            setOf(WidgetAuthoringUserAction.Continue, WidgetAuthoringUserAction.Discard),
+            projection.allowedActions,
+        )
+    }
+
+    @Test
+    fun `time warning follows accepted call but never marks it invalid`() {
+        val stage = WidgetAuthoringStageKey.CallFunction("search")
+        val projection = WidgetAuthoringWorkflowProjector.project(
+            snapshot(
+                status = WidgetAuthoringSessionStatus.AwaitingStage,
+                currentStage = WidgetAuthoringStageKey.Plan,
+                attempts = emptyList(),
+                checkpoints = listOf(
+                    checkpoint(stage, WidgetAuthoringCheckpointStatus.Accepted).copy(
+                        artifact = """{"source":"function call(runtime) { return runtime.language; }"}""",
+                    ),
+                ),
+                instruction = "Mostre Europa de dia e América de noite",
+            ),
+        )
+
+        val call = projection.stages.single { it.stage == stage }
+        assertEquals(WidgetAuthoringStageDisplayStatus.Accepted, call.status)
+        assertEquals(listOf(WidgetAuthoringWarning.TimeConditionNotEvident), call.warnings)
+    }
+
+    @Test
+    fun `warning detector ignores unrelated or malformed content`() {
+        val stage = WidgetAuthoringStageKey.Algorithm
+        assertEquals(
+            emptyList<WidgetAuthoringWarning>(),
+            WidgetAuthoringWarningDetector.detect(
+                "Show the first Wikipedia page",
+                stage,
+                """{"steps":[{"toolId":"wikipedia_pages","selectionMode":"first"}]}""",
+            ),
+        )
+        assertEquals(emptyList<WidgetAuthoringWarning>(), WidgetAuthoringWarningDetector.detect("random", stage, "{}"))
+        assertEquals(emptyList<WidgetAuthoringWarning>(), WidgetAuthoringWarningDetector.detect("random", stage, "{"))
+    }
+
+    @Test
+    fun `page selection mismatch warnings cover random first and unsupported last`() {
+        val stage = WidgetAuthoringStageKey.Algorithm
+        val first = """{"steps":[{"toolId":"wikipedia_pages","selectionMode":"first"}]}"""
+        val random = """{"steps":[{"toolId":"wikipedia_pages","selectionMode":"seeded_random"}]}"""
+        val cases = listOf(
+            Triple("Mostre uma página randômica", first, WidgetAuthoringWarning.RandomSelectionMayUseFirst),
+            Triple("Mostre a primeira página", random, WidgetAuthoringWarning.FirstSelectionMayUseRandom),
+            Triple("Mostre a última página", first, WidgetAuthoringWarning.LastSelectionUnavailable),
+            Triple("Show the last page", random, WidgetAuthoringWarning.LastSelectionUnavailable),
+        )
+        cases.forEach { (instruction, artifact, expected) ->
+            assertEquals(listOf(expected), WidgetAuthoringWarningDetector.detect(instruction, stage, artifact))
+        }
+        assertEquals(
+            emptyList<WidgetAuthoringWarning>(),
+            WidgetAuthoringWarningDetector.detect("randômica", stage, random),
+        )
+        assertEquals(
+            emptyList<WidgetAuthoringWarning>(),
+            WidgetAuthoringWarningDetector.detect("primeira", stage, first),
+        )
+        assertEquals(
+            emptyList<WidgetAuthoringWarning>(),
+            WidgetAuthoringWarningDetector.detect("Primeira ou última página", stage, first),
+        )
+    }
+
+    @Test
     fun `projects resumed interrupted attempt and keeps accepted upstream stage`() {
         val feasibility = checkpoint(WidgetAuthoringStageKey.Feasibility, WidgetAuthoringCheckpointStatus.Accepted)
         val interrupted = attempt(
@@ -124,12 +216,13 @@ class WidgetAuthoringWorkflowProjectionTest {
         currentStage: WidgetAuthoringStageKey,
         attempts: List<WidgetAuthoringAttempt>,
         checkpoints: List<WidgetAuthoringCheckpoint>,
+        instruction: String = "Build a widget",
     ) = WidgetAuthoringSessionSnapshot(
         session = WidgetAuthoringSession(
             id = "session",
             revision = 4,
             status = status,
-            instruction = "Build a widget",
+            instruction = instruction,
             targetWidgetId = null,
             modelId = "model",
             modelArtifactDigest = DIGEST,

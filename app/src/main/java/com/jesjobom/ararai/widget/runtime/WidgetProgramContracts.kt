@@ -106,7 +106,7 @@ object WidgetRuntimePolicy {
     const val MAX_JSON_BYTES = 64 * 1024
     const val MAX_JSON_DEPTH = 16
     const val MAX_JSON_VALUES = 512
-    const val MAX_STRING_CHARS = 4_096
+    const val MAX_STRING_CHARS = 16_384
     const val MAX_MEMORY_BYTES = 8L * 1024 * 1024
     const val MAX_STACK_BYTES = 512L * 1024
     const val MAX_EXECUTION_MILLIS = 250L
@@ -115,7 +115,7 @@ object WidgetRuntimePolicy {
     const val MAX_PRESENTATION_DEPTH = 8
     const val MAX_PRESENTATION_NODES = 128
     const val MAX_PRESENTATION_CHILDREN = 32
-    const val MAX_TEXT_CHARS = 2_048
+    const val MAX_TEXT_CHARS = 16_384
 
     val supportedRuntimeValues = WidgetRuntimeValue.entries.toSet()
     val supportedPresentation = WidgetPresentationCapability.entries.toSet()

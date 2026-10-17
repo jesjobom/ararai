@@ -24,6 +24,16 @@ import org.junit.Test
 
 class WidgetAuthoringPipelineModelTest {
     @Test
+    fun `model without declared widget protocol cannot load for production authoring`() = runTest {
+        val engine = RecordingStageEngine(wait = false)
+        val controller = WidgetAuthoringPipelineModelController(engine)
+        val unverifiedModel = MODEL.copy(toolCapabilities = ModelToolCapabilities())
+
+        assertEquals(WidgetAuthoringModelPreparationResult.Ineligible, controller.prepare(unverifiedModel, INFERENCE))
+        assertEquals(0, engine.loadCalls)
+    }
+
+    @Test
     fun `preparation uses fixed context output reserve and temperature without changing chat settings`() = runTest {
         val engine = RecordingStageEngine(wait = false)
         val controller = WidgetAuthoringPipelineModelController(engine)
@@ -145,6 +155,25 @@ class WidgetAuthoringPipelineModelTest {
         assertTrue(prompt.contains("one named function declaration"))
         assertTrue(prompt.contains("every brace closed"))
         assertTrue(prompt.contains("do not use an anonymous function"))
+        assertTrue(prompt.contains("do not use an anonymous function, arrow callback, or Math.random"))
+    }
+
+    @Test
+    fun `tool argument repair rejects call wrappers and keeps runtime fields conditional`() {
+        val request = WidgetAuthoringRoundRequest(
+            stage = WidgetAuthoringStage.CallFunction,
+            toolName = SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
+            toolDescriptionJson = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_CALL_FUNCTION_TOOL),
+            objective = "Generate function buildCallEvents(runtime)",
+            contextJson = "{}",
+            repairCode = WidgetAuthoringStageFailureCode.InvalidToolArguments,
+        )
+
+        val prompt = request.toUserText()
+        assertTrue(prompt.contains("bare tool input arguments object"))
+        assertTrue(prompt.contains("Never return alias, toolId, contractVersion, args, or an arguments wrapper"))
+        assertTrue(prompt.contains("only when those fields are required by the selected tool"))
+        assertFalse(prompt.contains("Keep the frozen alias"))
     }
 
     @Test
@@ -181,13 +210,93 @@ class WidgetAuthoringPipelineModelTest {
         val prompt = engine.requests.single().plainChatPrompt
         assertTrue(prompt.contains("Controlled failure: invalid_render_execution"))
         assertTrue(prompt.contains("Rejected artifact omitted to prevent anchoring"))
-        assertTrue(prompt.contains("outcomes is a plain JavaScript object"))
-        assertTrue(prompt.contains("outcomes[alias]"))
-        assertTrue(prompt.contains("never call outcomes.get()"))
+        assertTrue(prompt.contains("runtime.pickArrayItem(outcomes, alias, arrayPath"))
+        assertTrue(prompt.contains("No Math.random"))
+        assertTrue(prompt.contains("and an indexed loop"))
+        assertTrue(prompt.contains("Do not build card or https_link objects manually"))
+        assertTrue(prompt.contains("runtime.card([title, body, runtime.linkFor(outcomes, alias"))
+        assertTrue(prompt.contains("ONE array argument"))
+        assertTrue(prompt.contains("Never use card.addText, card.addLinkFor"))
+        assertTrue(prompt.contains("or outcomes.getArray"))
+        assertTrue(prompt.contains("Formatting a title must not replace a requested body or description"))
+        assertTrue(prompt.contains("No Math.random, arrow functions, textNode, or collectionCard"))
         assertFalse(prompt.contains("get_events"))
         assertFalse(prompt.contains("return outcomes.get"))
-        assertTrue(prompt.contains("Follow presentationContract exactly"))
-        assertTrue(prompt.contains("never use type:'text/value'"))
+    }
+
+    @Test
+    fun `failed outcome repair preserves custom source failure handling`() = runTest {
+        val engine = RecordingStageEngine(wait = false)
+        val controller = WidgetAuthoringPipelineModelController(engine)
+        controller.prepare(MODEL, INFERENCE)
+
+        controller.capture(
+            MODEL,
+            WidgetAuthoringRoundRequest(
+                stage = WidgetAuthoringStage.RenderFunction,
+                toolName = SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
+                toolDescriptionJson = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_RENDER_FUNCTION_TOOL),
+                objective = renderFunctionObjective(),
+                contextJson = "{}",
+                repairCode = WidgetAuthoringStageFailureCode.InvalidPresentationFailureHandling,
+            ),
+        )
+
+        val prompt = engine.requests.single().plainChatPrompt
+        assertTrue(prompt.contains("Handle failed and empty outcomes"))
+        assertTrue(prompt.contains("runtime.pickArrayItem(outcomes, alias, arrayPath"))
+        assertTrue(prompt.contains("runtime.isSuccess(outcomes, alias)"))
+        assertFalse(prompt.contains("For an array card, use runtime.collectionCard"))
+    }
+
+    @Test
+    fun `provenance repair requires linkFor node rather than manually assembled link`() = runTest {
+        val engine = RecordingStageEngine(wait = false)
+        val controller = WidgetAuthoringPipelineModelController(engine)
+        controller.prepare(MODEL, INFERENCE)
+
+        controller.capture(
+            MODEL,
+            WidgetAuthoringRoundRequest(
+                stage = WidgetAuthoringStage.RenderFunction,
+                toolName = SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
+                toolDescriptionJson = WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_RENDER_FUNCTION_TOOL),
+                objective = renderFunctionObjective(),
+                contextJson = "{}",
+                repairCode = WidgetAuthoringStageFailureCode.InvalidPresentationProvenance,
+            ),
+        )
+
+        val prompt = engine.requests.single().plainChatPrompt
+        assertTrue(prompt.contains("Controlled failure: invalid_presentation_provenance"))
+        assertTrue(prompt.contains("runtime.linkFor(outcomes, alias, exactItemUrlPath, label)"))
+        assertTrue(prompt.contains("Do not build card or https_link objects manually"))
+    }
+
+    @Test
+    fun `typed card repair does not ask the model to generate JavaScript`() = runTest {
+        val engine = RecordingStageEngine(wait = false)
+        val controller = WidgetAuthoringPipelineModelController(engine)
+        controller.prepare(MODEL, INFERENCE)
+
+        controller.capture(
+            MODEL,
+            WidgetAuthoringRoundRequest(
+                stage = WidgetAuthoringStage.RenderFunction,
+                toolName = SUBMIT_WIDGET_COLLECTION_CARD_TOOL,
+                toolDescriptionJson = WidgetAuthoringStageSchemas.collectionCard,
+                objective = collectionCardObjective(),
+                contextJson = "{}",
+                repairCode = WidgetAuthoringStageFailureCode.InvalidPresentationFailureHandling,
+            ),
+        )
+
+        val prompt = engine.requests.single().plainChatPrompt
+        assertTrue(prompt.contains("exact itemFields property names"))
+        assertTrue(prompt.contains("Only fallback is literal text"))
+        assertTrue(prompt.contains("Do not write JavaScript"))
+        assertFalse(prompt.contains("Final source check"))
+        assertFalse(prompt.contains("function render(runtime"))
     }
 
     @Test

@@ -14,7 +14,7 @@ internal object ManagedWidgetPolicy {
     const val MAX_OBSERVATIONS_PER_WIDGET = 256
     const val MAX_OBSERVATION_AGE_DAYS = 90
     const val MAX_OBSERVATION_NAME_CHARS = 64
-    const val MAX_OBSERVATION_STRING_CHARS = WidgetRuntimePolicy.MAX_STRING_CHARS
+    const val MAX_OBSERVATION_STRING_CHARS = 4_096
 
     const val MAX_RUNS_PER_WIDGET = 100
     const val MAX_RUN_AGE_DAYS = 30

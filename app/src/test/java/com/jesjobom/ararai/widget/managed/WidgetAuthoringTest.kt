@@ -34,6 +34,32 @@ import org.junit.Test
 
 class WidgetAuthoringTest {
     @Test
+    fun `new authoring shows latest page contract while editing keeps referenced legacy version`() {
+        val v2 = widgetContract().copy(version = 2)
+        val contracts = listOf(widgetContract(), v2, onThisDayContract())
+
+        val newTools = JsonParser.parseString(
+            WidgetAuthoringContextBuilder.build("Show a page", contracts).apiContextJson,
+        ).asJsonObject.getAsJsonArray("tools")
+        assertEquals(
+            listOf(2),
+            newTools.map { it.asJsonObject }
+                .filter { it["id"].asString == "wikipedia_pages" }
+                .map { it["version"].asInt },
+        )
+
+        val editTools = JsonParser.parseString(
+            WidgetAuthoringContextBuilder.build("Change the title", contracts, definition(), revision()).apiContextJson,
+        ).asJsonObject.getAsJsonArray("tools")
+        assertEquals(
+            listOf(1, 2),
+            editTools.map { it.asJsonObject }
+                .filter { it["id"].asString == "wikipedia_pages" }
+                .map { it["version"].asInt },
+        )
+    }
+
+    @Test
     fun `proposal parser accepts one bounded complete draft`() {
         val result = WidgetProposalParser.parse(validProposal(), AVAILABLE_TOOLS)
 
@@ -135,6 +161,8 @@ class WidgetAuthoringTest {
         assertTrue(prompt.apiContextJson.contains("runtime.language"))
         assertTrue(prompt.apiContextJson.contains("runtime.seededIndex"))
         assertTrue(prompt.apiContextJson.contains("wikipediaBehaviorGuidance"))
+        assertTrue(prompt.apiContextJson.contains("Search pages by query"))
+        assertTrue(prompt.apiContextJson.contains("Events for a calendar date only"))
         assertTrue(prompt.apiContextJson.contains("\"mode\":\"edit\""))
         assertTrue(prompt.apiContextJson.contains("function plan(runtime)"))
         assertTrue(prompt.apiContextJson.contains("function render(runtime, outcomes, state)"))
@@ -323,6 +351,7 @@ class WidgetAuthoringTest {
         consumers = setOf(ApplicationToolConsumer.Widget),
         inputSchemaJson = """{"type":"object"}""",
         outputSchemaJson = """{"type":"object"}""",
+        authoringSummary = "Search pages by query; not a verified event feed.",
     )
 
     private fun onThisDayContract() = ApplicationToolContract(
@@ -333,6 +362,7 @@ class WidgetAuthoringTest {
         consumers = setOf(ApplicationToolConsumer.Model, ApplicationToolConsumer.Widget),
         inputSchemaJson = """{"type":"object"}""",
         outputSchemaJson = """{"type":"object"}""",
+        authoringSummary = "Events for a calendar date only; no topic query.",
     )
 
     private fun modelOnlyContract() = ApplicationToolContract(
