@@ -57,6 +57,10 @@
 
 Any failure makes the gate fail. GitHub Actions runs the same script for pull
 requests, pushes to `main`, and manual dispatches. The canonical Android Gradle runtime is Temurin JDK 17.
+External GitHub Actions are pinned to full commit SHAs, with version comments
+for review. Dependabot checks for action updates weekly; its PRs require normal
+review and a passing quality gate before the pins change. A new app version
+does not require updating the action pins.
 The workflow installs Temurin JDK 21 first, preserves it as
 `FIREBASE_JAVA_HOME`, then installs JDK 17 last so every Gradle invocation uses
 the declared Android baseline. `scripts/run-firestore-rules-tests.sh` temporarily
