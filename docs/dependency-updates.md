@@ -49,3 +49,14 @@ enabled by this workflow.
 Vendored QuickJS updates follow the additional checksum, file-selection,
 license, ABI, adversarial, R8, size, and physical-device procedure in
 `quickjs-runtime/ORIGIN.md` and `docs/widget-script-runtime.md`.
+
+## Update Node test tooling
+
+The root `package.json` contains only development dependencies for Firebase
+rules/emulator tests and widget-helper tests. Keep direct versions exact, refresh
+`package-lock.json` with npm rather than editing it manually, and run
+`npm ci --include=dev --ignore-scripts` plus `npm audit --include=dev` when
+reviewing updates. Run the full quality gate before accepting the new lockfile.
+The current unresolved advisory groups and their exposure are recorded in
+`docs/npm-test-tooling-audit.md`; do not use `npm audit fix --force` merely to
+lower the count if it downgrades the Firebase SDK or CLI.
