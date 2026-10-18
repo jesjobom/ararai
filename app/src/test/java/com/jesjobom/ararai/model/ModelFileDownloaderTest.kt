@@ -362,6 +362,101 @@ class ModelFileDownloaderTest {
         assertFalse(outside.exists())
     }
 
+    @Test
+    fun `rejects missing or nonpositive model size before opening source`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val source = RecordingModelByteSource()
+
+        listOf(null, 0L, -1L).forEach { size ->
+            assertThrows(ModelDownloadException::class.java) {
+                runBlocking { ModelFileDownloader(root, source).download(helloConfig().copy(expectedBytes = size)) }
+            }
+        }
+
+        assertEquals(0, source.openCount)
+    }
+
+    @Test
+    fun `discards oversized partial before requesting a range`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val finalFile = File(root, helloConfig().relativePath)
+        finalFile.parentFile!!.mkdirs()
+        File(finalFile.parentFile, "${finalFile.name}.part").writeText("too-long")
+        val source = RangeModelByteSource(acceptRange = true)
+
+        ModelFileDownloader(root, source).download(helloConfig())
+
+        assertEquals(0L, source.requestedOffset)
+        assertEquals("hello", finalFile.readText())
+    }
+
+    @Test
+    fun `rejects excess response before writing it and preserves final artifact`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val finalFile = File(root, helloConfig().relativePath)
+        finalFile.parentFile!!.mkdirs()
+        finalFile.writeText("old-valid")
+        val tempFile = File(finalFile.parentFile, "${finalFile.name}.part")
+        val input = CloseRecordingInputStream("hello!".toByteArray())
+        val connection = FakeHttpConnection(input = input)
+        assertThrows(ModelDownloadException::class.java) {
+            runBlocking {
+                ModelFileDownloader(
+                    root,
+                    UrlModelByteSource(QueueConnectionFactory(connection)),
+                ).download(helloConfig())
+            }
+        }
+
+        assertEquals("old-valid", finalFile.readText())
+        assertFalse(tempFile.exists())
+        assertEquals(1, input.closeCount)
+        assertEquals(1, connection.disconnectCount)
+    }
+
+    @Test
+    fun `rejects resumed response crossing the size limit`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val finalFile = File(root, helloConfig().relativePath)
+        finalFile.parentFile!!.mkdirs()
+        val tempFile = File(finalFile.parentFile, "${finalFile.name}.part")
+        tempFile.writeText("he")
+        val source = object : ModelByteSource {
+            override fun open(config: ModelConfig): InputStream = error("Offset-aware open expected")
+            override fun open(config: ModelConfig, requestedOffset: Long): ModelByteResponse {
+                assertEquals(2L, requestedOffset)
+                return ModelByteResponse(ByteArrayInputStream("llo!".toByteArray()), requestedOffset)
+            }
+        }
+
+        assertThrows(ModelDownloadException::class.java) {
+            runBlocking { ModelFileDownloader(root, source).download(helloConfig()) }
+        }
+
+        assertFalse(tempFile.exists())
+        assertFalse(finalFile.exists())
+    }
+
+    @Test
+    fun `overflowed primary does not contaminate fallback download`() = runTest {
+        val root = Files.createTempDirectory("ararai-download").toFile()
+        val config = helloConfig().copy(
+            url = "https://example.com/primary.gguf",
+            fallbackUrls = listOf("https://example.com/fallback.gguf"),
+        )
+        val source = UrlSwitchingModelByteSource(
+            mapOf(
+                config.url to "hello!".toByteArray(),
+                config.fallbackUrls.single() to "hello".toByteArray(),
+            ),
+        )
+
+        ModelFileDownloader(root, source).download(config)
+
+        assertEquals(listOf(config.url, config.fallbackUrls.single()), source.openedUrls)
+        assertEquals("hello", File(root, config.relativePath).readText())
+    }
+
     private fun helloConfig(): ModelConfig = ModelConfig(
         id = "hello",
         name = "Hello Model",

@@ -34,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Foreground service that keeps the process alive while a widget authoring job
@@ -42,6 +43,7 @@ import kotlinx.coroutines.launch
  */
 class WidgetAuthoringService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var latestStartId = 0
 
     private val controller
         get() = (application as ArarAiApplication).widgetAuthoringJobs
@@ -63,6 +65,7 @@ class WidgetAuthoringService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
+        latestStartId = startId
         when (intent?.action) {
             ACTION_REFRESH -> {
                 handleForegroundRefresh(startId)
@@ -75,19 +78,23 @@ class WidgetAuthoringService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_CANCEL_RESUMABLE -> {
-                if (intent.matchesWidgetAuthoringSession(workflow.activeSession.value)) {
-                    workflow.cancelActiveAttempt()
+                val snapshot = workflow.activeSession.value
+                val attemptId = snapshot?.session?.activeAttemptId
+                if (intent.matchesWidgetAuthoringSession(snapshot) && snapshot != null && attemptId != null) {
+                    serviceScope.launch {
+                        runCatching { workflow.cancelExpectedAttempt(snapshot.session.id, attemptId) }
+                        withContext(Dispatchers.Main.immediate) { reconcileForeground(startId) }
+                    }
                 }
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                reconcileForeground(startId)
                 return START_NOT_STICKY
             }
             ACTION_CONTINUE_RESUMABLE -> {
-                handleContinue(intent)
+                handleContinue(intent, startId)
                 return START_NOT_STICKY
             }
             ACTION_RETRY_RESUMABLE -> {
-                handleRetry(intent)
+                handleRetry(intent, startId)
                 return START_NOT_STICKY
             }
         }
@@ -118,7 +125,33 @@ class WidgetAuthoringService : Service() {
             else -> workflowPresenter.startingNotification()
         }
         startInForeground(notification)
-        when (widgetAuthoringForegroundDisposition(snapshot, legacyState)) {
+        applyForegroundDisposition(startId, snapshot, legacyState)
+    }
+
+    private fun reconcileForeground(startId: Int) {
+        // An older asynchronous action must not tear down a newer service start.
+        val snapshot = workflow.activeSession.value
+        val legacyState = controller.state.value
+        val disposition = widgetAuthoringForegroundDispositionForStart(
+            startId,
+            latestStartId,
+            snapshot,
+            legacyState,
+        ) ?: return
+        if (disposition == WidgetAuthoringForegroundDisposition.Keep) {
+            val notification = snapshot?.let(workflowPresenter::notification)
+                ?: legacyState?.let(presenter::notification)
+            if (notification != null) startInForeground(notification)
+        }
+        applyForegroundDisposition(startId, snapshot, legacyState)
+    }
+
+    private fun applyForegroundDisposition(
+        startId: Int,
+        snapshot: WidgetAuthoringSessionSnapshot?,
+        legacyState: WidgetAuthoringJobState?,
+    ) {
+        when (widgetAuthoringForegroundDispositionForStart(startId, latestStartId, snapshot, legacyState) ?: return) {
             WidgetAuthoringForegroundDisposition.Keep -> Unit
             WidgetAuthoringForegroundDisposition.DetachAndStop -> {
                 stopForeground(STOP_FOREGROUND_DETACH)
@@ -136,34 +169,34 @@ class WidgetAuthoringService : Service() {
         super.onDestroy()
     }
 
-    private fun handleContinue(intent: Intent) {
+    private fun handleContinue(intent: Intent, startId: Int) {
         val snapshot = workflow.activeSession.value
         if (!intent.matchesWidgetAuthoringSession(snapshot)) {
-            stopSelf()
+            reconcileForeground(startId)
             return
         }
         serviceScope.launch {
-            runCatching { workflow.acceptCurrent(intent.requireActionId()) }
+            runCatching { workflow.acceptCurrent(intent.requireActionId(), expectedSession = snapshot) }
                 .onSuccess { result ->
                     if (result is AcceptWidgetAuthoringStageResult.AssemblyInvalid) {
                         workflowPresenter.onStateChanged(workflow.activeSession.value)
                     }
                 }
-            stopSelf()
+            withContext(Dispatchers.Main.immediate) { reconcileForeground(startId) }
         }
     }
 
-    private fun handleRetry(intent: Intent) {
+    private fun handleRetry(intent: Intent, startId: Int) {
         val snapshot = workflow.activeSession.value
         if (!intent.matchesWidgetAuthoringSession(snapshot)) {
-            stopSelf()
+            reconcileForeground(startId)
             return
         }
         val app = application as ArarAiApplication
         val item = app.modelController.state.value.models.firstOrNull { it.config.id == snapshot?.session?.modelId }
         val available = item?.state as? ModelStartupState.Available
         if (snapshot == null || item == null || available == null) {
-            stopSelf()
+            reconcileForeground(startId)
             return
         }
         serviceScope.launch {
@@ -173,13 +206,14 @@ class WidgetAuthoringService : Service() {
                     inference = WidgetAuthoringInferenceCodec.decode(snapshot.session.inferenceConfigJson),
                     modelArtifactDigest = item.config.sha256,
                     actionId = intent.requireActionId(),
+                    expectedSession = snapshot,
                 )
             }.onSuccess { result ->
                 if (result !is RunWidgetAuthoringStageResult.Submitted) {
                     workflowPresenter.onStateChanged(workflow.activeSession.value)
                 }
             }
-            stopSelf()
+            withContext(Dispatchers.Main.immediate) { reconcileForeground(startId) }
         }
     }
 
@@ -238,6 +272,17 @@ internal enum class WidgetAuthoringForegroundDisposition {
     Keep,
     DetachAndStop,
     RemoveAndStop,
+}
+
+internal fun widgetAuthoringForegroundDispositionForStart(
+    startId: Int,
+    latestStartId: Int,
+    snapshot: WidgetAuthoringSessionSnapshot?,
+    legacyState: WidgetAuthoringJobState?,
+): WidgetAuthoringForegroundDisposition? = if (startId == latestStartId) {
+    widgetAuthoringForegroundDisposition(snapshot, legacyState)
+} else {
+    null
 }
 
 internal fun widgetAuthoringForegroundDisposition(

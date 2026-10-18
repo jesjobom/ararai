@@ -106,4 +106,10 @@ internal class ResumableWidgetAuthoringController(
         ?.also { it.cancel() }
         ?.let { true }
         ?: false
+
+    suspend fun cancelExpectedAttempt(sessionId: String, attemptId: String): Boolean = mutex.withLock {
+        val current = activeSession.value?.session
+        if (current?.id != sessionId || current.activeAttemptId != attemptId) return@withLock false
+        cancelActiveAttempt()
+    }
 }

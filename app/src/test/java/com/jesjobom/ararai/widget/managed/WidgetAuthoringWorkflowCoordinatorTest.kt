@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -71,6 +72,7 @@ class WidgetAuthoringWorkflowCoordinatorTest {
 
         val begin = coordinator.begin(MODEL, INFERENCE, DIGEST, "Build a widget", null)
         assertTrue(begin is BeginWidgetAuthoringWorkflowResult.Created)
+        val oldNotificationSnapshot = requireNotNull(coordinator.activeSession.value)
         val submitted = coordinator.startCurrent(MODEL, INFERENCE, DIGEST, "start")
         assertTrue(submitted is RunWidgetAuthoringStageResult.Submitted)
         runCurrent()
@@ -79,6 +81,15 @@ class WidgetAuthoringWorkflowCoordinatorTest {
         assertEquals(1, executions)
         assertEquals(WidgetAuthoringSessionStatus.AwaitingReview, snapshot.session.status)
         assertEquals(1, snapshot.attempts.size)
+        assertThrows(IllegalStateException::class.java) {
+            kotlinx.coroutines.runBlocking { coordinator.acceptCurrent("stale-continue", oldNotificationSnapshot) }
+        }
+        assertThrows(IllegalStateException::class.java) {
+            kotlinx.coroutines.runBlocking {
+                coordinator.retryCurrent(MODEL, INFERENCE, DIGEST, "stale-retry", oldNotificationSnapshot)
+            }
+        }
+        assertEquals(snapshot.session.revision, coordinator.activeSession.value?.session?.revision)
         assertTrue(coordinator.acceptCurrent("accept") is AcceptWidgetAuthoringStageResult.FeasibilityStopped)
         assertTrue(snapshot.checkpoints.isEmpty())
     }

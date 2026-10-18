@@ -13,6 +13,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -57,7 +58,9 @@ class WidgetAuthoringWorkflowControllerTest {
 
         assertTrue(first is SubmitWidgetAuthoringAttemptResult.Started)
         assertEquals(SubmitWidgetAuthoringAttemptResult.Busy, second)
-        assertTrue(controller.cancelActiveAttempt())
+        assertFalse(controller.cancelExpectedAttempt(session.session.id, "older-attempt"))
+        val attemptId = (first as SubmitWidgetAuthoringAttemptResult.Started).attemptId
+        assertTrue(controller.cancelExpectedAttempt(session.session.id, attemptId))
     }
 
     @Test

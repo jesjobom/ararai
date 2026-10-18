@@ -1,165 +1,80 @@
-# Improve audit index
+# ArarAI Improve implementation plans
 
-Baseline: `044f66c` (`2026-08-17`). This index is the read-only `improve`
-deliverable for the active OpenSpec change
-`organize-code-quality-security-audit`. It contains vetted candidates, not
-implementation authorization. Remediation plans will be written only after the
-full Semgrep, CodeQL, platform, and supply-chain rounds are reconciled.
+Reviewed 2026-10-17 against commit `38acb8b`. This is an advisory backlog, not
+authorization to modify application code or deliver a release. The previous
+2026-08-17 Improve register is preserved in
+[`2026-08-17-audit-archive.md`](2026-08-17-audit-archive.md). Its six findings
+were assigned completed, archived OpenSpec changes; do not reopen their old
+file/line claims without new evidence. The current `ArarAiApp.kt` remains large,
+but its earlier extraction change was completed within its stated scope.
 
-## Recon
+The advisor read first-party source, tests, specs, quality-gate docs, and
+recent device evidence. `scripts/check-java-runtime-alignment.sh` passed. The
+survey was hotspot-weighted, not a line-by-line audit of the whole repository.
+No build, test, static scanner, device action, or networked dependency audit was
+run during this read-only review. CI and physical-device behavior are not
+established by this audit.
 
-- Android/Kotlin application with Compose, local SQLite/media/model storage,
-  LiteRT-LM, application-owned whisper JNI, Firebase reporting, and optional web
-  knowledge tools.
-- Canonical verification: `scripts/quality-gate.sh`; device-only boundaries are
-  documented in `docs/device-validation.md`.
-- Current tests cover model download/integrity, Chat/Voice state, media,
-  persistence, tools, Firebase rules, Compose journeys, and build configuration.
-- Highest current churn is in `ArarAiApp.kt`, `ChatViewModel.kt`, `ChatScreen.kt`,
-  model configuration, and their tests.
-- npm audit result on 2026-08-17: 0 advisories across the 724-package Firebase
-  test-tool graph. Gradle/native/model advisory review remains a later task.
+## Recommended execution order
 
-## Vetted findings
+| Plan | Finding | Priority | Effort | Fix risk | Depends on | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| [001](001-preserve-active-authoring-service.md) | A stale notification action stops an active authoring foreground service | P1 | M | Medium | None | Archived; physical lifecycle gap recorded |
+| [002](002-bound-model-download-size.md) | Model download writes beyond expected size before rejecting | P2 | S | Low | None | Archived |
+| [003](003-serialize-litert-transitions.md) | LiteRT session transitions can close an active generation | P1 | M | Medium | None | Archived |
+| [004](004-preserve-generation-stream-integrity.md) | Full channels silently discard model deltas or terminal events | P1 | M | Medium | 003 | Archived; physical matrix gap recorded |
 
-| Priority | ID | Finding | Category | Impact | Effort | Fix risk | Confidence |
-| ---: | --- | --- | --- | --- | --- | --- | --- |
-| 1 | ARA-AUD-001 | Canonically constrain configured model paths | Security/correctness | A malformed catalog path such as a `models/` prefix followed by traversal can resolve outside the intended model directory and be used by download, migration, resolution, or deletion code. The catalog is bundled and reviewed, so this is a defense against configuration/supply-chain mistakes rather than a remote arbitrary-path primitive. | S | Low | High |
-| 2 | ARA-AUD-002 | Reconcile unreadable encrypted provider credentials | Correctness/security hardening | A stored token whose Keystore key/ciphertext can no longer be decrypted remains classified as configured and can remain enabled, while reads return no credential. Users then see persistent authentication failure rather than an explicit recoverable credential state. | S–M | Medium | High |
-| 3 | ARA-AUD-003 | Validate and enable release shrinking safely | Build/performance/security hardening | Release builds explicitly disable R8, matching the Play Console's low-optimization/no-mapping warning. The app ships larger bytecode and gains no obfuscation/optimization; enabling it without release tests could break reflection/JNI/Firebase paths. | M | Medium | High |
-| 4 | ARA-AUD-004 | Align the documented and exercised Java runtime | DX/build correctness | CI labels its setup JDK 17 but actually runs the full gate on Java 21, while project/quality documentation says JDK 17. Local and CI builds therefore do not exercise the same claimed Gradle runtime, weakening reproducibility and making failures environment-dependent. | S | Low | High |
-| 5 | ARA-AUD-005 | Make model HTTP connection ownership explicit | Reliability/performance | `UrlModelByteSource` creates `HttpURLConnection` instances but never explicitly disconnects them; non-2xx paths throw before an input stream can be closed. Repeated fallback/failure cycles can retain network resources longer than necessary. | S–M | Low | Medium |
-| 6 | ARA-AUD-006 | Continue decomposing the application UI hub | Architecture/testability | `ArarAiApp.kt` is 2,011 lines, has the highest recent churn, owns navigation plus several complete destination screens, and suppresses complexity/parameter findings. Prior work successfully extracted Chat/media boundaries, but unrelated settings, tools, benchmark, model, and shell changes still collide in one file. | L | Medium | High |
+Implementation and test evidence are in the archived OpenSpec change
+[`2026-10-18-harden-model-runtime-and-authoring-reliability`](../openspec/changes/archive/2026-10-18-harden-model-runtime-and-authoring-reliability/).
+JJ explicitly accepted archival with the remaining physical validation gaps,
+which are listed in its `evidence/2026-10-18-closure.md`.
 
-### ARA-AUD-001 evidence
+Plan 004 follows 003 because both change `LiteRtLmLocalLlmEngine.kt` and their
+concurrency/cancellation behavior must be verified together. Plans 001 and 002
+are independent. Each executor must read its full plan, verify its drift check,
+and update only its own status row after validation; do not push, commit, or
+archive an OpenSpec change unless separately authorized by the operator.
 
-- `app/src/main/java/com/jesjobom/ararai/model/ModelConfigParser.kt:163`
-  validates only `relativePath.startsWith("models/")`; it does not reject `..`,
-  absolute/canonical escape, or non-normalized segments.
-- `app/src/main/java/com/jesjobom/ararai/model/ModelFileDownloader.kt:102`
-  directly resolves that string with `File(appFilesRoot, config.relativePath)`
-  before creating parents and promoting a validated download.
-- `app/src/main/java/com/jesjobom/ararai/model/ModelResolver.kt:27` uses the same
-  unresolved construction. Existing parser tests cover normal nested paths but
-  no traversal/normalization rejection.
+## Vetted opportunities not planned in this default set
 
-Recommended boundary: validate normalized relative segments in the parser and
-defend again at every filesystem ownership boundary with canonical containment.
-Add parser/resolver/downloader tests for rejected escapes and accepted nested
-model paths.
-
-### ARA-AUD-002 evidence
-
-- `app/src/main/java/com/jesjobom/ararai/knowledge/WebSearchPreferences.kt:161`
-  suppresses every decryption failure and returns `null`.
-- The same file at `:167` and `:195` treats mere preference-key presence as a
-  configured credential, so corrupted/invalidated ciphertext can remain enabled.
-- `app/src/androidTest/java/com/jesjobom/ararai/WebSearchCredentialStoreTest.kt:18`
-  validates the successful save/restore/removal path but not invalidated keys or
-  malformed ciphertext.
-
-Recommended boundary: model unreadable credentials explicitly, disable/remove
-the unusable provider through a deliberate recovery policy, and add Android
-instrumentation coverage without ever logging token contents.
-
-### ARA-AUD-003 evidence
-
-- `app/build.gradle.kts:93` sets `release.isMinifyEnabled = false` while already
-  declaring the optimize ProGuard defaults and project rules.
-- The internal Play release was observed without R8 metadata/mapping during the
-  preceding release validation. No current release minification smoke gate
-  proves reflection, Compose, Firebase, LiteRT-LM, or JNI compatibility.
-
-Recommended boundary: first add a signed/unsigned release assembly and focused
-runtime smoke strategy, review keep rules and dependency consumer rules, then
-enable shrinking and preserve/upload mapping artifacts. Do not treat size alone
-as proof of correctness.
-
-### ARA-AUD-004 evidence
-
-- `.github/workflows/android-quality-gate.yml:29` names the step `Set up JDK 17`,
-  while `:33` configures `java-version: "21"`.
-- `docs/quality-gates.md:33`, `README.md:67`, and `openspec/project.md:71` state
-  JDK 17 as the supported build baseline. README separately documents Java 21 as
-  a Firebase emulator requirement.
-
-Recommended boundary: choose and document one Gradle runtime for the Android
-gate, and isolate any Java 21-only Firebase emulator invocation if both runtimes
-are genuinely required.
-
-### ARA-AUD-005 evidence
-
-- `app/src/main/java/com/jesjobom/ararai/model/ModelFileDownloader.kt:43` creates
-  an `HttpURLConnection`; `:51-59` throws on non-2xx without closing an error
-  stream or disconnecting.
-- Successful calls return only `connection.inputStream` at `:73`, losing the
-  connection handle; input close normally helps reuse/release but the ownership
-  contract is implicit and cannot guarantee explicit disconnect on every path.
-- Fallback behavior at `:100-174` may repeat this lifecycle for multiple URLs.
-
-Recommended boundary: make the byte response closeable or otherwise retain a
-cleanup callback and prove cleanup on success, HTTP failure, I/O failure, and
-cancellation with a controllable connection adapter.
-
-### ARA-AUD-006 evidence
-
-- `app/src/main/java/com/jesjobom/ararai/ui/ArarAiApp.kt` is 2,011 lines and has
-  31 touches in the inspected recent history, the highest first-party churn.
-- The file suppresses `TooManyFunctions` and contains application navigation,
-  home, settings, instruction/tools, provider credentials, benchmark, model
-  status, and model-card presentation.
-- Archived change `melhoria-7-separar-responsabilidades-da-tela-de-chat`
-  demonstrated a successful characterization-first extraction for Chat, and
-  `clarify-controller-lifecycle-and-boundaries` deliberately left navigation in
-  `ArarAiApp` for that slice rather than declaring the remaining concentration a
-  permanent architecture decision.
-
-Recommended boundary: characterize destination-level behavior and extract one
-cohesive destination at a time while retaining navigation/controller ownership.
-Avoid a single broad rewrite.
-
-## Dependency order
-
-1. ARA-AUD-004 is independent and improves environment reproducibility.
-2. ARA-AUD-001, ARA-AUD-002, and ARA-AUD-005 are independent focused hardening
-   candidates.
-3. ARA-AUD-003 requires release-build/runtime evidence before switching R8 on.
-4. ARA-AUD-006 should follow the security/correctness fixes and begin with
-   characterization tests; it must not obscure higher-priority scanner findings.
+- **Android lifecycle coverage (tests, high confidence):** The actual
+  `ForegroundServiceDidNotStartInTimeException` is recorded at
+  `docs/device-validation.md:3`; current
+  `WidgetAuthoringServiceIntentTest.kt:46-105` uses Robolectric intent/disposition
+  checks and `scripts/quality-gate.sh` assembles rather than executes Android
+  instrumentation. Plan 001 includes a focused service-lifecycle test and a
+  disposable-device execution gate. Do not run connected tests on the retained
+  SM-S901E: repository `AGENTS.md` explicitly prohibits it.
+- **Persistence architecture (medium leverage):**
+  `ManagedWidgetRepository.kt:297-562` owns schema/migrations, `:665-999` owns
+  execution state, and `:1001-1699` owns authoring state. A later
+  characterization-first extraction could separate SQL delegates while keeping
+  one transaction/`SQLiteOpenHelper` owner (L effort, medium fix risk). This is
+  not a precondition for the four correctness fixes.
+- **Product-direction spike, not a defect:**
+  `WidgetCollectionCardArtifact.kt:14-54` permits one path per title/body,
+  while `docs/managed-widgets.md:85-99` routes composed post-result text to
+  model-written custom source. The physical render-selection evidence in
+  `openspec/changes/archive/2026-10-15-simplify-widget-result-access/evidence/2026-10-15-sms901e-render-selection.md`
+  records repeated rejected attempts. Investigate a *bounded typed* title/body
+  composition contract only if real requests recur; retain provenance and the
+  documented no-filter/no-multiple-result limits. Product value is plausible,
+  not proven by this code audit (L effort, medium confidence).
+- **Project-context drift (docs, high confidence):** `openspec/project.md:57`
+  says no model advertises `widget_authoring_pipeline_v1`, but
+  `app/src/main/res/raw/fixed_model.properties:44` and consolidated spec
+  `openspec/specs/local-llm-hub/spec.md:4470` say E4B does. Correct during the
+  next documentation/OpenSpec maintenance pass; the consolidated spec and
+  catalog take precedence, so this is not an eligibility-code defect.
 
 ## Considered and rejected
 
-- **Web-search cancellation is swallowed:** rejected. The tool contract
-  intentionally serializes cancellation as `SEARCH_CANCELLED`, prevents provider
-  fallback on that result, and has explicit unit/instrumentation coverage.
-- **Web-search HTTP endpoints permit arbitrary SSRF:** rejected. Production
-  transport enforces HTTPS, exact host/path allowlists, no query/userinfo/port,
-  disables redirects, bounds responses, and applies timeouts.
-- **Chat media deletion accepts arbitrary paths:** rejected. The media repository
-  canonicalizes candidates and only owns direct children of the app media root;
-  the earlier media-ownership OpenSpec work documents this boundary.
-- **Firebase API key in `google-services.json` is a committed secret:** rejected.
-  It is public Firebase client configuration; authorization is enforced through
-  anonymous Auth, App Check, and Firestore Security Rules. Private signing and
-  debug-token material was not found in tracked filenames.
-- **Broad `Throwable` catches are automatically vulnerabilities:** rejected as a
-  blanket finding. Reviewed generation/transcription paths explicitly preserve
-  cancellation or use `finally` for cleanup. Narrowing individual catches may be
-  worthwhile during local changes, but no concrete user impact was established
-  for this audit register.
-- **Pending sideload report failure indicates broken retry:** rejected. Permanent
-  App Check failure is intentionally non-retryable and was verified during the
-  Play-distribution validation.
-
-## Direction
-
-No product-direction plans are proposed in this round. The repository already
-has explicit product constraints and this change is scoped to code quality and
-security improvement; speculative features would dilute the audit backlog.
-
-## Coverage limitations
-
-This `improve` pass did not execute Semgrep or CodeQL, perform a Gradle/native CVE
-reachability audit, analyze fetched upstream C/C++ source, or prove physical
-device, Firebase Console, Play signing, GPU/vendor, memory, or thermal behavior.
-Those are explicit later stages in the active OpenSpec change.
+- Reopening the August findings ARA-AUD-001 through ARA-AUD-005: current path
+  containment, credential recovery, release shrinking, Java alignment, and HTTP
+  ownership code contradict the archived observations; archived follow-up
+  changes document their implementation.
+- Treating `ArarAiApp.kt` size alone as a new P1: an incremental extraction was
+  completed and no specific current behavioral defect follows solely from its
+  line count. Review destination boundaries when touched next.
+- Running connected instrumentation on a data-bearing personal phone: the
+  repository warns the Gradle task may uninstall the package and erase app data.

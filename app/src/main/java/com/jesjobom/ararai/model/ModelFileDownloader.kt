@@ -114,7 +114,7 @@ class UrlModelByteSource(
     }
 }
 
-class ModelDownloadException(
+open class ModelDownloadException(
     message: String,
     cause: Throwable? = null,
 ) : Exception(message, cause)
@@ -137,6 +137,9 @@ class ModelFileDownloader(
         config: ModelConfig,
         onProgress: (ModelDownloadProgress) -> Unit,
     ): ModelResolutionState.Available = withContext(Dispatchers.IO) {
+        val expectedBytes = config.expectedBytes
+            ?.takeIf { it > 0L }
+            ?: throw ModelDownloadException("Configured model size must be positive for ${config.id}")
         val downloadUrls = listOf(config.url) + config.fallbackUrls
         val failures = mutableListOf<String>()
         val finalFile = ModelPathPolicy.resolveContained(appFilesRoot, config.relativePath)
@@ -149,13 +152,16 @@ class ModelFileDownloader(
         var previousUrl: String? = null
         for (url in downloadUrls) {
             if (previousUrl != null && previousUrl != url) {
-                tempFile.delete()
+                discardPartial(tempFile)
             }
             previousUrl = url
             val attemptConfig = config.copy(url = url)
             var cleanRetryAvailable = true
             attempts@ while (true) {
                 try {
+                    if (tempFile.isFile && tempFile.length() > expectedBytes) {
+                        discardPartial(tempFile)
+                    }
                     val requestedOffset = tempFile.takeIf(File::isFile)?.length() ?: 0L
                     val response = byteSource.open(attemptConfig, requestedOffset)
                     var appendedToPartial = false
@@ -166,7 +172,7 @@ class ModelFileDownloader(
                         java.io.FileOutputStream(tempFile, appendedToPartial).use { output ->
                             input.copyToWithProgress(
                                 output = output,
-                                totalBytes = config.expectedBytes,
+                                totalBytes = expectedBytes,
                                 initialBytes = if (appendedToPartial) requestedOffset else 0L,
                                 onProgress = onProgress,
                             )
@@ -176,7 +182,7 @@ class ModelFileDownloader(
                     when (val validation = ModelFileIntegrity.validate(tempFile, config)) {
                         ModelFileValidation.Valid -> Unit
                         is ModelFileValidation.Invalid -> {
-                            tempFile.delete()
+                            discardPartial(tempFile)
                             if (appendedToPartial && cleanRetryAvailable) {
                                 cleanRetryAvailable = false
                                 continue@attempts
@@ -190,7 +196,7 @@ class ModelFileDownloader(
                         Files.move(tempFile.toPath(), finalFile.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
                         ModelFileIntegrity.promoteVerification(tempFile, finalFile)
                     } catch (error: AtomicMoveNotSupportedException) {
-                        tempFile.delete()
+                        discardPartial(tempFile)
                         throw ModelDownloadException("Atomic model promotion is not supported", error)
                     }
 
@@ -204,6 +210,9 @@ class ModelFileDownloader(
                         }
                     }
                 } catch (error: ModelDownloadException) {
+                    if (error is ModelDownloadSizeExceededException) {
+                        discardPartial(tempFile)
+                    }
                     failures += error.message ?: error::class.java.simpleName
                     break@attempts
                 } catch (error: CancellationException) {
@@ -217,11 +226,19 @@ class ModelFileDownloader(
 
         throw ModelDownloadException("All configured download URLs failed for ${config.id}: ${failures.joinToString("; ")}")
     }
+
+    private fun discardPartial(tempFile: File) {
+        if (!tempFile.exists()) return
+        ModelFileIntegrity.invalidate(tempFile)
+        if (!tempFile.delete()) throw ModelDownloadException("Partial model could not be removed")
+    }
 }
+
+private class ModelDownloadSizeExceededException : ModelDownloadException("Model response exceeds configured size")
 
 private suspend fun InputStream.copyToWithProgress(
     output: java.io.OutputStream,
-    totalBytes: Long?,
+    totalBytes: Long,
     initialBytes: Long = 0L,
     onProgress: (ModelDownloadProgress) -> Unit,
 ) {
@@ -232,6 +249,7 @@ private suspend fun InputStream.copyToWithProgress(
         currentCoroutineContext().ensureActive()
         val read = read(buffer)
         if (read == -1) break
+        if (read > totalBytes - bytesCopied) throw ModelDownloadSizeExceededException()
         output.write(buffer, 0, read)
         bytesCopied += read
         onProgress(ModelDownloadProgress(bytesCopied, totalBytes))

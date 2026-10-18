@@ -257,12 +257,12 @@ internal class WidgetAuthoringPipelineModelController(
                 }
             }
             .firstOrNull { it is GenerationEvent.Completed || it is GenerationEvent.Failed }
-        return capture.capturedOrNull()?.let(WidgetAuthoringRoundResult::Captured)
-            ?: if (terminal is GenerationEvent.Failed) {
-                WidgetAuthoringRoundResult.Failed(terminal.kind)
-            } else {
-                WidgetAuthoringRoundResult.NoArtifact
-            }
+        return when (terminal) {
+            is GenerationEvent.Failed -> WidgetAuthoringRoundResult.Failed(terminal.kind)
+            GenerationEvent.Completed -> capture.capturedOrNull()?.let(WidgetAuthoringRoundResult::Captured)
+                ?: WidgetAuthoringRoundResult.NoArtifact
+            else -> WidgetAuthoringRoundResult.NoArtifact
+        }
     }
 }
 

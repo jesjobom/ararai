@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.widget.managed
 
 import com.jesjobom.ararai.engine.GenerationEvent
+import com.jesjobom.ararai.engine.GenerationFailureKind
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.PromptChatRole
 import com.jesjobom.ararai.engine.PromptRequest
@@ -82,6 +83,37 @@ class WidgetAuthoringPipelineModelTest {
         assertEquals(WidgetAuthoringModelPreparationResult.RecoveryTimedOut, result)
         assertEquals(1, engine.loadCalls)
         assertEquals(1, engine.unloadCalls)
+    }
+
+    @Test
+    fun `captured artifact is not accepted when generation later fails or ends without completion`() = runTest {
+        val failedEngine = RecordingStageEngine(
+            wait = false,
+            terminal = GenerationEvent.Failed(
+                "Model event delivery capacity exceeded",
+                GenerationFailureKind.Unexpected,
+            ),
+        )
+        val failedController = WidgetAuthoringPipelineModelController(failedEngine)
+        failedController.prepare(MODEL, INFERENCE)
+        assertEquals(
+            WidgetAuthoringRoundResult.Failed(GenerationFailureKind.Unexpected),
+            failedController.capture(MODEL, request()),
+        )
+
+        val missingTerminalEngine = RecordingStageEngine(wait = false, terminal = null)
+        val missingTerminalController = WidgetAuthoringPipelineModelController(missingTerminalEngine)
+        missingTerminalController.prepare(MODEL, INFERENCE)
+        assertEquals(WidgetAuthoringRoundResult.NoArtifact, missingTerminalController.capture(MODEL, request()))
+    }
+
+    @Test
+    fun `completed generation without artifact remains a missing artifact`() = runTest {
+        val engine = RecordingStageEngine(wait = false, captureArtifact = false)
+        val controller = WidgetAuthoringPipelineModelController(engine)
+        controller.prepare(MODEL, INFERENCE)
+
+        assertEquals(WidgetAuthoringRoundResult.NoArtifact, controller.capture(MODEL, request()))
     }
 
     @Test
@@ -409,7 +441,11 @@ class WidgetAuthoringPipelineModelTest {
         rejectedArtifact = rejectedArtifact,
     )
 
-    private class RecordingStageEngine(private val wait: Boolean) : LocalLlmEngine {
+    private class RecordingStageEngine(
+        private val wait: Boolean,
+        private val terminal: GenerationEvent? = GenerationEvent.Completed,
+        private val captureArtifact: Boolean = true,
+    ) : LocalLlmEngine {
         var loadedConfig: InferenceConfig? = null
         var loadCalls = 0
         var unloadCalls = 0
@@ -431,8 +467,8 @@ class WidgetAuthoringPipelineModelTest {
                 if (wait) {
                     awaitCancellation()
                 } else {
-                    request.ephemeralTools.single().execute(CAPTURED_ARGUMENTS)
-                    emit(GenerationEvent.Completed)
+                    if (captureArtifact) request.ephemeralTools.single().execute(CAPTURED_ARGUMENTS)
+                    terminal?.let { emit(it) }
                 }
             } finally {
                 released = true

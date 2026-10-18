@@ -1,6 +1,7 @@
 package com.jesjobom.ararai
 
 import android.app.Application
+import android.app.Notification
 import androidx.test.core.app.ApplicationProvider
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
@@ -10,6 +11,7 @@ import com.jesjobom.ararai.widget.managed.WidgetAuthoringCheckpoint
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobRequest
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobState
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringNotificationAction
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringNotificationProjector
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringSession
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringSessionSnapshot
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringSessionStatus
@@ -40,6 +42,84 @@ class WidgetAuthoringServiceIntentTest {
         assertTrue(intent.matchesWidgetAuthoringSession(snapshot))
         assertFalse(intent.matchesWidgetAuthoringSession(snapshot(revision = 5)))
         assertFalse(intent.matchesWidgetAuthoringSession(null))
+    }
+
+    @Test
+    fun `stale notification actions leave a newer running attempt foreground`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val old = snapshot(revision = 4, status = WidgetAuthoringSessionStatus.AttemptRunning)
+        val current = snapshot(revision = 5, status = WidgetAuthoringSessionStatus.AttemptRunning)
+
+        listOf(
+            WidgetAuthoringNotificationAction.Cancel,
+            WidgetAuthoringNotificationAction.Continue,
+            WidgetAuthoringNotificationAction.Retry,
+        ).forEach { action ->
+            val staleIntent = WidgetAuthoringService.workflowActionIntent(context, old, action)
+            assertFalse(staleIntent.matchesWidgetAuthoringSession(current))
+            assertEquals(
+                WidgetAuthoringForegroundDisposition.Keep,
+                widgetAuthoringForegroundDisposition(current, null),
+            )
+        }
+    }
+
+    @Test
+    fun `matching cancel targets the current attempt and keeps foreground until cancellation completes`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val running = snapshot(revision = 5, status = WidgetAuthoringSessionStatus.AttemptRunning)
+        val cancel = WidgetAuthoringService.workflowActionIntent(
+            context,
+            running,
+            WidgetAuthoringNotificationAction.Cancel,
+        )
+
+        assertTrue(cancel.matchesWidgetAuthoringSession(running))
+        assertEquals(
+            WidgetAuthoringForegroundDisposition.Keep,
+            widgetAuthoringForegroundDispositionForStart(7, 7, running, null),
+        )
+        assertTrue(WidgetAuthoringNotificationProjector.project(running).ongoing)
+        assertTrue(
+            WidgetAuthoringNotificationProjector.project(running).actions.contains(
+                WidgetAuthoringNotificationAction.Cancel,
+            ),
+        )
+        val notification = ResumableWidgetAuthoringNotificationPresenter(context).notification(running)
+        assertTrue(notification.flags and Notification.FLAG_ONGOING_EVENT != 0)
+        assertEquals(1, notification.actions.size)
+    }
+
+    @Test
+    fun `duplicate notification delivery retains stable action identity but rejects a newer revision`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val current = snapshot(revision = 5, status = WidgetAuthoringSessionStatus.AttemptRunning)
+        val first = WidgetAuthoringService.workflowActionIntent(
+            context,
+            current,
+            WidgetAuthoringNotificationAction.Cancel,
+        )
+        val redelivered = WidgetAuthoringService.workflowActionIntent(
+            context,
+            current,
+            WidgetAuthoringNotificationAction.Cancel,
+        )
+
+        assertEquals(first.action, redelivered.action)
+        assertEquals(first.extras?.getString("action_id"), redelivered.extras?.getString("action_id"))
+        assertTrue(redelivered.matchesWidgetAuthoringSession(current))
+        assertFalse(redelivered.matchesWidgetAuthoringSession(snapshot(revision = 6)))
+    }
+
+    @Test
+    fun `older asynchronous completion cannot alter a newer service start`() {
+        val newerRunning = snapshot(revision = 6, status = WidgetAuthoringSessionStatus.AttemptRunning)
+
+        assertNull(widgetAuthoringForegroundDispositionForStart(7, 8, newerRunning, null))
+        assertEquals(
+            WidgetAuthoringForegroundDisposition.Keep,
+            widgetAuthoringForegroundDispositionForStart(8, 8, newerRunning, null),
+        )
     }
 
     @Test

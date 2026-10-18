@@ -41,9 +41,12 @@ import com.jesjobom.ararai.tools.ApplicationToolDispatcher
 import com.jesjobom.ararai.tools.WIKIPEDIA_ON_THIS_DAY_TOOL_NAME
 import com.jesjobom.ararai.tools.WIKIPEDIA_PAGES_TOOL_NAME
 import com.jesjobom.ararai.tools.modelApplicationToolDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -61,6 +64,9 @@ class LiteRtLmLocalLlmEngine(
 ) : LocalLlmEngine {
     override val supportsIncrementalConversation: Boolean = true
     private val lock = Any()
+
+    // Native session ownership order: generationMutex -> transitionMutex.
+    // A transition cannot close a session while a generation holds its lease.
     private val transitionMutex = Mutex()
     private val generationMutex = Mutex()
     private var loadedSession: LiteRtLmSession? = null
@@ -93,60 +99,68 @@ class LiteRtLmLocalLlmEngine(
         model: LocalModel,
         config: InferenceConfig,
         profile: LiteRtLmWorkloadProfile,
-    ) = withContext(dispatcher + NonCancellable) {
-        transitionMutex.withLock {
-            check(model.runtime == ModelRuntime.LiteRtLm) {
-                "Unsupported local model runtime: ${model.runtime.displayName}"
-            }
-
-            val alreadyLoaded =
-                synchronized(lock) {
-                    val isLoaded =
-                        loadedSession != null &&
-                            loadedModelId == model.id &&
-                            loadedModelPath == model.filePath &&
-                            loadedConfig?.contextTokens == config.contextTokens &&
-                            loadedProfile == profile
-                    if (isLoaded) {
-                        loadedConfig = config
-                        loadedInputCapabilities = model.inputCapabilities
-                        loadedToolNames = model.toolCapabilities.toolNames
-                        loadedAuthoringToolNames = model.toolCapabilities.allowedAuthoringToolNames
+    ) = withContext(dispatcher) {
+        generationMutex.withLock {
+            withContext(NonCancellable) {
+                transitionMutex.withLock {
+                    check(model.runtime == ModelRuntime.LiteRtLm) {
+                        "Unsupported local model runtime: ${model.runtime.displayName}"
                     }
-                    isLoaded
-                }
-            if (alreadyLoaded) {
-                runtimeTelemetry.record(
-                    event = "engine_load_reused",
-                    resourceId = synchronized(lock) { loadedSession?.let { System.identityHashCode(it) } },
-                    outcome = "success",
-                )
-                return@withLock
-            }
 
-            replaceSessionLocked(model, config, profile)
+                    val alreadyLoaded =
+                        synchronized(lock) {
+                            val isLoaded =
+                                loadedSession != null &&
+                                    loadedModelId == model.id &&
+                                    loadedModelPath == model.filePath &&
+                                    loadedConfig?.contextTokens == config.contextTokens &&
+                                    loadedProfile == profile
+                            if (isLoaded) {
+                                loadedConfig = config
+                                loadedInputCapabilities = model.inputCapabilities
+                                loadedToolNames = model.toolCapabilities.toolNames
+                                loadedAuthoringToolNames = model.toolCapabilities.allowedAuthoringToolNames
+                            }
+                            isLoaded
+                        }
+                    if (alreadyLoaded) {
+                        runtimeTelemetry.record(
+                            event = "engine_load_reused",
+                            resourceId = synchronized(lock) { loadedSession?.let { System.identityHashCode(it) } },
+                            outcome = "success",
+                        )
+                        return@withLock
+                    }
+
+                    replaceSessionLocked(model, config, profile)
+                }
+            }
         }
     }
 
     override suspend fun reload(
         model: LocalModel,
         config: InferenceConfig,
-    ) = withContext(dispatcher + NonCancellable) {
-        transitionMutex.withLock {
-            check(model.runtime == ModelRuntime.LiteRtLm) {
-                "Unsupported local model runtime: ${model.runtime.displayName}"
-            }
-            runtimeTelemetry.record(event = "engine_reload_started", elapsedMillis = 0)
-            try {
-                replaceSessionLocked(model, config, LiteRtLmWorkloadProfile.TextOnly)
-                runtimeTelemetry.record(
-                    event = "engine_reload_finished",
-                    resourceId = synchronized(lock) { loadedSession?.let(System::identityHashCode) },
-                    outcome = "success",
-                )
-            } catch (error: Throwable) {
-                runtimeTelemetry.record(event = "engine_reload_finished", outcome = "failed")
-                throw error
+    ) = withContext(dispatcher) {
+        generationMutex.withLock {
+            withContext(NonCancellable) {
+                transitionMutex.withLock {
+                    check(model.runtime == ModelRuntime.LiteRtLm) {
+                        "Unsupported local model runtime: ${model.runtime.displayName}"
+                    }
+                    runtimeTelemetry.record(event = "engine_reload_started", elapsedMillis = 0)
+                    try {
+                        replaceSessionLocked(model, config, LiteRtLmWorkloadProfile.TextOnly)
+                        runtimeTelemetry.record(
+                            event = "engine_reload_finished",
+                            resourceId = synchronized(lock) { loadedSession?.let(System::identityHashCode) },
+                            outcome = "success",
+                        )
+                    } catch (error: Throwable) {
+                        runtimeTelemetry.record(event = "engine_reload_finished", outcome = "failed")
+                        throw error
+                    }
+                }
             }
         }
     }
@@ -156,39 +170,39 @@ class LiteRtLmLocalLlmEngine(
         config: InferenceConfig,
         awaitReady: suspend () -> Boolean,
     ): Boolean = withContext(dispatcher) {
-        transitionMutex.withLock {
-            check(model.runtime == ModelRuntime.LiteRtLm) {
-                "Unsupported local model runtime: ${model.runtime.displayName}"
-            }
-            runtimeTelemetry.record(event = "engine_recovery_started", elapsedMillis = 0)
-            try {
-                withContext(NonCancellable) { unloadLocked() }
-                runtimeTelemetry.record(event = "engine_recovery_unloaded", outcome = "success")
-                if (!awaitReady()) {
-                    runtimeTelemetry.record(event = "engine_recovery_finished", outcome = "timed_out")
-                    return@withLock false
+        generationMutex.withLock {
+            transitionMutex.withLock {
+                check(model.runtime == ModelRuntime.LiteRtLm) {
+                    "Unsupported local model runtime: ${model.runtime.displayName}"
                 }
-                runtimeTelemetry.record(event = "engine_recovery_reload_started", elapsedMillis = 0)
-                withContext(NonCancellable) {
-                    replaceSessionLocked(model, config, LiteRtLmWorkloadProfile.TextOnly)
+                runtimeTelemetry.record(event = "engine_recovery_started", elapsedMillis = 0)
+                try {
+                    withContext(NonCancellable) { unloadLocked() }
+                    runtimeTelemetry.record(event = "engine_recovery_unloaded", outcome = "success")
+                    if (!awaitReady()) {
+                        runtimeTelemetry.record(event = "engine_recovery_finished", outcome = "timed_out")
+                        return@withLock false
+                    }
+                    runtimeTelemetry.record(event = "engine_recovery_reload_started", elapsedMillis = 0)
+                    withContext(NonCancellable) {
+                        replaceSessionLocked(model, config, LiteRtLmWorkloadProfile.TextOnly)
+                    }
+                    runtimeTelemetry.record(
+                        event = "engine_recovery_finished",
+                        resourceId = synchronized(lock) { loadedSession?.let(System::identityHashCode) },
+                        outcome = "success",
+                    )
+                    true
+                } catch (error: Throwable) {
+                    runtimeTelemetry.record(event = "engine_recovery_finished", outcome = "failed")
+                    throw error
                 }
-                runtimeTelemetry.record(
-                    event = "engine_recovery_finished",
-                    resourceId = synchronized(lock) { loadedSession?.let(System::identityHashCode) },
-                    outcome = "success",
-                )
-                true
-            } catch (error: Throwable) {
-                runtimeTelemetry.record(event = "engine_recovery_finished", outcome = "failed")
-                throw error
             }
         }
     }
 
     @Suppress("LongMethod")
     override fun generate(request: PromptRequest): Flow<GenerationEvent> = callbackFlow {
-        val generationStarted = AtomicBoolean(false)
-        val generationFinished = AtomicBoolean(false)
         val job =
             launch(dispatcher) {
                 try {
@@ -205,7 +219,7 @@ class LiteRtLmLocalLlmEngine(
                             }
                         if (initialState == null) {
                             runtimeTelemetry.record(event = "generation_request_rejected", outcome = "model_not_loaded")
-                            trySend(expectedGenerationFailure("Model is not loaded"))
+                            send(expectedGenerationFailure("Model is not loaded"))
                             return@generation
                         }
                         request.validateAgainst(initialState.capabilities)?.let { failure ->
@@ -213,7 +227,7 @@ class LiteRtLmLocalLlmEngine(
                                 event = "generation_request_rejected",
                                 outcome = "capability_validation",
                             )
-                            trySend(expectedGenerationFailure(failure))
+                            send(expectedGenerationFailure(failure))
                             return@generation
                         }
                         if (!request.toolsAreSupported(initialState)) {
@@ -221,53 +235,66 @@ class LiteRtLmLocalLlmEngine(
                                 event = "generation_request_rejected",
                                 outcome = "tools_unsupported",
                             )
-                            trySend(expectedGenerationFailure("Selected model does not support the requested tools"))
+                            send(expectedGenerationFailure("Selected model does not support the requested tools"))
                             return@generation
                         }
                         val session = transitionMutex.withLock {
-                            ensureProfile(LiteRtLmWorkloadProfile.from(request))
+                            // A native profile switch may finish after the collector is cancelled.
+                            // Publish its new session before releasing the transition gate so it
+                            // remains owned and can be unloaded by the next caller.
+                            withContext(NonCancellable) {
+                                ensureProfile(LiteRtLmWorkloadProfile.from(request))
+                            }
                         }
-                        generationStarted.set(true)
-                        session.generate(request, initialState.config).collect { chunk ->
-                            chunk.toGenerationEvents().forEach { trySend(it) }
+                        var completed = false
+                        try {
+                            session.generate(request, initialState.config).collect { chunk ->
+                                chunk.toGenerationEvents().forEach { send(it) }
+                            }
+                            send(GenerationEvent.Completed)
+                            completed = true
+                        } finally {
+                            if (!completed) session.cancel()
                         }
-                        generationFinished.set(true)
-                        trySend(GenerationEvent.Completed)
                     }
                 } catch (error: Throwable) {
-                    val failure = error.toGenerationFailure()
-                    runtimeTelemetry.record(
-                        event = "generation_request_failed",
-                        outcome = when (failure.kind) {
-                            GenerationFailureKind.ToolCallParsing -> "tool_call_parsing"
-                            GenerationFailureKind.Unexpected -> "unexpected"
-                            GenerationFailureKind.Expected -> "expected"
-                        },
-                    )
-                    trySend(failure)
+                    reportGenerationFailure(error) { send(it) }
                 } finally {
-                    generationFinished.set(true)
                     close()
                 }
             }
 
-        awaitClose {
-            if (generationStarted.get() && !generationFinished.get()) {
-                synchronized(lock) { loadedSession }?.cancel()
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun prepare(workload: LocalLlmWorkload) = generationMutex.withLock {
+        transitionMutex.withLock {
+            withContext(dispatcher + NonCancellable) {
+                ensureProfile(LiteRtLmWorkloadProfile(image = workload.image, audio = workload.audio))
+                Unit
             }
-            job.cancel()
         }
     }
 
-    override suspend fun prepare(workload: LocalLlmWorkload) = transitionMutex.withLock {
-        withContext(dispatcher + NonCancellable) {
-            ensureProfile(LiteRtLmWorkloadProfile(image = workload.image, audio = workload.audio))
-            Unit
-        }
+    override suspend fun unload() = generationMutex.withLock {
+        transitionMutex.withLock { withContext(NonCancellable) { unloadLocked() } }
     }
 
-    override suspend fun unload() = transitionMutex.withLock {
-        unloadLocked()
+    private suspend fun reportGenerationFailure(
+        error: Throwable,
+        sendFailure: suspend (GenerationEvent.Failed) -> Unit,
+    ) {
+        if (error is CancellationException) throw error
+        val failure = error.toGenerationFailure()
+        runtimeTelemetry.record(
+            event = "generation_request_failed",
+            outcome = when (failure.kind) {
+                GenerationFailureKind.ToolCallParsing -> "tool_call_parsing"
+                GenerationFailureKind.Unexpected -> "unexpected"
+                GenerationFailureKind.Expected -> "expected"
+            },
+        )
+        sendFailure(failure)
     }
 
     private suspend fun unloadLocked() {
@@ -434,6 +461,46 @@ private fun expectedGenerationFailure(message: String) = GenerationEvent.Failed(
     message = message,
     kind = GenerationFailureKind.Expected,
 )
+
+@OptIn(DelicateCoroutinesApi::class)
+internal class BoundedCallbackDelivery<T>(
+    private val channel: SendChannel<T>,
+    private val onOverflow: () -> Unit,
+) {
+    private val gate = Any()
+    private var state = DeliveryState.Active
+    val overflowed: Boolean get() = synchronized(gate) { state == DeliveryState.Overflow }
+    val active: Boolean get() = synchronized(gate) { state == DeliveryState.Active && !channel.isClosedForSend }
+
+    fun emit(value: T): Boolean {
+        var overflowNow = false
+        val sent = synchronized(gate) {
+            if (state != DeliveryState.Active) {
+                false
+            } else {
+                val result = channel.trySend(value)
+                // A closed channel is normal caller cancellation, not queue overflow.
+                if (result.isFailure && !result.isClosed) {
+                    state = DeliveryState.Overflow
+                    overflowNow = true
+                }
+                result.isSuccess
+            }
+        }
+        if (overflowNow) onOverflow()
+        return sent
+    }
+
+    fun complete(): Boolean = synchronized(gate) {
+        if (state != DeliveryState.Active || channel.isClosedForSend) return false
+        state = DeliveryState.Completed
+        true
+    }
+
+    private enum class DeliveryState { Active, Overflow, Completed }
+}
+
+private class ModelEventOverflowException : Exception("Model event delivery capacity exceeded")
 
 private fun generationOutcome(
     completed: Boolean,
@@ -653,8 +720,24 @@ private class AndroidLiteRtLmSession(
         val canReuse = selected.reused
         val conversation = created.conversation
         val conversationId = System.identityHashCode(conversation)
+        val reusable = key.sessionId != null
+        val completed = AtomicBoolean(false)
+        val errored = AtomicBoolean(false)
+        val firstCallbackObserved = AtomicBoolean(false)
+        val delivery = BoundedCallbackDelivery(this) {
+            errored.set(true)
+            runtimeTelemetry.record(
+                event = "generation_event_overflow",
+                requestId = requestId,
+                resourceId = conversationId,
+                outcome = "failed",
+            )
+            // Closing schedules awaitClose cleanup on the producer coroutine; the
+            // native callback never blocks or re-enters cancellation itself.
+            close(ModelEventOverflowException())
+        }
         created.wikipediaTool?.beginTurn { event ->
-            trySend(
+            delivery.emit(
                 LiteRtLmChunk(
                     toolEvent = event,
                     toolName = WIKIPEDIA_SEARCH_TOOL_NAME,
@@ -664,7 +747,7 @@ private class AndroidLiteRtLmSession(
         }
         created.structuredWikipediaTools.forEach { wikipediaTool ->
             wikipediaTool.beginTurn { event ->
-                trySend(
+                delivery.emit(
                     LiteRtLmChunk(
                         toolEvent = event,
                         toolName = wikipediaTool.toolId,
@@ -674,7 +757,7 @@ private class AndroidLiteRtLmSession(
             }
         }
         created.webSearchTool?.beginTurn { event ->
-            trySend(
+            delivery.emit(
                 LiteRtLmChunk(
                     toolEvent = event,
                     toolName = WEB_SEARCH_TOOL_NAME,
@@ -692,7 +775,7 @@ private class AndroidLiteRtLmSession(
                         ApplicationToolExecutionEvent.Failed(ToolFailureReason.Unavailable)
                     }
             }
-            trySend(
+            delivery.emit(
                 LiteRtLmChunk(
                     toolEvent = mapped,
                     toolName = CALCULATOR_TOOL_NAME,
@@ -710,11 +793,6 @@ private class AndroidLiteRtLmSession(
             resourceId = conversationId,
             elapsedMillis = generationStartedAt.elapsedMillis(),
         )
-        val reusable = key.sessionId != null
-        val completed = AtomicBoolean(false)
-        val errored = AtomicBoolean(false)
-        val firstCallbackObserved = AtomicBoolean(false)
-
         try {
             conversations.activate(conversation)
             var previousText = ""
@@ -738,18 +816,12 @@ private class AndroidLiteRtLmSession(
                         previousText = currentText
                         previousReasoning = currentReasoning
                         if (textDelta.isNotEmpty() || reasoningDelta.isNotEmpty()) {
-                            trySend(LiteRtLmChunk(text = textDelta, reasoning = reasoningDelta))
+                            delivery.emit(LiteRtLmChunk(text = textDelta, reasoning = reasoningDelta))
                         }
                     }
 
                     override fun onDone() {
-                        runtimeTelemetry.record(
-                            event = "model_done",
-                            requestId = requestId,
-                            resourceId = conversationId,
-                            elapsedMillis = generationStartedAt.elapsedMillis(),
-                            outcome = "success",
-                        )
+                        if (!delivery.active) return
                         runCatching { conversation.getBenchmarkInfo() }
                             .onFailure { error ->
                                 Log.w("ArarAI.LiteRtLm", "Unable to read LiteRT-LM benchmark metrics", error)
@@ -761,7 +833,7 @@ private class AndroidLiteRtLmSession(
                                         "prefillTokens=${benchmark.lastPrefillTokenCount}, " +
                                         "prefillTokensPerSecond=${benchmark.lastPrefillTokensPerSecond}",
                                 )
-                                trySend(
+                                delivery.emit(
                                     LiteRtLmChunk(
                                         metrics =
                                         liteRtLmGenerationMetrics(
@@ -774,6 +846,14 @@ private class AndroidLiteRtLmSession(
                                     ),
                                 )
                             }
+                        if (!delivery.complete()) return
+                        runtimeTelemetry.record(
+                            event = "model_done",
+                            requestId = requestId,
+                            resourceId = conversationId,
+                            elapsedMillis = generationStartedAt.elapsedMillis(),
+                            outcome = "success",
+                        )
                         if (reusable) {
                             conversations.retain(
                                 resource = conversation,
@@ -793,6 +873,7 @@ private class AndroidLiteRtLmSession(
                     }
 
                     override fun onError(throwable: Throwable) {
+                        if (!delivery.active) return
                         errored.set(true)
                         runtimeTelemetry.record(
                             event = "model_error",

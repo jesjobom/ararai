@@ -91,13 +91,15 @@ internal class WidgetAuthoringWorkflowCoordinator(
         inference: InferenceConfig,
         modelArtifactDigest: String,
         actionId: String,
+        expectedSession: WidgetAuthoringSessionSnapshot? = null,
     ): RunWidgetAuthoringStageResult = submit(
         model,
         inference,
         modelArtifactDigest,
         actionId,
-        requireNotNull(activeSession.value).session.currentStage,
+        (expectedSession ?: requireNotNull(activeSession.value)).session.currentStage,
         WidgetAuthoringAttemptKind.Repair,
+        expectedSession,
     )
 
     suspend fun reprocess(
@@ -115,8 +117,12 @@ internal class WidgetAuthoringWorkflowCoordinator(
         WidgetAuthoringAttemptKind.Reprocess,
     )
 
-    suspend fun acceptCurrent(actionId: String): AcceptWidgetAuthoringStageResult {
+    suspend fun acceptCurrent(
+        actionId: String,
+        expectedSession: WidgetAuthoringSessionSnapshot? = null,
+    ): AcceptWidgetAuthoringStageResult {
         val snapshot = requireNotNull(activeSession.value)
+        snapshot.requireNotificationRevision(expectedSession)
         WidgetAuthoringWorkflowStateMachine.requireAllowed(snapshot, WidgetAuthoringUserAction.Continue)
         val attempt = snapshot.attempts.last { attempt ->
             attempt.stage == snapshot.session.currentStage &&
@@ -174,6 +180,11 @@ internal class WidgetAuthoringWorkflowCoordinator(
 
     fun cancelActiveAttempt(): Boolean = controller.cancelActiveAttempt()
 
+    suspend fun cancelExpectedAttempt(
+        sessionId: String,
+        attemptId: String,
+    ): Boolean = controller.cancelExpectedAttempt(sessionId, attemptId)
+
     suspend fun discard(): Boolean {
         val snapshot = requireNotNull(activeSession.value)
         WidgetAuthoringWorkflowStateMachine.requireAllowed(snapshot, WidgetAuthoringUserAction.Discard)
@@ -187,8 +198,10 @@ internal class WidgetAuthoringWorkflowCoordinator(
         actionId: String,
         stage: WidgetAuthoringStageKey,
         kind: WidgetAuthoringAttemptKind,
+        expectedSession: WidgetAuthoringSessionSnapshot? = null,
     ): RunWidgetAuthoringStageResult {
         val snapshot = requireNotNull(activeSession.value)
+        snapshot.requireNotificationRevision(expectedSession)
         if (!snapshot.configurationMatches(model, inference, modelArtifactDigest)) {
             return RunWidgetAuthoringStageResult.ConfigurationChanged
         }
@@ -206,6 +219,15 @@ internal class WidgetAuthoringWorkflowCoordinator(
                 WidgetAuthoringAttemptExecution(model, inference, prompt, runtimeContextProvider()),
             ),
         )
+    }
+
+    private fun WidgetAuthoringSessionSnapshot.requireNotificationRevision(
+        expected: WidgetAuthoringSessionSnapshot?,
+    ) {
+        if (expected == null) return
+        check(session.id == expected.session.id && session.revision == expected.session.revision) {
+            "Notification action is stale"
+        }
     }
 
     private suspend fun acceptRenderOrStop(

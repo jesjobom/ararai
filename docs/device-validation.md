@@ -1,5 +1,47 @@
 # ArarAI physical-device validation
 
+## 2026-10-18 — E2B native stream cancellation and reload
+
+On the connected SM-S901E (Android 16), debug APK `202610181748` (SHA-256
+`76bdc64c79bf946b33ce1ff42ae6aedfd51a6107994a939ad74defb5f92d3242`)
+passed a focused physical instrumentation test with the installed Gemma 4 E2B
+artifact and synthetic text: complete generation, cancellation after the first
+token, native reload, and another complete generation. AndroidJUnitRunner
+reported `OK (1 test)` in 52.578 s. The app and instrumentation APKs were
+updated with `adb install -r` and `adb install -r -t` and run through
+`am instrument`, avoiding a package uninstall; the 6.0 GiB model directory
+remained present. See the archived change's dated `evidence/2026-10-18-closure.md`
+for build identity and outstanding Voice/widget/service-lifecycle coverage.
+
+JJ also reported two successful audio-via-Chat turns, one without transcription
+and one with. These are not a dedicated Voice Chat cancellation/reload matrix.
+
+## 2026-10-18 — E4B image low-memory result on SM-S901E
+
+JJ tested Gemma 4 E4B image turns on the retained SM-S901E (Android 16) with
+the current debug app, a temporary 512 px image variant, and an isolated
+pre-widget `main` build (`c9de4eb`, `com.jesjobom.ararai.abmain`, APK
+`202610181532`, SHA-256
+`75e1cc9c1b10e34732b7d3678b3a1ed0e0d47e87647ae2ac241f5d3993f47ad1`).
+The isolated app used the same verified E4B artifact and did not replace the
+retained app. On pre-widget `main`, one image yielded a description before the
+app closed and another yielded no description; Android recorded two
+`LOW_MEMORY` exits. Both imported images were normalized to a 1024 px longest
+side. The 512 px variant also remained unreliable: a context-2048 turn yielded
+a response but the app then closed. E2B image inference was reported working
+on the retained app.
+
+Conclusion: E4B image inference with the present LiteRT-LM configuration is
+not reliable on this SM-S901E. The pre-widget reproduction makes widget code
+an unlikely primary cause; it is not evidence of a universal E4B limitation.
+Full sanitized observations and build identities are in
+`openspec/changes/archive/2026-10-18-harden-model-runtime-and-authoring-reliability/evidence/2026-10-18-chat-image-lmk.md`.
+After the A/B test, the isolated app was uninstalled and the widget-enabled
+debug APK `202610181550` (SHA-256
+`9ef72c02bc18551c2d33c7510fd92e1e5dd97a4b1dcafade45c2ff3a77cded3d`)
+was installed over the retained app with the original 1024 px image limit.
+The E2B/E4B artifacts and widget database remained present.
+
 ## 2026-10-11 — staged-authoring foreground-service race
 
 On SM-S901E (America/Toronto), repeated widget-authoring closes were traced
