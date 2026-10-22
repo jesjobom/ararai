@@ -206,7 +206,7 @@ class WidgetAuthoringWorkflowRepositoryTest {
 
     @Test
     @Suppress("LongMethod")
-    fun `failed replacement preserves accepted graph and consumes persisted repair budget`() {
+    fun `failed replacement preserves accepted graph across restart and repeated repairs`() {
         var repository = repository()
         var snapshot = repository.createAuthoringSession(request())
         snapshot = acceptSuccessfulStage(repository, snapshot, WidgetAuthoringStageKey.Feasibility, "f", "{}")
@@ -257,18 +257,17 @@ class WidgetAuthoringWorkflowRepositoryTest {
                 ),
             )
         }
-        assertThrows(IllegalArgumentException::class.java) {
-            repository.startAuthoringAttempt(
-                StartWidgetAuthoringAttempt(
-                    snapshot.session.id,
-                    snapshot.session.revision,
-                    "replacement-repair-exhausted",
-                    WidgetAuthoringStageKey.Feasibility,
-                    WidgetAuthoringAttemptKind.Repair,
-                    EMPTY_DIGEST,
-                ),
-            )
-        }
+        val furtherRepair = repository.startAuthoringAttempt(
+            StartWidgetAuthoringAttempt(
+                snapshot.session.id,
+                snapshot.session.revision,
+                "replacement-repair-further",
+                WidgetAuthoringStageKey.Feasibility,
+                WidgetAuthoringAttemptKind.Repair,
+                EMPTY_DIGEST,
+            ),
+        ) as StartWidgetAuthoringAttemptResult.Started
+        assertEquals(4, furtherRepair.attempt.attemptNumber)
         assertEquals(WidgetAuthoringCheckpointStatus.Accepted, snapshot.checkpoints.single().status)
     }
 
@@ -379,10 +378,10 @@ class WidgetAuthoringWorkflowRepositoryTest {
     }
 
     @Test
-    fun `repair budget survives reload and discard requires current inactive revision`() {
+    fun `manual retries remain available beyond three attempts and discard requires current revision`() {
         val repository = repository()
         var snapshot = repository.createAuthoringSession(request())
-        repeat(3) { index ->
+        repeat(5) { index ->
             val kind = if (index == 0) WidgetAuthoringAttemptKind.Initial else WidgetAuthoringAttemptKind.Repair
             val started = repository.startAuthoringAttempt(
                 StartWidgetAuthoringAttempt(
@@ -405,21 +404,51 @@ class WidgetAuthoringWorkflowRepositoryTest {
             )
         }
 
-        assertThrows(IllegalArgumentException::class.java) {
-            repository.startAuthoringAttempt(
-                StartWidgetAuthoringAttempt(
-                    snapshot.session.id,
-                    snapshot.session.revision,
-                    "attempt-3",
-                    WidgetAuthoringStageKey.Feasibility,
-                    WidgetAuthoringAttemptKind.Repair,
-                    EMPTY_DIGEST,
-                ),
-            )
-        }
+        assertEquals(5, repository.authoringSession(snapshot.session.id)?.attempts?.size)
+        assertTrue(WidgetAuthoringUserAction.Retry in WidgetAuthoringWorkflowStateMachine.allowedActions(snapshot))
         assertFalse(repository.discardAuthoringSession(snapshot.session.id, snapshot.session.revision - 1))
         assertTrue(repository.discardAuthoringSession(snapshot.session.id, snapshot.session.revision))
         assertEquals(null, repository.activeAuthoringSession())
+    }
+
+    @Test
+    fun `successful candidate can be reprocessed before acceptance`() {
+        val repository = repository()
+        val created = repository.createAuthoringSession(request())
+        val first = repository.startAuthoringAttempt(
+            StartWidgetAuthoringAttempt(
+                created.session.id,
+                created.session.revision,
+                "initial",
+                WidgetAuthoringStageKey.Feasibility,
+                WidgetAuthoringAttemptKind.Initial,
+                EMPTY_DIGEST,
+            ),
+        ) as StartWidgetAuthoringAttemptResult.Started
+        val review = repository.completeAuthoringAttempt(
+            CompleteWidgetAuthoringAttempt(
+                created.session.id,
+                first.attempt.id,
+                WidgetAuthoringAttemptStatus.Succeeded,
+                FEASIBILITY,
+                null,
+            ),
+        )
+
+        val rerun = repository.startAuthoringAttempt(
+            StartWidgetAuthoringAttempt(
+                review.session.id,
+                review.session.revision,
+                "rerun",
+                WidgetAuthoringStageKey.Feasibility,
+                WidgetAuthoringAttemptKind.Reprocess,
+                EMPTY_DIGEST,
+            ),
+        ) as StartWidgetAuthoringAttemptResult.Started
+
+        assertEquals(2, rerun.attempt.stageRevision)
+        assertEquals(2, repository.authoringSession(created.session.id)?.attempts?.size)
+        assertTrue(repository.authoringSession(created.session.id)?.checkpoints?.isEmpty() == true)
     }
 
     @Test

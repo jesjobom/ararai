@@ -4,6 +4,7 @@ package com.jesjobom.ararai.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -43,6 +45,7 @@ import com.jesjobom.ararai.widget.managed.RunWidgetAuthoringStageResult
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringAssemblyResult
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringAttemptDetails
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringAttemptKind
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringAttemptStatus
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringCheckpointStatus
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringSessionStatus
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringStageDisplayStatus
@@ -317,37 +320,35 @@ internal fun ResumableManagedWidgetAuthoringRoute(
                     }
                 }
                 projection.stages.forEach { stage ->
+                    val current = stage.stage == projection.currentStage
                     AuthoringStageCard(
                         stage = stage,
                         reprocessEnabled = WidgetAuthoringUserAction.Reprocess in projection.allowedActions &&
-                            stage.acceptedCheckpoint?.status == WidgetAuthoringCheckpointStatus.Accepted &&
-                            !working,
+                            (
+                                stage.acceptedCheckpoint?.status == WidgetAuthoringCheckpointStatus.Accepted ||
+                                    (current && projection.status == WidgetAuthoringSessionStatus.AwaitingReview)
+                                ) &&
+                            !working && configurationAvailable,
                         onReprocess = { reprocessConfirmation = stage.stage },
+                        showAdvance = current && (
+                            WidgetAuthoringUserAction.Start in projection.allowedActions ||
+                                WidgetAuthoringUserAction.Continue in projection.allowedActions
+                            ),
+                        advanceEnabled = !working &&
+                            (WidgetAuthoringUserAction.Continue in projection.allowedActions || configurationAvailable),
+                        onAdvance = {
+                            if (WidgetAuthoringUserAction.Continue in projection.allowedActions) {
+                                continueWorkflow()
+                            } else {
+                                submitInitial()
+                            }
+                        },
+                        showRetry = current && WidgetAuthoringUserAction.Retry in projection.allowedActions,
+                        retryEnabled = configurationAvailable && !working,
+                        onRetry = ::retry,
+                        showCancel = current && attemptActive,
+                        onCancel = { coordinator.cancelActiveAttempt() },
                     )
-                }
-                when {
-                    attemptActive -> {
-                        CircularProgressIndicator()
-                        Text(stringResource(R.string.widget_authoring_workflow_attempt_running))
-                        OutlinedButton(onClick = { coordinator.cancelActiveAttempt() }) {
-                            Text(stringResource(R.string.action_cancel))
-                        }
-                    }
-                    WidgetAuthoringUserAction.Start in projection.allowedActions -> {
-                        Button(onClick = ::submitInitial, enabled = configurationAvailable && !working) {
-                            Text(stringResource(R.string.widget_authoring_workflow_run_stage))
-                        }
-                    }
-                    WidgetAuthoringUserAction.Continue in projection.allowedActions -> {
-                        Button(onClick = ::continueWorkflow, enabled = !working) {
-                            Text(stringResource(R.string.widget_authoring_workflow_continue))
-                        }
-                    }
-                    WidgetAuthoringUserAction.Retry in projection.allowedActions -> {
-                        Button(onClick = ::retry, enabled = configurationAvailable && !working) {
-                            Text(stringResource(R.string.widget_authoring_workflow_retry))
-                        }
-                    }
                 }
             }
             error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
@@ -416,7 +417,16 @@ internal fun AuthoringStageCard(
     stage: WidgetAuthoringStageProjection,
     reprocessEnabled: Boolean,
     onReprocess: () -> Unit,
+    showAdvance: Boolean = false,
+    advanceEnabled: Boolean = false,
+    onAdvance: () -> Unit = {},
+    showRetry: Boolean = false,
+    retryEnabled: Boolean = false,
+    onRetry: () -> Unit = {},
+    showCancel: Boolean = false,
+    onCancel: () -> Unit = {},
 ) {
+    var expanded by rememberSaveable(stage.stage.wireValue) { mutableStateOf(false) }
     val stageLabel = stage.stage.label()
     val statusLabel = stage.status.label()
     val accessibilityLabel = stringResource(
@@ -424,47 +434,91 @@ internal fun AuthoringStageCard(
         stageLabel,
         statusLabel,
     )
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .semantics { contentDescription = accessibilityLabel },
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = accessibilityLabel },
         ) {
-            Text(stageLabel, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(statusLabel, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            stage.warnings.forEach { warning ->
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(stageLabel, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(statusLabel, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     stringResource(
-                        when (warning) {
-                            WidgetAuthoringWarning.RandomSelectionMayUseFirst ->
-                                R.string.widget_authoring_warning_random_selection
-                            WidgetAuthoringWarning.FirstSelectionMayUseRandom ->
-                                R.string.widget_authoring_warning_first_selection
-                            WidgetAuthoringWarning.LastSelectionUnavailable ->
-                                R.string.widget_authoring_warning_last_selection
-                            WidgetAuthoringWarning.TimeConditionNotEvident ->
-                                R.string.widget_authoring_warning_time_condition
-                        },
+                        R.string.widget_authoring_workflow_stage_summary,
+                        stage.attempts.size,
+                        stage.attempts.lastOrNull()?.status?.label() ?: "—",
+                        stage.attempts.lastOrNull()?.durationMillis?.let { "$it ms" } ?: "—",
                     ),
-                    color = MaterialTheme.colorScheme.tertiary,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (stage.attempts.isNotEmpty()) {
+                    TextButton(onClick = { expanded = !expanded }) {
+                        Text(
+                            stringResource(
+                                if (expanded) {
+                                    R.string.widget_authoring_workflow_hide_attempts
+                                } else {
+                                    R.string.widget_authoring_workflow_show_attempts
+                                },
+                            ),
+                        )
+                    }
+                }
+                if (expanded) stage.attempts.forEach { AttemptDetails(it) }
             }
-            stage.attempts.forEach { AttemptDetails(it) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (showAdvance) {
+                Button(onClick = onAdvance, enabled = advanceEnabled) {
+                    Text(stringResource(R.string.widget_authoring_workflow_advance))
+                }
+            }
+            if (showRetry) {
+                Button(onClick = onRetry, enabled = retryEnabled) {
+                    Text(stringResource(R.string.widget_authoring_workflow_retry))
+                }
+            }
             if (reprocessEnabled) {
                 OutlinedButton(onClick = onReprocess) {
                     Text(stringResource(R.string.widget_authoring_workflow_reprocess))
                 }
             }
+            if (showCancel) {
+                CircularProgressIndicator()
+                OutlinedButton(onClick = onCancel) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        }
+        stage.warnings.forEach { warning ->
+            Text(
+                stringResource(
+                    when (warning) {
+                        WidgetAuthoringWarning.RandomSelectionMayUseFirst ->
+                            R.string.widget_authoring_warning_random_selection
+                        WidgetAuthoringWarning.FirstSelectionMayUseRandom ->
+                            R.string.widget_authoring_warning_first_selection
+                        WidgetAuthoringWarning.LastSelectionUnavailable ->
+                            R.string.widget_authoring_warning_last_selection
+                        WidgetAuthoringWarning.TimeConditionNotEvident ->
+                            R.string.widget_authoring_warning_time_condition
+                    },
+                ),
+                color = MaterialTheme.colorScheme.tertiary,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
 
 @Composable
 private fun AttemptDetails(attempt: WidgetAuthoringAttemptDetails) {
+    Text(attempt.status.label(), style = MaterialTheme.typography.bodySmall)
     Text(
         stringResource(
             R.string.widget_authoring_workflow_attempt_details,
@@ -496,6 +550,19 @@ private fun AttemptDetails(attempt: WidgetAuthoringAttemptDetails) {
         }
     }
 }
+
+@Composable
+private fun WidgetAuthoringAttemptStatus.label(): String = stringResource(
+    when (this) {
+        WidgetAuthoringAttemptStatus.Queued -> R.string.widget_authoring_workflow_status_queued
+        WidgetAuthoringAttemptStatus.Deferred -> R.string.widget_authoring_workflow_status_deferred
+        WidgetAuthoringAttemptStatus.Running -> R.string.widget_authoring_workflow_status_running
+        WidgetAuthoringAttemptStatus.Succeeded -> R.string.widget_authoring_workflow_attempt_succeeded
+        WidgetAuthoringAttemptStatus.Failed -> R.string.widget_authoring_workflow_attempt_failed
+        WidgetAuthoringAttemptStatus.Cancelled -> R.string.widget_authoring_workflow_status_cancelled
+        WidgetAuthoringAttemptStatus.Interrupted -> R.string.widget_authoring_workflow_status_interrupted
+    },
+)
 
 @Composable
 private fun WidgetAuthoringStageKey.label(): String = when (this) {

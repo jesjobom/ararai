@@ -468,7 +468,7 @@ internal fun repairArtifactForPrompt(
     artifact: String?,
     repairAttemptNumber: Int,
 ): String? {
-    require(repairAttemptNumber in 2..WidgetAuthoringPipelinePolicy.MAX_REPAIRS + 1)
+    require(repairAttemptNumber >= 2)
     if (repairAttemptNumber > 2 || code in CLEAN_REGENERATION_FAILURES) return null
     return artifact
 }

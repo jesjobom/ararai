@@ -104,6 +104,7 @@ class WidgetAuthoringWorkflowTest {
             WidgetAuthoringSessionStatus.AttemptRunning to setOf(WidgetAuthoringUserAction.CancelAttempt),
             WidgetAuthoringSessionStatus.AwaitingReview to setOf(
                 WidgetAuthoringUserAction.Continue,
+                WidgetAuthoringUserAction.Reprocess,
                 WidgetAuthoringUserAction.Discard,
             ),
             WidgetAuthoringSessionStatus.AwaitingRetry to setOf(

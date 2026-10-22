@@ -3,8 +3,8 @@
 package com.jesjobom.ararai.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -14,21 +14,33 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,6 +53,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -49,8 +63,10 @@ import com.jesjobom.ararai.widget.managed.ManagedWidgetExecutionStatus
 import com.jesjobom.ararai.widget.managed.ManagedWidgetStatus
 import com.jesjobom.ararai.widget.managed.WidgetRunDiagnostic
 import com.jesjobom.ararai.widget.managed.WidgetRunOutcome
+import com.jesjobom.ararai.widget.managed.WidgetRunRecord
 import com.jesjobom.ararai.widget.runtime.WidgetProgramParser
 import com.jesjobom.ararai.widget.runtime.WidgetProgramValidationResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
@@ -65,6 +81,9 @@ internal fun ManagedWidgetsRoute(
     var items by remember { mutableStateOf<List<ManagedWidgetListItemUiState>?>(null) }
     var failed by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
+    var busyWidgetId by remember { mutableStateOf<String?>(null) }
+    var toggleErrorWidgetId by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(reload) {
         runCatching { controller.loadList() }
             .onSuccess {
@@ -80,6 +99,29 @@ internal fun ManagedWidgetsRoute(
         onCreate = onCreate,
         onOpenWidget = onOpenWidget,
         onRetry = { reload += 1 },
+        busyWidgetId = busyWidgetId,
+        toggleErrorWidgetId = toggleErrorWidgetId,
+        onEnabledChange = { widgetId, enabled ->
+            if (busyWidgetId == null) {
+                busyWidgetId = widgetId
+                toggleErrorWidgetId = null
+                scope.launch {
+                    try {
+                        val updated = controller.setEnabled(widgetId, enabled)
+                        items = items?.map { item ->
+                            if (item.definition.id == widgetId) item.copy(definition = updated) else item
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: RuntimeException) {
+                        toggleErrorWidgetId = widgetId
+                        reload += 1
+                    } finally {
+                        busyWidgetId = null
+                    }
+                }
+            }
+        },
     )
 }
 
@@ -91,6 +133,9 @@ internal fun ManagedWidgetsScreen(
     onCreate: () -> Unit,
     onOpenWidget: (String) -> Unit,
     onRetry: () -> Unit,
+    busyWidgetId: String? = null,
+    toggleErrorWidgetId: String? = null,
+    onEnabledChange: (String, Boolean) -> Unit,
 ) {
     ArarAiScaffold(title = stringResource(R.string.widgets_title), onBack = onBack) { modifier ->
         Column(
@@ -107,7 +152,16 @@ internal fun ManagedWidgetsScreen(
                 loadFailed -> WidgetLoadFailure(onRetry)
                 items == null -> CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
                 items.isEmpty() -> WidgetEmptyState(onCreate)
-                else -> items.forEach { item -> WidgetListCard(item, onOpenWidget) }
+                else -> items.forEach { item ->
+                    WidgetListCard(
+                        item = item,
+                        onOpenWidget = onOpenWidget,
+                        onEnabledChange = onEnabledChange,
+                        toggleEnabled = busyWidgetId == null,
+                        toggling = busyWidgetId == item.definition.id,
+                        toggleFailed = toggleErrorWidgetId == item.definition.id,
+                    )
+                }
             }
         }
     }
@@ -144,7 +198,15 @@ private fun WidgetLoadFailure(onRetry: () -> Unit) {
 private fun WidgetListCard(
     item: ManagedWidgetListItemUiState,
     onOpenWidget: (String) -> Unit,
+    onEnabledChange: (String, Boolean) -> Unit,
+    toggleEnabled: Boolean,
+    toggling: Boolean,
+    toggleFailed: Boolean,
 ) {
+    val toggleLabel = stringResource(
+        if (item.definition.enabled) R.string.widgets_disable_named else R.string.widgets_enable_named,
+        item.definition.displayName,
+    )
     Card(onClick = { onOpenWidget(item.definition.id) }, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -154,8 +216,15 @@ private fun WidgetListCard(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                Text(if (item.definition.enabled) stringResource(R.string.widgets_enabled) else stringResource(R.string.widgets_disabled))
+                Switch(
+                    checked = item.definition.enabled,
+                    enabled = toggleEnabled,
+                    onCheckedChange = { onEnabledChange(item.definition.id, it) },
+                    modifier = Modifier.semantics { contentDescription = toggleLabel },
+                )
             }
+            if (toggling) CircularProgressIndicator()
+            if (toggleFailed) Text(stringResource(R.string.widgets_toggle_failed), color = MaterialTheme.colorScheme.error)
             Text(
                 if (item.definition.status == ManagedWidgetStatus.NeedsAttention) {
                     stringResource(R.string.widgets_needs_attention)
@@ -293,25 +362,27 @@ internal fun ManagedWidgetDetailScreen(
                 loadFailed -> WidgetLoadFailure(onRetry)
                 state == null -> CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
                 else -> {
-                    WidgetPresentationSection(state) { uriHandler.openUri(it) }
-                    WidgetStatusSection(state)
                     WidgetManagementActions(
                         state = state,
                         busy = busy,
-                        onRefresh = onRefresh,
                         onEnabledChange = onEnabledChange,
                         onEdit = onEdit,
                         onDuplicate = onDuplicate,
                         onDelete = { confirmDelete = true },
                     )
+                    WidgetPresentationSection(state) { uriHandler.openUri(it) }
+                    Button(onClick = onRefresh, enabled = !busy && state.definition.enabled) {
+                        Icon(Icons.Filled.Refresh, contentDescription = null)
+                        Text(stringResource(R.string.widget_refresh))
+                    }
+                    WidgetScheduleSection(state)
                     WidgetPermissionSection(state)
-                    WidgetRunHistory(state.runs)
+                    WidgetRunHistory(state.definition.id, state.runs)
                     state.revision.initialPrompt?.let { prompt ->
                         Text(stringResource(R.string.widget_initial_prompt), style = MaterialTheme.typography.titleMedium)
                         SelectionContainer { Text(prompt, style = MaterialTheme.typography.bodyMedium) }
                     }
-                    Text(stringResource(R.string.widget_source), style = MaterialTheme.typography.titleMedium)
-                    Text(state.revision.source, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    WidgetSourceSection(state.revision.source)
                 }
             }
         }
@@ -345,20 +416,38 @@ private fun WidgetPresentationSection(
 }
 
 @Composable
-private fun WidgetStatusSection(state: ManagedWidgetDetailUiState) {
+private fun WidgetScheduleSection(state: ManagedWidgetDetailUiState) {
+    MetadataField(
+        label = stringResource(R.string.widget_schedule),
+        value = state.definition.periodicIntervalHours?.let {
+            stringResource(R.string.widget_schedule_periodic, it)
+        } ?: stringResource(R.string.widget_schedule_manual),
+        showScheduleHelp = state.definition.periodicIntervalHours != null,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MetadataField(label: String, value: String, showScheduleHelp: Boolean = false) {
+    val tooltipState = rememberTooltipState()
+    val scope = rememberCoroutineScope()
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                if (state.definition.enabled) stringResource(R.string.widgets_enabled) else stringResource(R.string.widgets_disabled),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                state.definition.periodicIntervalHours?.let {
-                    stringResource(R.string.widget_schedule_periodic, it)
-                } ?: stringResource(R.string.widget_schedule_manual),
-            )
-            Text(stringResource(R.string.widget_schedule_inexact), style = MaterialTheme.typography.bodySmall)
-            Text(stringResource(R.string.widget_active_revision, state.definition.activeRevision))
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                if (showScheduleHelp) {
+                    TooltipBox(
+                        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                        tooltip = { PlainTooltip { Text(stringResource(R.string.widget_schedule_inexact)) } },
+                        state = tooltipState,
+                    ) {
+                        IconButton(onClick = { scope.launch { tooltipState.show() } }) {
+                            Icon(Icons.Filled.Info, contentDescription = stringResource(R.string.widget_schedule_help))
+                        }
+                    }
+                }
+            }
+            Text(value, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -367,36 +456,57 @@ private fun WidgetStatusSection(state: ManagedWidgetDetailUiState) {
 private fun WidgetManagementActions(
     state: ManagedWidgetDetailUiState,
     busy: Boolean,
-    onRefresh: () -> Unit,
     onEnabledChange: (Boolean) -> Unit,
     onEdit: () -> Unit,
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    val toggleLabel = stringResource(
+        if (state.definition.enabled) R.string.widgets_disable_named else R.string.widgets_enable_named,
+        state.definition.displayName,
+    )
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         Text(
-            if (state.definition.enabled) stringResource(R.string.widget_disable) else stringResource(R.string.widget_enable),
+            stringResource(R.string.widget_active_revision, state.definition.activeRevision),
             modifier = Modifier.weight(1f),
         )
         Switch(
             checked = state.definition.enabled,
             enabled = !busy,
             onCheckedChange = onEnabledChange,
+            modifier = Modifier.semantics { contentDescription = toggleLabel },
         )
-    }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = onRefresh, enabled = !busy && state.definition.enabled) {
-            Icon(Icons.Filled.Refresh, contentDescription = null)
-            Text(stringResource(R.string.widget_refresh))
-        }
-        OutlinedButton(onClick = onEdit, enabled = !busy) {
-            Icon(Icons.Filled.AutoAwesome, contentDescription = null)
-            Text(stringResource(R.string.widget_edit))
-        }
-        OutlinedButton(onClick = onDuplicate, enabled = !busy) { Text(stringResource(R.string.widget_duplicate)) }
-        TextButton(onClick = onDelete, enabled = !busy) {
-            Icon(Icons.Filled.Delete, contentDescription = null)
-            Text(stringResource(R.string.widget_delete))
+        Box {
+            IconButton(onClick = { menuExpanded = true }, enabled = !busy) {
+                Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.widget_more_actions))
+            }
+            DropdownMenu(expanded = menuExpanded && !busy, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.widget_edit)) },
+                    leadingIcon = { Icon(Icons.Filled.AutoAwesome, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        onEdit()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.widget_duplicate)) },
+                    leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        onDuplicate()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.widget_delete)) },
+                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        onDelete()
+                    },
+                )
+            }
         }
     }
     if (busy) CircularProgressIndicator()
@@ -419,12 +529,15 @@ private fun WidgetPermissionSection(state: ManagedWidgetDetailUiState) {
 }
 
 @Composable
-private fun WidgetRunHistory(runs: List<com.jesjobom.ararai.widget.managed.WidgetRunRecord>) {
+private fun WidgetRunHistory(widgetId: String, runs: List<WidgetRunRecord>) {
+    var expanded by remember(widgetId) { mutableStateOf(false) }
+    val orderedRuns = remember(runs) { runs.sortedWith(compareByDescending<WidgetRunRecord> { it.startedAtMillis }.thenByDescending { it.id }) }
     Text(stringResource(R.string.widget_run_history), style = MaterialTheme.typography.titleMedium)
-    if (runs.isEmpty()) {
+    if (orderedRuns.isEmpty()) {
         Text(stringResource(R.string.widget_no_runs))
     } else {
-        runs.forEachIndexed { index, run ->
+        val visibleRuns = if (expanded) orderedRuns else orderedRuns.take(4)
+        visibleRuns.forEachIndexed { index, run ->
             Text(
                 stringResource(
                     R.string.widget_run_entry,
@@ -434,7 +547,40 @@ private fun WidgetRunHistory(runs: List<com.jesjobom.ararai.widget.managed.Widge
                 ),
                 style = MaterialTheme.typography.bodySmall,
             )
-            if (index != runs.lastIndex) HorizontalDivider()
+            if (index != visibleRuns.lastIndex) HorizontalDivider()
+        }
+        if (orderedRuns.size > 4) {
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(if (expanded) stringResource(R.string.widget_history_show_less) else stringResource(R.string.widget_history_show_all, orderedRuns.size))
+            }
+        }
+    }
+}
+
+@Composable
+private fun WidgetSourceSection(source: String) {
+    Text(stringResource(R.string.widget_source), style = MaterialTheme.typography.titleMedium)
+    val keywordColor = MaterialTheme.colorScheme.primary
+    val stringColor = MaterialTheme.colorScheme.tertiary
+    val numberColor = MaterialTheme.colorScheme.secondary
+    val commentColor = MaterialTheme.colorScheme.outline
+    val highlighted = remember(source, keywordColor, stringColor, numberColor, commentColor) {
+        highlightJavaScript(source, keywordColor, stringColor, numberColor, commentColor)
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        SelectionContainer {
+            Text(
+                text = highlighted,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall,
+                softWrap = true,
+            )
         }
     }
 }

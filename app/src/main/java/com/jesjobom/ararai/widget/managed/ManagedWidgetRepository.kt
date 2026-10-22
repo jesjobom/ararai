@@ -1492,7 +1492,6 @@ internal class SqliteManagedWidgetRepository(
                     compareBy<WidgetAuthoringAttempt> { it.stageRevision }.thenBy { it.attemptNumber },
                 ) ?: throw IllegalArgumentException("A repair requires a preceding attempt")
                 require(preceding.status != WidgetAuthoringAttemptStatus.Succeeded)
-                require(preceding.attemptNumber <= WidgetAuthoringWorkflowPolicy.MAX_REPAIRS_PER_STAGE_REVISION)
                 preceding.stageRevision to preceding.attemptNumber + 1
             }
             WidgetAuthoringAttemptKind.Reprocess -> {
@@ -1500,12 +1499,19 @@ internal class SqliteManagedWidgetRepository(
                     snapshot.session.status in setOf(
                         WidgetAuthoringSessionStatus.AwaitingStage,
                         WidgetAuthoringSessionStatus.AwaitingRetry,
+                        WidgetAuthoringSessionStatus.AwaitingReview,
                         WidgetAuthoringSessionStatus.ReadyForPreview,
                     ),
                 )
-                require(checkpoint?.status == WidgetAuthoringCheckpointStatus.Accepted)
+                require(
+                    checkpoint?.status == WidgetAuthoringCheckpointStatus.Accepted ||
+                        (
+                            snapshot.session.status == WidgetAuthoringSessionStatus.AwaitingReview &&
+                                snapshot.session.currentStage == command.stage
+                            ),
+                )
                 val nextStageRevision = maxOf(
-                    checkpoint.stageRevision,
+                    checkpoint?.stageRevision ?: 0,
                     attempts.maxOfOrNull(WidgetAuthoringAttempt::stageRevision) ?: 0,
                 ) + 1
                 nextStageRevision to 1

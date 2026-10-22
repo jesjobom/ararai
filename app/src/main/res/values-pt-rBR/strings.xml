@@ -417,6 +417,9 @@
     <string name="widgets_load_failed">Não foi possível carregar os widgets.</string>
     <string name="widgets_enabled">Ativado</string>
     <string name="widgets_disabled">Desativado</string>
+    <string name="widgets_enable_named">Ativar %1$s</string>
+    <string name="widgets_disable_named">Desativar %1$s</string>
+    <string name="widgets_toggle_failed">Não foi possível alterar o estado deste widget. Tente novamente.</string>
     <string name="widgets_needs_attention">Requer atenção</string>
     <string name="widgets_ready">Pronto</string>
     <string name="widgets_stale">A última atualização falhou · exibindo conteúdo salvo</string>
@@ -428,6 +431,8 @@
     <string name="widget_schedule_manual">Somente atualização manual</string>
     <string name="widget_schedule_periodic">Aproximadamente a cada %1$d horas</string>
     <string name="widget_schedule_inexact">O Android escolhe uma janela inexata de execução em segundo plano.</string>
+    <string name="widget_schedule">Frequência</string>
+    <string name="widget_schedule_help">Sobre o horário das atualizações</string>
     <string name="widget_active_revision">Revisão ativa %1$d</string>
     <string name="widget_permissions">Permissões</string>
     <string name="widget_tools">Ferramentas: %1$s</string>
@@ -438,6 +443,8 @@
     <string name="widget_authoring_saved_prompt_hint">Este pedido está salvo na autoria atual e não pode ser editado. Inicie um novo pedido para escrever outro prompt.</string>
     <string name="widget_authoring_start_new_request">Iniciar novo pedido</string>
     <string name="widget_run_history">Histórico de execuções</string>
+    <string name="widget_history_show_all">Mostrar todas as %1$d execuções</string>
+    <string name="widget_history_show_less">Mostrar menos execuções</string>
     <string name="widget_run_entry">%1$s · revisão %2$d · %3$s</string>
     <string name="widget_no_runs">Nenhum histórico de execução.</string>
     <string name="widget_refresh">Atualizar agora</string>
@@ -445,6 +452,7 @@
     <string name="widget_disable">Desativar</string>
     <string name="widget_edit">Editar</string>
     <string name="widget_duplicate">Duplicar</string>
+    <string name="widget_more_actions">Mais ações do widget</string>
     <string name="widget_delete">Excluir</string>
     <string name="widget_delete_title">Excluir este widget?</string>
     <string name="widget_delete_description">O código, as revisões, a apresentação salva, as observações, o histórico e os trabalhos futuros serão removidos.</string>
@@ -494,8 +502,12 @@
     <string name="widget_authoring_runtime_failed">O LiteRT-LM interrompeu a geração antes de entregar uma proposta de widget. Nada foi salvo; tente novamente.</string>
     <string name="widget_authoring_workflow_start">Iniciar autoria por etapas</string>
     <string name="widget_authoring_workflow_saved">O progresso é salvo após cada tentativa. Revise cada resultado antes de continuar.</string>
-    <string name="widget_authoring_workflow_run_stage">Executar esta etapa</string>
-    <string name="widget_authoring_workflow_continue">Aceitar e continuar</string>
+    <string name="widget_authoring_workflow_advance">Avançar</string>
+    <string name="widget_authoring_workflow_stage_summary">Tentativas: %1$d · último estado: %2$s · duração: %3$s</string>
+    <string name="widget_authoring_workflow_show_attempts">Mostrar tentativas</string>
+    <string name="widget_authoring_workflow_hide_attempts">Ocultar tentativas</string>
+    <string name="widget_authoring_workflow_attempt_succeeded">Concluída com sucesso</string>
+    <string name="widget_authoring_workflow_attempt_failed">Falhou</string>
     <string name="widget_authoring_workflow_retry">Tentar esta etapa novamente</string>
     <string name="widget_authoring_workflow_reprocess">Reprocessar etapa</string>
     <string name="widget_authoring_warning_random_selection">Aviso: o pedido parece solicitar uma página aleatória, mas este algoritmo seleciona o primeiro resultado. Revise ou reprocesse a etapa. Você ainda pode continuar.</string>
@@ -513,7 +525,7 @@
     <string name="widget_authoring_workflow_discard_title">Descartar autoria salva?</string>
     <string name="widget_authoring_workflow_discard_message">Todas as tentativas e checkpoints transitórios deste workflow serão apagados. Widgets existentes não serão alterados.</string>
     <string name="widget_authoring_workflow_reprocess_title">Reprocessar esta etapa?</string>
-    <string name="widget_authoring_workflow_reprocess_message">O resultado aceito continua valendo até você aceitar uma substituição bem-sucedida. Ao aceitá-la, as etapas dependentes ficarão obsoletas.</string>
+    <string name="widget_authoring_workflow_reprocess_message">Uma nova tentativa será iniciada. Se houver resultado aceito, ele continuará valendo até você aceitar uma substituição bem-sucedida; então, as etapas dependentes ficarão obsoletas.</string>
     <string name="widget_authoring_workflow_attempt_details">Revisão %1$d · tentativa %2$d · %3$s · %4$s ms · %5$s bytes</string>
     <string name="widget_authoring_workflow_attempt_initial">inicial</string>
     <string name="widget_authoring_workflow_attempt_repair">nova tentativa</string>

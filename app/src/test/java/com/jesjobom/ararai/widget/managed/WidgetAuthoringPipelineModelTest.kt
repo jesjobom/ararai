@@ -359,6 +359,14 @@ class WidgetAuthoringPipelineModelTest {
                 repairAttemptNumber = 3,
             ),
         )
+        assertEquals(
+            null,
+            repairArtifactForPrompt(
+                WidgetAuthoringStageFailureCode.InvalidPresentationTone,
+                artifact,
+                repairAttemptNumber = 5,
+            ),
+        )
     }
 
     @Test

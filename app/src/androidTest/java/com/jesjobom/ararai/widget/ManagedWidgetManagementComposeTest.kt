@@ -1,17 +1,26 @@
 package com.jesjobom.ararai.widget
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.jesjobom.ararai.ui.ManagedWidgetDetailScreen
 import com.jesjobom.ararai.ui.ManagedWidgetDetailUiState
+import com.jesjobom.ararai.ui.ManagedWidgetListItemUiState
 import com.jesjobom.ararai.ui.ManagedWidgetsScreen
 import com.jesjobom.ararai.widget.managed.ManagedWidgetDefinition
 import com.jesjobom.ararai.widget.managed.ManagedWidgetStatus
 import com.jesjobom.ararai.widget.managed.WidgetProgramRevision
+import com.jesjobom.ararai.widget.managed.WidgetRunOutcome
+import com.jesjobom.ararai.widget.managed.WidgetRunRecord
 import com.jesjobom.ararai.widget.runtime.StrictJson
 import com.jesjobom.ararai.widget.runtime.WidgetPresentationNode
 import com.jesjobom.ararai.widget.runtime.sha256
@@ -35,6 +44,7 @@ class ManagedWidgetManagementComposeTest {
                     onCreate = { creations += 1 },
                     onOpenWidget = {},
                     onRetry = {},
+                    onEnabledChange = { _, _ -> },
                 )
             }
         }
@@ -42,6 +52,35 @@ class ManagedWidgetManagementComposeTest {
         composeRule.onNodeWithText("No widgets yet").assertIsDisplayed()
         composeRule.onAllNodesWithText("Create widget")[0].performClick()
         composeRule.runOnIdle { assertEquals(1, creations) }
+    }
+
+    @Test
+    fun listSwitchChangesEnablementWithoutOpeningWidget() {
+        var definition by mutableStateOf(detail().definition)
+        val toggles = mutableListOf<Pair<String, Boolean>>()
+        val opened = mutableListOf<String>()
+        composeRule.setContent {
+            MaterialTheme {
+                ManagedWidgetsScreen(
+                    items = listOf(ManagedWidgetListItemUiState(definition, null)),
+                    loadFailed = false,
+                    onBack = {},
+                    onCreate = {},
+                    onOpenWidget = { opened += it },
+                    onRetry = {},
+                    onEnabledChange = { id, enabled -> toggles += id to enabled },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Enabled").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Disable History").assertIsOn().performClick()
+        composeRule.runOnIdle {
+            assertEquals(listOf("widget-1" to false), toggles)
+            assertEquals(emptyList<String>(), opened)
+            definition = definition.copy(enabled = false)
+        }
+        composeRule.onNodeWithContentDescription("Enable History").assertIsOff()
     }
 
     @Test
@@ -67,13 +106,64 @@ class ManagedWidgetManagementComposeTest {
         composeRule.onNodeWithText("Ada Lovelace").assertIsDisplayed()
         composeRule.onNodeWithText("Tools: wikipedia_pages@1").assertIsDisplayed()
         composeRule.onNodeWithText("No execution history.").assertIsDisplayed()
+        composeRule.onNodeWithText("Frequency").assertExists()
+        composeRule.onNodeWithText("Active revision 1").assertExists()
+        composeRule.onNodeWithText("Revision").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("About background timing").assertExists()
+        composeRule.onNodeWithText("Enabled").assertDoesNotExist()
         composeRule.onNodeWithText("Refresh now").performClick()
+        composeRule.onNodeWithContentDescription("More widget actions").performClick()
         composeRule.onNodeWithText("Edit").performClick()
+        composeRule.onNodeWithContentDescription("More widget actions").performClick()
         composeRule.onNodeWithText("Duplicate").performClick()
-        composeRule.onNodeWithText("Disable").performClick()
+        composeRule.onNodeWithContentDescription("More widget actions").performClick()
+        composeRule.onNodeWithText("Delete").performClick()
+        composeRule.onNodeWithText("Delete this widget?").assertExists()
+        composeRule.onNodeWithText("Cancel").performClick()
+        composeRule.onNodeWithContentDescription("Disable History").performClick()
         composeRule.runOnIdle {
             assertEquals(listOf("refresh", "edit", "duplicate", "enabled:false"), actions)
         }
+    }
+
+    @Test
+    fun detailShowsFourRecentRunsUntilExpanded() {
+        val runs = (6 downTo 1).map { revision ->
+            WidgetRunRecord(
+                id = "run-$revision",
+                widgetId = "widget-1",
+                revision = revision,
+                startedAtMillis = revision * 1000L,
+                completedAtMillis = revision * 1000L + 1,
+                durationMillis = 1,
+                plannedToolIds = emptyList(),
+                outcome = WidgetRunOutcome.Success,
+                diagnostic = null,
+            )
+        }
+        composeRule.setContent {
+            MaterialTheme {
+                ManagedWidgetDetailScreen(
+                    state = detail().copy(runs = runs.reversed()),
+                    loadFailed = false,
+                    busy = false,
+                    onBack = {},
+                    onEdit = {},
+                    onRefresh = {},
+                    onEnabledChange = {},
+                    onDuplicate = {},
+                    onDelete = {},
+                    onRetry = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("revision 6", substring = true).assertExists()
+        composeRule.onNodeWithText("revision 2", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithText("Show all 6 runs").performClick()
+        composeRule.onNodeWithText("revision 2", substring = true).assertExists()
+        composeRule.onNodeWithText("Show fewer runs").performClick()
+        composeRule.onNodeWithText("revision 2", substring = true).assertDoesNotExist()
     }
 
     private fun detail(): ManagedWidgetDetailUiState {

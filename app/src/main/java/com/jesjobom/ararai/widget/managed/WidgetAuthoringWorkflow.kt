@@ -8,7 +8,6 @@ internal object WidgetAuthoringWorkflowPolicy {
     const val MAX_INFERENCE_CONFIG_BYTES = 4 * 1024
     const val MAX_STAGE_KEY_CHARS = 96
     const val MAX_ACTION_ID_CHARS = 128
-    const val MAX_REPAIRS_PER_STAGE_REVISION = WidgetAuthoringPipelinePolicy.MAX_REPAIRS
 }
 
 internal sealed interface WidgetAuthoringStageKey {
@@ -298,11 +297,12 @@ internal object WidgetAuthoringWorkflowStateMachine {
         }
         WidgetAuthoringSessionStatus.AwaitingReview -> setOf(
             WidgetAuthoringUserAction.Continue,
+            WidgetAuthoringUserAction.Reprocess,
             WidgetAuthoringUserAction.Discard,
         )
         WidgetAuthoringSessionStatus.AwaitingRetry -> buildSet {
             add(WidgetAuthoringUserAction.Discard)
-            if (snapshot.hasRepairBudget()) add(WidgetAuthoringUserAction.Retry)
+            add(WidgetAuthoringUserAction.Retry)
             if (snapshot.hasAcceptedCheckpoint()) add(WidgetAuthoringUserAction.Reprocess)
             if (snapshot.hasCompleteAcceptedGraph()) add(WidgetAuthoringUserAction.Confirm)
         }
@@ -316,19 +316,6 @@ internal object WidgetAuthoringWorkflowStateMachine {
 
     private fun WidgetAuthoringSessionSnapshot.hasAcceptedCheckpoint(): Boolean = checkpoints.any {
         it.status == WidgetAuthoringCheckpointStatus.Accepted
-    }
-
-    private fun WidgetAuthoringSessionSnapshot.hasRepairBudget(): Boolean {
-        val currentStageAttempts = attempts.filter { it.stage == session.currentStage }
-        val currentRevision = currentStageAttempts.maxOfOrNull(WidgetAuthoringAttempt::stageRevision)
-        val latest = currentRevision?.let { revision ->
-            currentStageAttempts
-                .filter { it.stageRevision == revision }
-                .maxByOrNull(WidgetAuthoringAttempt::attemptNumber)
-        }
-        return latest != null &&
-            latest.status != WidgetAuthoringAttemptStatus.Succeeded &&
-            latest.attemptNumber <= WidgetAuthoringWorkflowPolicy.MAX_REPAIRS_PER_STAGE_REVISION
     }
 
     internal fun WidgetAuthoringSessionSnapshot.hasCompleteAcceptedGraph(): Boolean = checkpoints.any {

@@ -417,6 +417,9 @@
     <string name="widgets_load_failed">Widgets could not be loaded.</string>
     <string name="widgets_enabled">Enabled</string>
     <string name="widgets_disabled">Disabled</string>
+    <string name="widgets_enable_named">Enable %1$s</string>
+    <string name="widgets_disable_named">Disable %1$s</string>
+    <string name="widgets_toggle_failed">Could not change this widget’s status. Try again.</string>
     <string name="widgets_needs_attention">Needs attention</string>
     <string name="widgets_ready">Ready</string>
     <string name="widgets_stale">Last refresh failed · showing saved content</string>
@@ -428,6 +431,8 @@
     <string name="widget_schedule_manual">Manual refresh only</string>
     <string name="widget_schedule_periodic">About every %1$d hours</string>
     <string name="widget_schedule_inexact">Android chooses an inexact background execution window.</string>
+    <string name="widget_schedule">Frequency</string>
+    <string name="widget_schedule_help">About background timing</string>
     <string name="widget_active_revision">Active revision %1$d</string>
     <string name="widget_permissions">Permissions</string>
     <string name="widget_tools">Tools: %1$s</string>
@@ -438,6 +443,8 @@
     <string name="widget_authoring_saved_prompt_hint">This request is saved for the current authoring and cannot be edited. Start a new request to enter a different prompt.</string>
     <string name="widget_authoring_start_new_request">Start a new request</string>
     <string name="widget_run_history">Run history</string>
+    <string name="widget_history_show_all">Show all %1$d runs</string>
+    <string name="widget_history_show_less">Show fewer runs</string>
     <string name="widget_run_entry">%1$s · revision %2$d · %3$s</string>
     <string name="widget_no_runs">No execution history.</string>
     <string name="widget_refresh">Refresh now</string>
@@ -445,6 +452,7 @@
     <string name="widget_disable">Disable</string>
     <string name="widget_edit">Edit</string>
     <string name="widget_duplicate">Duplicate</string>
+    <string name="widget_more_actions">More widget actions</string>
     <string name="widget_delete">Delete</string>
     <string name="widget_delete_title">Delete this widget?</string>
     <string name="widget_delete_description">Its source, revisions, saved presentation, observations, execution history, and future work will be removed.</string>
@@ -494,8 +502,12 @@
     <string name="widget_authoring_runtime_failed">LiteRT-LM stopped generation before a widget proposal could be captured. Nothing was saved; try again.</string>
     <string name="widget_authoring_workflow_start">Start staged authoring</string>
     <string name="widget_authoring_workflow_saved">Progress is saved after every attempt. Review each result before continuing.</string>
-    <string name="widget_authoring_workflow_run_stage">Run this stage</string>
-    <string name="widget_authoring_workflow_continue">Accept and continue</string>
+    <string name="widget_authoring_workflow_advance">Advance</string>
+    <string name="widget_authoring_workflow_stage_summary">Attempts: %1$d · latest: %2$s · duration: %3$s</string>
+    <string name="widget_authoring_workflow_show_attempts">Show attempts</string>
+    <string name="widget_authoring_workflow_hide_attempts">Hide attempts</string>
+    <string name="widget_authoring_workflow_attempt_succeeded">Succeeded</string>
+    <string name="widget_authoring_workflow_attempt_failed">Failed</string>
     <string name="widget_authoring_workflow_retry">Retry this stage</string>
     <string name="widget_authoring_workflow_reprocess">Reprocess stage</string>
     <string name="widget_authoring_warning_random_selection">Warning: the request appears to ask for a random page, but this algorithm selects the first result. Review it or reprocess this stage. You can still continue.</string>
@@ -513,7 +525,7 @@
     <string name="widget_authoring_workflow_discard_title">Discard saved authoring?</string>
     <string name="widget_authoring_workflow_discard_message">All transient attempts and checkpoints for this workflow will be deleted. Existing widgets will not change.</string>
     <string name="widget_authoring_workflow_reprocess_title">Reprocess this stage?</string>
-    <string name="widget_authoring_workflow_reprocess_message">The accepted result remains authoritative until you accept a successful replacement. Accepting it will mark dependent stages stale.</string>
+    <string name="widget_authoring_workflow_reprocess_message">A new attempt will start. Any previously accepted result remains authoritative until you accept a successful replacement; then dependent stages become stale.</string>
     <string name="widget_authoring_workflow_attempt_details">Revision %1$d · attempt %2$d · %3$s · %4$s ms · %5$s bytes</string>
     <string name="widget_authoring_workflow_attempt_initial">initial</string>
     <string name="widget_authoring_workflow_attempt_repair">retry</string>

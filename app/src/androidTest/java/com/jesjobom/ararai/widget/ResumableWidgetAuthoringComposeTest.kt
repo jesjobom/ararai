@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
 import com.jesjobom.ararai.R
 import com.jesjobom.ararai.ui.AuthoringStageCard
@@ -35,6 +36,12 @@ class ResumableWidgetAuthoringComposeTest {
         )
         val reprocessLabel = context.getString(R.string.widget_authoring_workflow_reprocess)
         val capturedContentLabel = context.getString(R.string.widget_authoring_workflow_captured_content)
+        val summary = context.getString(
+            R.string.widget_authoring_workflow_stage_summary,
+            1,
+            context.getString(R.string.widget_authoring_workflow_attempt_succeeded),
+            "25 ms",
+        )
         composeRule.setContent {
             MaterialTheme {
                 AuthoringStageCard(
@@ -49,7 +56,12 @@ class ResumableWidgetAuthoringComposeTest {
             .assertIsDisplayed()
             .assertContentDescriptionEquals(accessibilityLabel)
         composeRule.onNodeWithText(reprocessLabel).assertHasClickAction()
+        composeRule.onNodeWithText(summary).assertIsDisplayed()
+        composeRule.onNodeWithText(capturedContentLabel).assertDoesNotExist()
+        composeRule.onNodeWithText(context.getString(R.string.widget_authoring_workflow_show_attempts)).performClick()
         composeRule.onNodeWithText(capturedContentLabel).assertIsDisplayed()
+        composeRule.onNodeWithText(context.getString(R.string.widget_authoring_workflow_hide_attempts)).performClick()
+        composeRule.onNodeWithText(capturedContentLabel).assertDoesNotExist()
     }
 
     @Test

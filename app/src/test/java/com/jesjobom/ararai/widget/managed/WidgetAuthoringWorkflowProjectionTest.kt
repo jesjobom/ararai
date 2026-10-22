@@ -27,7 +27,11 @@ class WidgetAuthoringWorkflowProjectionTest {
             projection.stages.single { it.stage == WidgetAuthoringStageKey.Algorithm }.warnings,
         )
         assertEquals(
-            setOf(WidgetAuthoringUserAction.Continue, WidgetAuthoringUserAction.Discard),
+            setOf(
+                WidgetAuthoringUserAction.Continue,
+                WidgetAuthoringUserAction.Reprocess,
+                WidgetAuthoringUserAction.Discard,
+            ),
             projection.allowedActions,
         )
     }
@@ -179,7 +183,11 @@ class WidgetAuthoringWorkflowProjectionTest {
             projection.stages.single { it.stage == WidgetAuthoringStageKey.Algorithm }.status,
         )
         assertEquals(
-            setOf(WidgetAuthoringUserAction.Continue, WidgetAuthoringUserAction.Discard),
+            setOf(
+                WidgetAuthoringUserAction.Continue,
+                WidgetAuthoringUserAction.Reprocess,
+                WidgetAuthoringUserAction.Discard,
+            ),
             projection.allowedActions,
         )
     }

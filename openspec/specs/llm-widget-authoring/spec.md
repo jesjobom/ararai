@@ -710,15 +710,14 @@ The application SHALL assemble the final source from exact accepted source
 fragments in a fixed application-owned order and SHALL perform
 a complete synthetic dry-run of the exact package before preview. A later model
 round MUST NOT rewrite accepted fragments. Each user-authorized stage attempt
-SHALL have checked-in artifact-size, timeout, and stage-local retry limits. A
+SHALL have checked-in artifact-size and timeout limits; manual stage retries SHALL have no fixed count limit. A
 repair SHALL require an explicit user action, remain scoped to the failed stage,
 and never expand the frozen
 capability envelope or rewrite an accepted checkpoint.
 
 #### Scenario: Repair a rejected fragment
 
-- **WHEN** a fragment fails deterministic validation, stage-local repair
-  budget remains, and the user chooses Retry
+- **WHEN** a fragment fails deterministic validation and the user chooses Retry
 - **THEN** the application supplies immutable accepted dependencies, the
   relevant contract, a controlled failure code, and the rejected artifact only
   when a first repair has a localized validation category
@@ -780,8 +779,7 @@ capability envelope or rewrite an accepted checkpoint.
 
 #### Scenario: Exhaust repair budget
 
-- **WHEN** the current stage exhausts its persisted retry budget without a
-  valid candidate
+- **WHEN** the current stage repeatedly fails without a valid candidate
 - **THEN** it records a controlled stage-specific result and awaits user action
 - **AND** no widget revision is confirmed, scheduled, or executed.
 
@@ -1006,13 +1004,17 @@ add the frozen alias, tool id, and contract version. Previously accepted legacy
 envelopes and complete-call functions MAY be normalized for compatibility but
 SHALL NOT expand authority.
 
+Starting a pending stage and accepting a reviewed candidate SHALL be presented
+as one context-dependent action named Advance. Acceptance SHALL remain the
+only transition that makes a candidate an authoritative checkpoint.
+
 #### Scenario: Successful attempt awaits acceptance
 
 - **WHEN** one stage generation returns an artifact that passes deterministic
   parsing and validation
 - **THEN** the application persists it as a reviewable candidate
 - **AND** it does not use that candidate as an upstream checkpoint until the
-  user chooses Continue.
+  user chooses Advance.
 
 #### Scenario: Accepted checkpoint unlocks the next stage
 
@@ -1033,6 +1035,13 @@ SHALL NOT expand authority.
 - **THEN** no partial candidate or accepted checkpoint is exposed
 - **AND** the last committed session revision remains authoritative.
 
+#### Scenario: Advance through stages
+
+- **WHEN** a pending stage has no candidate
+- **THEN** Advance starts that stage
+- **AND** when the resulting candidate awaits review, Advance accepts it and
+  unlocks the next stage.
+
 ### Requirement: Inspectable safe execution details
 
 For every attempt, the application SHALL show the stage and revision, attempt
@@ -1047,6 +1056,11 @@ internal prompts, secrets, raw exception text, stack traces, model paths, and
 unbounded logs. If generation fails before a bounded artifact is captured, the
 application SHALL say that no artifact was available instead of fabricating or
 exposing unrelated content.
+
+The stage summary SHALL initially show status, latest attempt outcome and
+duration, and total attempt count. The user SHALL be able to expand each stage
+to inspect every attempt and its inert captured response. Contextual actions
+SHALL appear immediately below their stage, outside the expanded detail.
 
 #### Scenario: Inspect a successful code stage
 
@@ -1070,19 +1084,26 @@ exposing unrelated content.
   content is unavailable
 - **AND** it exposes no raw internal exception or generated token stream.
 
+#### Scenario: Inspect a compact stage
+
+- **WHEN** a stage has multiple completed attempts
+- **THEN** its card shows a concise latest outcome, duration, and count
+- **AND** expanding it reveals every attempt and captured response.
+
 ### Requirement: User-controlled retry and reprocessing
 
 Each explicit user action SHALL authorize at most one model generation. A
-failed stage SHALL expose Retry while its persisted repair budget remains. A
+failed stage SHALL expose Retry without a cumulative manual attempt limit. A
 retry SHALL receive only immutable accepted dependencies, the relevant checked-
 in contract, a controlled failure code, and the immediately preceding bounded
 rejected artifact only when the first repair has a precise localized validation
 category. Source-envelope and render-execution repairs SHALL omit rejected
-source. A second repair SHALL omit the previous artifact for every category.
-Restarting the process SHALL NOT reset consumed repair budget.
+source. All later repairs SHALL omit the previous artifact for every category.
+Retry SHALL NOT start an automatic loop.
 
-An accepted stage SHALL expose Reprocess. Reprocessing SHALL create a new stage
-revision without overwriting the accepted checkpoint. If the replacement fails
+An accepted stage or a successful unaccepted candidate SHALL expose Reprocess.
+Reprocessing SHALL create a new stage revision without overwriting any accepted
+checkpoint. If the replacement fails
 or is abandoned, the previous accepted checkpoint and descendants remain
 authoritative. If the user accepts a successful replacement, every transitive
 downstream checkpoint SHALL atomically become stale and SHALL be excluded from
@@ -1090,17 +1111,15 @@ context construction, preview, and final assembly until regenerated.
 
 #### Scenario: Retry only the failed stage
 
-- **WHEN** a stage attempt fails deterministic validation and repair budget
-  remains
+- **WHEN** a stage attempt fails deterministic validation and the user chooses Retry
 - **THEN** Retry starts exactly one repair attempt for that stage
 - **AND** no accepted upstream stage is regenerated or changed.
 
 #### Scenario: Repair budget survives restart
 
 - **WHEN** the app restarts after one or more retries of the current stage
-- **THEN** the remaining repair count is unchanged
-- **AND** exhausted stage-local repair authority cannot be restored by process
-  recreation.
+- **THEN** prior attempts remain persisted
+- **AND** the user can still retry the failed stage.
 
 #### Scenario: Render execution repair regenerates without source anchoring
 
@@ -1123,6 +1142,18 @@ context construction, preview, and final assembly until regenerated.
 - **THEN** every transitive downstream checkpoint is marked stale in the same
   durable transition
 - **AND** stale content cannot be used to build later prompts or a widget draft.
+
+#### Scenario: Continue after repeated failures
+
+- **WHEN** a stage fails after more than three user-authorized attempts
+- **THEN** the user can still request one more attempt
+- **AND** previous attempts remain inspectable.
+
+#### Scenario: Reprocess successful candidate before accepting it
+
+- **WHEN** the current stage has a successful candidate awaiting review
+- **THEN** the user can start a new stage revision without accepting that
+  candidate first.
 
 ### Requirement: Normalized feasibility and actionable presentation validation
 
