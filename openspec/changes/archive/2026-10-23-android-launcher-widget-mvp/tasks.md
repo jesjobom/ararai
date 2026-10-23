@@ -13,4 +13,4 @@
 - [x] Add a bottom-right refresh control that coalesces one-time execution and respects enablement.
 - [x] Cover projection, link policy, and refresh dispatch with focused tests.
 - [x] Run the full quality gate, install over the retained device app, and confirm existing launcher instances remain registered.
-- [ ] Visually inspect the compact and expanded instances and exercise their link and refresh actions when the device is unlocked.
+- [x] Confirm the launcher appearance and exercise its link and refresh actions on device (verified by JJ on 2026-10-23).
