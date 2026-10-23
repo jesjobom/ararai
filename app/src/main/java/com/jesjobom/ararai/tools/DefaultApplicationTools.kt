@@ -96,7 +96,8 @@ fun defaultApplicationToolRegistry(
     ),
 )
 
-internal fun wikipediaWidgetApplicationToolRegistry(
+/** Curated widget tool set. Only Wikipedia bindings are approved at present. */
+internal fun defaultWidgetApplicationToolRegistry(
     pagesTool: WikipediaPagesTool,
     onThisDayTool: WikipediaOnThisDayTool,
     state: () -> ApplicationToolOperationalState,

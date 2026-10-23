@@ -66,6 +66,7 @@ internal class ManagedWidgetExecutionCoordinator(
     private val executor: ManagedWidgetProgramExecutor,
     private val contextProvider: () -> WidgetRuntimeContext,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val onCommitted: (String) -> Unit = {},
 ) {
     suspend fun execute(widgetId: String): ManagedWidgetExecutionStatus = when (
         val acquisition = repository.acquireRunLease(widgetId)
@@ -80,7 +81,7 @@ internal class ManagedWidgetExecutionCoordinator(
         executeOwned(lease)
     } catch (cancelled: CancellationException) {
         withContext(NonCancellable) {
-            repository.completeRun(
+            val result = repository.completeRun(
                 lease,
                 failureCompletion(
                     lease = lease,
@@ -88,6 +89,7 @@ internal class ManagedWidgetExecutionCoordinator(
                     diagnostic = WidgetRunDiagnostic.Cancelled,
                 ),
             )
+            if (result == ManagedWidgetCommitResult.Stored) notifyCommitted(lease.widgetId)
         }
         throw cancelled
     }
@@ -188,12 +190,15 @@ internal class ManagedWidgetExecutionCoordinator(
         completion: ManagedWidgetRunCompletion,
         retryable: Boolean = false,
     ): ManagedWidgetExecutionStatus = when (repository.completeRun(lease, completion)) {
-        ManagedWidgetCommitResult.Stored -> if (retryable) {
-            ManagedWidgetExecutionStatus.RetryableFailure
-        } else {
-            ManagedWidgetExecutionStatus.Completed
+        ManagedWidgetCommitResult.Stored -> {
+            notifyCommitted(lease.widgetId)
+            if (retryable) ManagedWidgetExecutionStatus.RetryableFailure else ManagedWidgetExecutionStatus.Completed
         }
         ManagedWidgetCommitResult.Discarded -> ManagedWidgetExecutionStatus.Discarded
+    }
+
+    private fun notifyCommitted(widgetId: String) {
+        runCatching { onCommitted(widgetId) }
     }
 
     private fun failureCompletion(

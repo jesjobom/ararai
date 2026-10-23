@@ -222,6 +222,8 @@ internal fun ArarAiApp(
     voiceTemporaryDirectory: File,
     openModelManagementRequest: Int = 0,
     openWidgetAuthoringRequest: Int = 0,
+    openWidgetsRequest: Int = 0,
+    openWidgetDetailRequest: Pair<String, Int>? = null,
     liteRtLmCacheDir: String? = null,
     webSearchToolFactory: WebSearchToolFactory = WebSearchToolFactory(),
     localLlmEngineFactory: (() -> LocalLlmEngine)? = null,
@@ -552,6 +554,31 @@ internal fun ArarAiApp(
                 -> Unit
             }
             destination = AppDestination.WidgetAuthoring
+        }
+    }
+
+    LaunchedEffect(openWidgetsRequest) {
+        if (openWidgetsRequest > 0) {
+            when (destination) {
+                AppDestination.Chat -> chatViewModel.onLeavingChat()
+                AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
+                AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
+                else -> Unit
+            }
+            destination = AppDestination.Widgets
+        }
+    }
+
+    LaunchedEffect(openWidgetDetailRequest) {
+        openWidgetDetailRequest?.let { (widgetId, _) ->
+            when (destination) {
+                AppDestination.Chat -> chatViewModel.onLeavingChat()
+                AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
+                AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
+                else -> Unit
+            }
+            selectedWidgetId = widgetId
+            destination = AppDestination.WidgetDetail
         }
     }
 

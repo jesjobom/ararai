@@ -97,6 +97,41 @@ class ManagedWidgetExecutionCoordinatorTest {
     }
 
     @Test
+    fun `committed run requests launcher update without depending on notifier success`() = runTest {
+        val store = store()
+        val widget = store.createConfirmed(fixture())
+        val notified = mutableListOf<String>()
+        val coordinator = ManagedWidgetExecutionCoordinator(
+            repository = DispatcherManagedWidgetRepository(store, UnconfinedTestDispatcher()),
+            executor = ManagedWidgetProgramExecutor { _, _, _, _ -> successfulProgramResult() },
+            contextProvider = { WidgetRuntimeContext("en-CA", "America/Toronto", "2026-09-05T12:00:00", 42) },
+            nowMillis = { now },
+            onCommitted = { id ->
+                notified += id
+                error("launcher temporarily unavailable")
+            },
+        )
+
+        assertEquals(ManagedWidgetExecutionStatus.Completed, coordinator.execute(widget.id))
+        assertEquals(listOf(widget.id), notified)
+        assertEquals(WidgetRunOutcome.Success, store.listRuns(widget.id).single().outcome)
+    }
+
+    @Test
+    fun `definition mutations request launcher updates`() = runTest {
+        val repository = DispatcherManagedWidgetRepository(store(), UnconfinedTestDispatcher())
+        val notified = mutableListOf<String>()
+        val controller = ManagedWidgetScheduleController(repository, RecordingScheduler(), notified::add)
+
+        val created = controller.createConfirmed(fixture())
+        controller.replaceActiveRevision(created.id, fixture(displayName = "Updated"))
+        controller.setEnabled(created.id, false)
+        controller.delete(created.id)
+
+        assertEquals(List(4) { created.id }, notified)
+    }
+
+    @Test
     fun `repository lease coalesces races and discards result after edit disable and delete`() {
         val store = store()
         val widget = store.createConfirmed(fixture())

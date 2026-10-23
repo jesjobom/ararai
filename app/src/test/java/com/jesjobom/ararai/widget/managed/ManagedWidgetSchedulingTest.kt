@@ -186,6 +186,7 @@ class ManagedWidgetWorkerTest {
         application.executions.clear()
         application.failure = null
         application.outcome = ManagedWidgetWorkerOutcome.Completed
+        application.networkRequired = false
     }
 
     @Test
@@ -228,6 +229,18 @@ class ManagedWidgetWorkerTest {
     }
 
     @Test
+    fun `one-time refresh detects network requirement before execution`() = runTest {
+        application.networkRequired = true
+        val connectivity = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        shadowOf(connectivity).setActiveNetworkInfo(null)
+
+        val result = worker(WIDGET_ID, detectNetwork = true).doWork()
+
+        assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
+        assertTrue(application.executions.isEmpty())
+    }
+
+    @Test
     fun `network readiness retries a transient UID block without calling the tool early`() = runTest {
         var checks = 0
 
@@ -261,10 +274,15 @@ class ManagedWidgetWorkerTest {
         assertFalse(dependencies.any { it.contains("LocalLlm") || it.contains("Model") })
     }
 
-    private fun worker(widgetId: String?, requiresNetwork: Boolean = false): ManagedWidgetWorker {
+    private fun worker(
+        widgetId: String?,
+        requiresNetwork: Boolean = false,
+        detectNetwork: Boolean = false,
+    ): ManagedWidgetWorker {
         val input = Data.Builder().apply {
             widgetId?.let { putString(ManagedWidgetWorker.KEY_WIDGET_ID, it) }
             putBoolean(ManagedWidgetWorker.KEY_REQUIRES_NETWORK, requiresNetwork)
+            putBoolean(ManagedWidgetWorker.KEY_DETECT_NETWORK, detectNetwork)
         }.build()
         return TestListenableWorkerBuilder<ManagedWidgetWorker>(application)
             .setInputData(input)
@@ -277,6 +295,9 @@ class ManagedWidgetWorkerTest {
         val executions = mutableListOf<String>()
         var failure: RuntimeException? = null
         var outcome = ManagedWidgetWorkerOutcome.Completed
+        var networkRequired = false
+
+        override suspend fun requiresNetworkForManagedWidget(widgetId: String): Boolean = networkRequired
 
         override suspend fun executeManagedWidget(widgetId: String): ManagedWidgetWorkerOutcome {
             executions += widgetId

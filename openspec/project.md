@@ -47,10 +47,12 @@ inference remains device-, driver-, model-, and workload-dependent.
   historical events for a calendar date; both are typed contracts available to
   verified models and widgets. The legacy `wikipedia_search@1` binding remains
   registered for compatibility.
-- Managed in-app widgets provide bounded multi-round model authorship, strict
+- Managed widgets provide bounded multi-round model authorship, strict
   staged validation, explicit source/permission/schedule consent, immutable local
   revisions, unique inexact WorkManager schedules, manual refresh, stale cache,
-  bounded observations and sanitized runs, and fixed Compose rendering. A model
+  bounded observations and sanitized runs, and fixed Compose rendering. Android
+  launcher instances may display a fixed, text-only projection of validated
+  cached results; launcher rendering never executes model-authored code. A model
   runs only during an explicit foreground authoring attempt; refreshes execute
   the confirmed program without model inference. Eligibility is declared through
   `widget_authoring_pipeline_v1` only after the per-stage and complete physical

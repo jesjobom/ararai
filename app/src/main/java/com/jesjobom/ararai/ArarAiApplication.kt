@@ -39,7 +39,7 @@ import com.jesjobom.ararai.tools.ApplicationToolCategory
 import com.jesjobom.ararai.tools.ApplicationToolDispatcher
 import com.jesjobom.ararai.tools.ApplicationToolOperationalState
 import com.jesjobom.ararai.tools.defaultApplicationToolRegistry
-import com.jesjobom.ararai.tools.wikipediaWidgetApplicationToolRegistry
+import com.jesjobom.ararai.tools.defaultWidgetApplicationToolRegistry
 import com.jesjobom.ararai.ui.ManagedWidgetDraftGenerationResult
 import com.jesjobom.ararai.ui.ManagedWidgetDraftUiState
 import com.jesjobom.ararai.ui.ManagedWidgetsController
@@ -71,6 +71,8 @@ import com.jesjobom.ararai.widget.managed.WidgetDraftBuilder
 import com.jesjobom.ararai.widget.managed.WorkManagerManagedWidgetScheduler
 import com.jesjobom.ararai.widget.runtime.GatewayWidgetProgramToolExecutor
 import com.jesjobom.ararai.widget.runtime.QuickJsWidgetJavaScriptEngine
+import com.jesjobom.ararai.widget.runtime.WidgetProgramParser
+import com.jesjobom.ararai.widget.runtime.WidgetProgramValidationResult
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeContext
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeCoordinator
 import kotlinx.coroutines.CoroutineScope
@@ -179,7 +181,7 @@ class ArarAiApplication :
     }
 
     private val managedWidgetToolRegistry by lazy {
-        wikipediaWidgetApplicationToolRegistry(
+        defaultWidgetApplicationToolRegistry(
             wikipediaTool,
             wikipediaOnThisDayTool,
             state = {
@@ -233,11 +235,14 @@ class ArarAiApplication :
         )
     }
 
-    private val managedWidgetScheduler by lazy {
-        val networkToolIds = managedWidgetToolRegistry.descriptors()
+    private val managedWidgetNetworkToolIds by lazy {
+        managedWidgetToolRegistry.descriptors()
             .filter { it.category == ApplicationToolCategory.ExternalKnowledge }
             .mapTo(mutableSetOf()) { it.id }
-        WorkManagerManagedWidgetScheduler(WorkManager.getInstance(this), networkToolIds)
+    }
+
+    private val managedWidgetScheduler by lazy {
+        WorkManagerManagedWidgetScheduler(WorkManager.getInstance(this), managedWidgetNetworkToolIds)
     }
 
     private val managedWidgetCoordinator by lazy {
@@ -251,6 +256,7 @@ class ArarAiApplication :
             repository = managedWidgetRepository,
             executor = RuntimeManagedWidgetProgramExecutor(runtime),
             contextProvider = ::currentWidgetRuntimeContext,
+            onCommitted = { com.jesjobom.ararai.widget.launcher.LauncherWidgetUpdates.request(this) },
         )
     }
 
@@ -261,7 +267,9 @@ class ArarAiApplication :
     internal val managedWidgetApplicationServices by lazy {
         ManagedWidgetApplicationServices(
             repository = managedWidgetRepository,
-            schedules = ManagedWidgetScheduleController(managedWidgetRepository, managedWidgetScheduler),
+            schedules = ManagedWidgetScheduleController(managedWidgetRepository, managedWidgetScheduler) {
+                com.jesjobom.ararai.widget.launcher.LauncherWidgetUpdates.request(this)
+            },
             manualRefresh = ManagedWidgetManualRefresh(managedWidgetCoordinator),
             toolRegistry = managedWidgetToolRegistry,
         )
@@ -371,6 +379,13 @@ class ArarAiApplication :
         } else {
             ManagedWidgetWorkerOutcome.Completed
         }
+    }
+
+    override suspend fun requiresNetworkForManagedWidget(widgetId: String): Boolean {
+        val revision = managedWidgetRepository.activeRevision(widgetId) ?: return false
+        val validated = WidgetProgramParser.parse(revision.manifestJson, revision.source)
+        return validated is WidgetProgramValidationResult.Valid &&
+            validated.program.manifest.capabilities.tools.any { it.id in managedWidgetNetworkToolIds }
     }
 
     val diagnosticErrorReportCoordinator by lazy {

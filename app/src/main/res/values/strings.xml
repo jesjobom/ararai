@@ -426,6 +426,17 @@
     <string name="widgets_last_result">Last result: %1$s</string>
     <string name="widgets_never_run">Not refreshed yet</string>
     <string name="widget_detail_title">Widget details</string>
+    <string name="widget_launcher_description">Show an ArarAI widget on your Android Home screen</string>
+    <string name="widget_launcher_choose_title">Choose a widget for Home</string>
+    <string name="widget_launcher_choose_empty">Create a widget in ArarAI first, then add it to Home.</string>
+    <string name="widget_launcher_unconfigured">Choose a widget in ArarAI</string>
+    <string name="widget_launcher_unavailable">This widget is no longer available</string>
+    <string name="widget_launcher_empty">No result yet. Open ArarAI to refresh.</string>
+    <string name="widget_launcher_disabled">Disabled</string>
+    <string name="widget_launcher_stale">Last update failed · showing saved result</string>
+    <string name="widget_launcher_needs_attention">Needs attention</string>
+    <string name="widget_launcher_updated">Updated %1$s</string>
+    <string name="widget_launcher_refresh">Refresh widget</string>
     <string name="widget_no_presentation">No saved presentation yet.</string>
     <string name="widget_invalid_presentation">The saved presentation is invalid and was not rendered.</string>
     <string name="widget_schedule_manual">Manual refresh only</string>

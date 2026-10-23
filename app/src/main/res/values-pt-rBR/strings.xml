@@ -426,6 +426,17 @@
     <string name="widgets_last_result">Último resultado: %1$s</string>
     <string name="widgets_never_run">Ainda não foi atualizado</string>
     <string name="widget_detail_title">Detalhes do widget</string>
+    <string name="widget_launcher_description">Mostre um widget do ArarAI na tela inicial do Android</string>
+    <string name="widget_launcher_choose_title">Escolha um widget para a tela inicial</string>
+    <string name="widget_launcher_choose_empty">Crie um widget no ArarAI antes de adicioná-lo à tela inicial.</string>
+    <string name="widget_launcher_unconfigured">Escolha um widget no ArarAI</string>
+    <string name="widget_launcher_unavailable">Este widget não está mais disponível</string>
+    <string name="widget_launcher_empty">Ainda não há resultado. Abra o ArarAI para atualizar.</string>
+    <string name="widget_launcher_disabled">Desativado</string>
+    <string name="widget_launcher_stale">Última atualização falhou · exibindo resultado salvo</string>
+    <string name="widget_launcher_needs_attention">Requer atenção</string>
+    <string name="widget_launcher_updated">Atualizado em %1$s</string>
+    <string name="widget_launcher_refresh">Atualizar widget</string>
     <string name="widget_no_presentation">Ainda não há apresentação salva.</string>
     <string name="widget_invalid_presentation">A apresentação salva é inválida e não foi exibida.</string>
     <string name="widget_schedule_manual">Somente atualização manual</string>

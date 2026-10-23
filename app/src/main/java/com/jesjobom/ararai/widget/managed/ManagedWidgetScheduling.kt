@@ -114,6 +114,8 @@ internal class WorkManagerManagedWidgetScheduler(
 
 interface ManagedWidgetExecutionProvider {
     suspend fun executeManagedWidget(widgetId: String): ManagedWidgetWorkerOutcome
+
+    suspend fun requiresNetworkForManagedWidget(widgetId: String): Boolean = false
 }
 
 enum class ManagedWidgetWorkerOutcome { Completed, Retry }
@@ -128,7 +130,9 @@ internal class ManagedWidgetWorker(
             ?: return Result.failure()
         val provider = applicationContext as? ManagedWidgetExecutionProvider ?: return Result.failure()
         return try {
-            if (inputData.getBoolean(KEY_REQUIRES_NETWORK, false) && !awaitWidgetNetworkAccess(::networkAvailable)) {
+            val requiresNetwork = inputData.getBoolean(KEY_REQUIRES_NETWORK, false) ||
+                (inputData.getBoolean(KEY_DETECT_NETWORK, false) && provider.requiresNetworkForManagedWidget(widgetId))
+            if (requiresNetwork && !awaitWidgetNetworkAccess(::networkAvailable)) {
                 return Result.retry()
             }
             when (provider.executeManagedWidget(widgetId)) {
@@ -145,6 +149,7 @@ internal class ManagedWidgetWorker(
     companion object {
         const val KEY_WIDGET_ID = "widget_id"
         const val KEY_REQUIRES_NETWORK = "requires_network"
+        const val KEY_DETECT_NETWORK = "detect_network"
     }
 
     @Suppress("DEPRECATION")
@@ -176,10 +181,12 @@ internal class ManagedWidgetManualRefresh(
 internal class ManagedWidgetScheduleController(
     private val repository: ManagedWidgetRepository,
     private val scheduler: ManagedWidgetScheduler,
+    private val onChanged: (String) -> Unit = {},
 ) {
     suspend fun createConfirmed(candidate: ConfirmedWidgetRevision): ManagedWidgetDefinition {
         val definition = repository.createConfirmed(candidate)
         reconcile(definition.id)
+        notifyChanged(definition.id)
         return definition
     }
 
@@ -189,6 +196,7 @@ internal class ManagedWidgetScheduleController(
     ): ManagedWidgetDefinition {
         val definition = repository.replaceActiveRevision(widgetId, candidate)
         reconcile(widgetId)
+        notifyChanged(widgetId)
         return definition
     }
 
@@ -208,12 +216,18 @@ internal class ManagedWidgetScheduleController(
     ): ManagedWidgetDefinition {
         val definition = repository.setEnabled(widgetId, enabled)
         reconcile(widgetId)
+        notifyChanged(widgetId)
         return definition
     }
 
     suspend fun delete(widgetId: String) {
         repository.delete(widgetId)
         scheduler.cancel(widgetId)
+        notifyChanged(widgetId)
+    }
+
+    private fun notifyChanged(widgetId: String) {
+        runCatching { onChanged(widgetId) }
     }
 }
 
