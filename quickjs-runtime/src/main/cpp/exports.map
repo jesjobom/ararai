@@ -1,0 +1,9 @@
+{
+    global:
+        Java_com_jesjobom_ararai_quickjs_NativeQuickJsBridge_cancel;
+        Java_com_jesjobom_ararai_quickjs_NativeQuickJsBridge_close;
+        Java_com_jesjobom_ararai_quickjs_NativeQuickJsBridge_create;
+        Java_com_jesjobom_ararai_quickjs_NativeQuickJsBridge_evaluate;
+    local:
+        *;
+};

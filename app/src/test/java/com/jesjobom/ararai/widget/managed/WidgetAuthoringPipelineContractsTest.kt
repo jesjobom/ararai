@@ -1,0 +1,693 @@
+@file:Suppress("MaxLineLength")
+
+package com.jesjobom.ararai.widget.managed
+
+import com.google.gson.JsonArray
+import com.google.gson.JsonNull
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import com.jesjobom.ararai.widget.runtime.WidgetRuntimeValue
+import com.jesjobom.ararai.widget.runtime.WidgetToolCapability
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class WidgetAuthoringPipelineContractsTest {
+    @Test
+    fun `feasibility accepts a bounded achievable envelope`() {
+        val parsed = WidgetFeasibilityParser.parse(achievable().toString(), AVAILABLE_TOOLS)
+
+        assertTrue(parsed is WidgetFeasibilityParseResult.Valid)
+        val artifact = (parsed as WidgetFeasibilityParseResult.Valid).artifact
+        assertEquals(WidgetFeasibilityOutcome.Achievable, artifact.outcome)
+        assertEquals(listOf(TOOL), artifact.tools.map { it.capability })
+        assertEquals(WidgetRuntimeValue.entries.toSet(), artifact.runtimeValues)
+        assertEquals(null, artifact.reason)
+        assertEquals(null, artifact.clarificationQuestion)
+    }
+
+    @Test
+    fun `feasibility normalizes an overlong achievable display name without a repair`() {
+        val raw = achievable().apply {
+            addProperty("message", "  ${"Historical event ".repeat(10)}  ")
+        }
+
+        val parsed = WidgetFeasibilityParser.parse(raw.toString(), AVAILABLE_TOOLS)
+
+        assertTrue(parsed is WidgetFeasibilityParseResult.Valid)
+        val displayName = (parsed as WidgetFeasibilityParseResult.Valid).artifact.displayName
+        assertTrue(displayName.length <= 80)
+        assertTrue(displayName.endsWith("…"))
+        assertEquals(false, displayName.contains("  "))
+    }
+
+    @Test
+    fun `feasibility resolves the newest registered version in the application`() {
+        val newest = WidgetToolCapability(TOOL.id, 2)
+
+        val parsed = WidgetFeasibilityParser.parse(achievable().toString(), setOf(TOOL, newest))
+
+        assertTrue(parsed is WidgetFeasibilityParseResult.Valid)
+        assertEquals(listOf(newest), (parsed as WidgetFeasibilityParseResult.Valid).artifact.tools.map { it.capability })
+    }
+
+    @Test
+    fun `feasibility localizes controlled failures without retaining rejected values`() {
+        val additional = achievable().apply { addProperty("endpoint", "https://example.com") }
+        val unsupportedSchedule = achievable().apply { addProperty("periodicIntervalHours", 5) }
+        val invented = achievable().apply { add("toolIds", JsonArray().apply { add("http_get") }) }
+
+        listOf(
+            additional to WidgetAuthoringStageFailureCode.InvalidFeasibilityFields,
+            unsupportedSchedule to WidgetAuthoringStageFailureCode.InvalidFeasibilitySchedule,
+            invented to WidgetAuthoringStageFailureCode.InvalidFeasibilityTools,
+        ).forEach { (artifact, code) ->
+            assertEquals(
+                WidgetFeasibilityParseResult.Invalid(code),
+                WidgetFeasibilityParser.parse(artifact.toString(), AVAILABLE_TOOLS),
+            )
+        }
+    }
+
+    @Test
+    fun `feasibility distinguishes every structural rejection without rejected content`() {
+        val missingField = achievable().apply { remove("toolIds") }
+        val invalidOutcome = achievable().apply { addProperty("outcome", "maybe") }
+        val invalidDisplayName = achievable().apply { addProperty("message", " ") }
+
+        listOf(
+            "not-json" to WidgetAuthoringStageFailureCode.InvalidFeasibilityJsonRoot,
+            missingField.toString() to WidgetAuthoringStageFailureCode.InvalidFeasibilityFields,
+            invalidOutcome.toString() to WidgetAuthoringStageFailureCode.InvalidFeasibilityOutcome,
+            invalidDisplayName.toString() to WidgetAuthoringStageFailureCode.InvalidFeasibilityDisplayName,
+        ).forEach { (raw, code) ->
+            assertEquals(
+                WidgetFeasibilityParseResult.Invalid(code),
+                WidgetFeasibilityParser.parse(raw, AVAILABLE_TOOLS),
+            )
+        }
+    }
+
+    @Test
+    fun `feasibility reports resource limit independently from contract categories`() {
+        val oversized = " ".repeat(WidgetAuthoringPipelinePolicy.MAX_ARTIFACT_BYTES + 1)
+
+        assertEquals(
+            WidgetFeasibilityParseResult.Invalid(WidgetAuthoringStageFailureCode.ResourceLimit),
+            WidgetFeasibilityParser.parse(oversized, AVAILABLE_TOOLS),
+        )
+    }
+
+    @Test
+    fun `feasibility accepts unachievable and clarification only without authority`() {
+        val unachievable = terminal("unachievable", "No supported provider")
+        val clarification = terminal("needs_clarification", "Which language should be used?")
+
+        val unavailable = WidgetFeasibilityParser.parse(unachievable.toString(), AVAILABLE_TOOLS)
+            as WidgetFeasibilityParseResult.Valid
+        val question = WidgetFeasibilityParser.parse(clarification.toString(), AVAILABLE_TOOLS)
+            as WidgetFeasibilityParseResult.Valid
+
+        assertEquals(false, unavailable.artifact.enabled)
+        assertEquals("No supported provider", unavailable.artifact.reason)
+        assertEquals(null, unavailable.artifact.periodicIntervalHours)
+        assertTrue(unavailable.artifact.tools.isEmpty())
+        assertTrue(unavailable.artifact.runtimeValues.isEmpty())
+        assertTrue(unavailable.artifact.presentation.isEmpty())
+        assertEquals("Which language should be used?", question.artifact.clarificationQuestion)
+        assertEquals(null, question.artifact.reason)
+    }
+
+    @Test
+    fun `algorithm accepts ordered independent calls within the frozen envelope`() {
+        val feasibility = validFeasibility()
+        val parsed = WidgetAlgorithmParser.parse(algorithm().toString(), feasibility)
+
+        assertTrue(parsed is WidgetAlgorithmParseResult.Valid)
+        assertEquals(1, (parsed as WidgetAlgorithmParseResult.Valid).artifact.toolCallSteps.size)
+        assertEquals(TOOL, parsed.artifact.toolCallSteps.single().tool)
+    }
+
+    @Test
+    fun `algorithm permits an implicit empty dependency list only on the first step`() {
+        val candidate = algorithm().apply {
+            addProperty("renderCapability", "custom_source")
+            getAsJsonArray("steps").first().asJsonObject.remove("dependsOn")
+            getAsJsonArray("steps").add(transformStep("format_event", listOf("events_call"), "Show event year"))
+        }
+
+        assertTrue(
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true) is
+                WidgetAlgorithmParseResult.Valid,
+        )
+        candidate.getAsJsonArray("steps")[1].asJsonObject.addProperty("selectionMode", "seeded_random")
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true),
+        )
+        candidate.getAsJsonArray("steps")[1].asJsonObject.remove("selectionMode")
+        candidate.getAsJsonArray("steps")[1].asJsonObject.remove("dependsOn")
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true),
+        )
+    }
+
+    @Test
+    fun `non page tool schema omits page selection while page version keeps it`() {
+        val eventSchema = JsonParser.parseString(algorithmCaptureSchema(validFeasibility())).asJsonObject
+        val eventStepFields = eventSchema.getAsJsonObject("parameters").getAsJsonObject("properties")
+            .getAsJsonObject("steps").getAsJsonObject("items").getAsJsonObject("properties")
+        assertFalse(eventStepFields.has("selectionMode"))
+
+        val pageTool = WidgetToolCapability("wikipedia_pages", 2)
+        val pageFeasibility = validFeasibility().copy(tools = listOf(WidgetSelectedTool(pageTool, "page search")))
+        val pageSchema = JsonParser.parseString(algorithmCaptureSchema(pageFeasibility)).asJsonObject
+        val pageStepFields = pageSchema.getAsJsonObject("parameters").getAsJsonObject("properties")
+            .getAsJsonObject("steps").getAsJsonObject("items").getAsJsonObject("properties")
+        assertTrue(pageStepFields.has("selectionMode"))
+    }
+
+    @Test
+    fun `algorithm selects a render capability while legacy checkpoints remain readable`() {
+        val selected = algorithm().apply { addProperty("renderCapability", "collection_card") }
+        val invalid = algorithm().apply { addProperty("renderCapability", "invented") }
+        val feasibility = validFeasibility()
+
+        assertEquals(
+            WidgetRenderCapability.CollectionCard,
+            (WidgetAlgorithmParser.parse(selected.toString(), feasibility) as WidgetAlgorithmParseResult.Valid)
+                .artifact.renderCapability,
+        )
+        assertEquals(
+            null,
+            (WidgetAlgorithmParser.parse(algorithm().toString(), feasibility) as WidgetAlgorithmParseResult.Valid)
+                .artifact.renderCapability,
+        )
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(algorithm().toString(), feasibility, requireRenderCapability = true),
+        )
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(invalid.toString(), feasibility),
+        )
+        assertTrue(WidgetAuthoringStageSchemas.algorithm.contains("\"renderCapability\""))
+    }
+
+    @Test
+    fun `collection card cannot silently drop filtering after a Wikipedia result`() {
+        val prompt = "Mostre um item da Wikipedia sobre Brasil cuja descrição mencione fauna"
+        val candidate = algorithm().apply {
+            addProperty("presentationObjective", prompt)
+            addProperty("renderCapability", "collection_card")
+            getAsJsonArray("steps").add(transformStep("filter_fauna", listOf("events_call"), prompt))
+        }
+
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true),
+        )
+        candidate.getAsJsonArray("steps").last().asJsonObject.add("dependsOn", JsonArray())
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true),
+        )
+        candidate.addProperty("renderCapability", "custom_source")
+        assertTrue(
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true) is
+                WidgetAlgorithmParseResult.Valid,
+        )
+    }
+
+    @Test
+    fun `time dependent query before the tool remains compatible with collection card`() {
+        val prompt = "Busque América à noite ou Europa de dia e mostre uma página"
+        val candidate = algorithm().apply {
+            addProperty("presentationObjective", prompt)
+            addProperty("renderCapability", "collection_card")
+            add(
+                "steps",
+                JsonArray().apply {
+                    add(algorithm().getAsJsonArray("steps").first())
+                    add(transformStep("choose_query", listOf("current_date"), prompt))
+                    add(toolStep("events_call", listOf("choose_query")))
+                },
+            )
+        }
+
+        assertTrue(
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true) is
+                WidgetAlgorithmParseResult.Valid,
+        )
+    }
+
+    @Test
+    fun `collection card cannot ignore a second tool result`() {
+        val candidate = algorithm().apply {
+            addProperty("renderCapability", "collection_card")
+            getAsJsonArray("steps").add(toolStep("second_call", listOf("current_date")))
+        }
+
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true),
+        )
+        candidate.addProperty("renderCapability", "custom_source")
+        assertTrue(
+            WidgetAlgorithmParser.parse(candidate.toString(), validFeasibility(), requireRenderCapability = true) is
+                WidgetAlgorithmParseResult.Valid,
+        )
+    }
+
+    @Test
+    fun `new page algorithm freezes tool selection while old checkpoints remain readable`() {
+        val pageTool = WidgetToolCapability("wikipedia_pages", 2)
+        val feasibility = validFeasibility().copy(tools = listOf(WidgetSelectedTool(pageTool, "page search")))
+        val selected = algorithm().apply {
+            getAsJsonArray("steps").last().asJsonObject.apply {
+                addProperty("toolId", pageTool.id)
+                addProperty("contractVersion", pageTool.version)
+                addProperty("selectionMode", "seeded_random")
+            }
+        }
+
+        val parsed = WidgetAlgorithmParser.parse(selected.toString(), feasibility, requirePageSelection = true)
+        assertEquals(
+            WidgetToolSelectionMode.SeededRandom,
+            (parsed as WidgetAlgorithmParseResult.Valid).artifact.toolCallSteps.single().selectionMode,
+        )
+        selected.getAsJsonArray("steps").last().asJsonObject.remove("selectionMode")
+        assertTrue(WidgetAlgorithmParser.parse(selected.toString(), feasibility) is WidgetAlgorithmParseResult.Valid)
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(selected.toString(), feasibility, requirePageSelection = true),
+        )
+        assertTrue(WidgetAuthoringStageSchemas.algorithm.contains("\"selectionMode\""))
+    }
+
+    @Test
+    fun `collection card artifact generates only application-owned render source`() {
+        val selected = algorithm().apply { addProperty("renderCapability", "collection_card") }
+        val algorithm = (
+            WidgetAlgorithmParser.parse(selected.toString(), validFeasibility()) as
+                WidgetAlgorithmParseResult.Valid
+            ).artifact
+        val raw = """{"alias":"events_call","items":"events","title":"text","url":"canonicalUrl","fallback":"No events","selection":"first"}"""
+
+        val parsed = WidgetCollectionCardArtifact.parse(raw, algorithm) as WidgetSourceFragmentParseResult.Valid
+
+        assertTrue(parsed.artifact.source.startsWith("function render(runtime, outcomes, state)"))
+        assertTrue(parsed.artifact.source.contains("runtime.collectionCard(outcomes, \"events_call\""))
+        assertTrue(parsed.artifact.source.contains("\"selection\":\"first\""))
+        assertTrue(parsed.artifact.source.contains("\"fallback\":\"No events\""))
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidPresentationFields),
+            WidgetCollectionCardArtifact.parse(raw.replace("\"fallback\":\"No events\",", ""), algorithm),
+        )
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidPresentationFields),
+            WidgetCollectionCardArtifact.parse(raw.replace("events_call", "invented"), algorithm),
+        )
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidPresentationFields),
+            WidgetCollectionCardArtifact.parse(raw.replace("\"first\"", "\"last\""), algorithm),
+        )
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidPresentationFields),
+            WidgetCollectionCardArtifact.parse(raw.replace("\"title\":\"text\"", "\"title\":\"Wikipedia event today\""), algorithm),
+        )
+    }
+
+    @Test
+    fun `algorithm derives protocol version while accepting a legacy version field`() {
+        val current = algorithm().apply { remove("protocolVersion") }
+        val incompatible = algorithm().apply { addProperty("protocolVersion", 2) }
+
+        assertTrue(WidgetAlgorithmParser.parse(current.toString(), validFeasibility()) is WidgetAlgorithmParseResult.Valid)
+        assertTrue(WidgetAlgorithmParser.parse(algorithm().toString(), validFeasibility()) is WidgetAlgorithmParseResult.Valid)
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(incompatible.toString(), validFeasibility()),
+        )
+        assertEquals(false, WidgetAuthoringStageSchemas.algorithm.contains("protocolVersion"))
+    }
+
+    @Test
+    fun `algorithm ignores tool metadata on steps that cannot invoke tools`() {
+        val artifact = algorithm().apply {
+            getAsJsonArray("steps").first().asJsonObject.apply {
+                addProperty("toolId", TOOL.id)
+                addProperty("contractVersion", TOOL.version)
+            }
+            getAsJsonArray("steps").add(
+                JsonObject().apply {
+                    addProperty("id", "render_event")
+                    addProperty("kind", "transform")
+                    addProperty("objective", "Render the selected event")
+                    add("dependsOn", JsonArray().apply { add("events_call") })
+                    add("toolId", JsonNull.INSTANCE)
+                    addProperty("contractVersion", TOOL.version)
+                    add("runtimeInputs", JsonArray())
+                },
+            )
+        }
+
+        val parsed = WidgetAlgorithmParser.parse(artifact.toString(), validFeasibility())
+
+        assertTrue(parsed is WidgetAlgorithmParseResult.Valid)
+        val steps = (parsed as WidgetAlgorithmParseResult.Valid).artifact.steps
+        assertEquals(null, steps.single { it.id == "current_date" }.tool)
+        assertEquals(null, steps.single { it.id == "render_event" }.tool)
+        assertEquals(TOOL, steps.single { it.id == "events_call" }.tool)
+    }
+
+    @Test
+    fun `algorithm derives runtime authority and ignores legacy model runtime labels`() {
+        val artifact = algorithm().apply {
+            getAsJsonArray("steps").first().asJsonObject.apply {
+                remove("toolId")
+                remove("contractVersion")
+            }
+            getAsJsonArray("steps").last().asJsonObject.add(
+                "runtimeInputs",
+                JsonArray().apply {
+                    add("month")
+                    add("day")
+                    add("locale")
+                },
+            )
+        }
+
+        val parsed = WidgetAlgorithmParser.parse(artifact.toString(), validFeasibility())
+
+        assertTrue(parsed is WidgetAlgorithmParseResult.Valid)
+        assertEquals(false, WidgetAuthoringStageSchemas.algorithm.contains("runtimeInputs"))
+    }
+
+    @Test
+    fun `algorithm derives tool version from the frozen envelope`() {
+        val artifact = algorithm().apply {
+            getAsJsonArray("steps").last().asJsonObject.apply {
+                remove("contractVersion")
+            }
+        }
+
+        val parsed = WidgetAlgorithmParser.parse(artifact.toString(), validFeasibility())
+
+        assertTrue(parsed is WidgetAlgorithmParseResult.Valid)
+        assertEquals(TOOL, (parsed as WidgetAlgorithmParseResult.Valid).artifact.toolCallSteps.single().tool)
+        assertEquals(false, WidgetAuthoringStageSchemas.algorithm.contains("contractVersion"))
+    }
+
+    @Test
+    fun `algorithm still rejects unknown fields on steps without tools`() {
+        val artifact = algorithm().apply {
+            getAsJsonArray("steps").first().asJsonObject.addProperty("endpoint", "https://example.com")
+        }
+
+        assertEquals(
+            WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+            WidgetAlgorithmParser.parse(artifact.toString(), validFeasibility()),
+        )
+    }
+
+    @Test
+    fun `algorithm rejects duplicate cyclic invented and live-result-dependent steps`() {
+        val duplicate = algorithm().apply {
+            getAsJsonArray("steps").add(getAsJsonArray("steps").last().deepCopy())
+        }
+        val invented = algorithm().apply {
+            getAsJsonArray("steps").last().asJsonObject.addProperty("toolId", "http_get")
+        }
+        val liveDependent = algorithm().apply {
+            getAsJsonArray("steps").add(
+                toolStep(
+                    id = "second_call",
+                    dependsOn = listOf("events_call"),
+                ),
+            )
+        }
+        val forwardDependency = algorithm().apply {
+            getAsJsonArray("steps").first().asJsonObject
+                .getAsJsonArray("dependsOn")
+                .add("events_call")
+        }
+
+        listOf(duplicate, invented, liveDependent, forwardDependency).forEach { artifact ->
+            assertEquals(
+                WidgetAlgorithmParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm),
+                WidgetAlgorithmParser.parse(artifact.toString(), validFeasibility()),
+            )
+        }
+    }
+
+    @Test
+    fun `source fragment freezes identity signature and one safe generated function`() {
+        val parsed = WidgetSourceFragmentParser.parse(
+            fragment("call_events", "buildCallEvents", listOf("runtime"), VALID_CALL_SOURCE).toString(),
+            expectedArtifactId = "call_events",
+            expectedFunctionName = "buildCallEvents",
+            expectedInputNames = listOf("runtime"),
+        )
+
+        assertTrue(parsed is WidgetSourceFragmentParseResult.Valid)
+        assertEquals(VALID_CALL_SOURCE, (parsed as WidgetSourceFragmentParseResult.Valid).artifact.source)
+    }
+
+    @Test
+    fun `source fragment derives identity from the stage while accepting the legacy envelope`() {
+        val current = JsonObject().apply { addProperty("source", VALID_CALL_SOURCE) }
+        val incompatible = fragment("call_events", "buildCallEvents", listOf("runtime"), VALID_CALL_SOURCE).apply {
+            addProperty("protocolVersion", 2)
+        }
+
+        val parsed = WidgetSourceFragmentParser.parse(
+            current.toString(),
+            expectedArtifactId = "call_events",
+            expectedFunctionName = "buildCallEvents",
+            expectedInputNames = listOf("runtime"),
+        )
+
+        assertTrue(parsed is WidgetSourceFragmentParseResult.Valid)
+        val artifact = (parsed as WidgetSourceFragmentParseResult.Valid).artifact
+        assertEquals("call_events", artifact.artifactId)
+        assertEquals("buildCallEvents", artifact.functionName)
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidSource),
+            WidgetSourceFragmentParser.parse(
+                incompatible.toString(),
+                expectedArtifactId = "call_events",
+                expectedFunctionName = "buildCallEvents",
+                expectedInputNames = listOf("runtime"),
+            ),
+        )
+        assertEquals(false, WidgetAuthoringStageSchemas.sourceFragment("submit").contains("protocolVersion"))
+        assertEquals(false, WidgetAuthoringStageSchemas.sourceFragment("submit").contains("artifactId"))
+    }
+
+    @Test
+    fun `source fragment rejects renamed extra and ambient functions`() {
+        val renamed = fragment("call_events", "renamed", listOf("runtime"), VALID_CALL_SOURCE)
+        val extra = fragment(
+            "call_events",
+            "buildCallEvents",
+            listOf("runtime"),
+            VALID_CALL_SOURCE + "\nfunction hidden() { return 1; }",
+        )
+        val ambient = fragment(
+            "call_events",
+            "buildCallEvents",
+            listOf("runtime"),
+            "function buildCallEvents(runtime) { return Date.now(); }",
+        )
+
+        listOf(renamed, extra, ambient).forEach { artifact ->
+            assertEquals(
+                WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidSource),
+                WidgetSourceFragmentParser.parse(
+                    artifact.toString(),
+                    "call_events",
+                    "buildCallEvents",
+                    listOf("runtime"),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `render rejects ambient random and accepts the compact seeded helper contract`() {
+        val random = "function render(runtime, outcomes, state) { return Math.random(); }"
+        val compact = """function render(runtime, outcomes, state) {
+  const picked = runtime.pickArrayItem(outcomes, 'events', 'events', 'seeded_random');
+  if (!picked) return runtime.card('No events');
+  return runtime.card([picked.item.title + ' (' + picked.item.year + ')', picked.item.text, runtime.linkFor(outcomes, 'events', picked.path + '.canonicalUrl', 'Read')]);
+}"""
+        val collectionCard = """function render(runtime, outcomes, state) {
+  return runtime.collectionCard(outcomes, 'events', {
+    items:'events', title:'title', body:'text', url:'canonicalUrl', fallback:'No events'
+  });
+}"""
+        fun parse(source: String) = WidgetSourceFragmentParser.parse(
+            JsonObject().apply { addProperty("source", source) }.toString(),
+            "render",
+            "render",
+            listOf("runtime", "outcomes", "state"),
+        )
+
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidSource),
+            parse(random),
+        )
+        assertTrue(parse(compact) is WidgetSourceFragmentParseResult.Valid)
+        assertTrue(parse(collectionCard) is WidgetSourceFragmentParseResult.Valid)
+    }
+
+    @Test
+    fun `render accepts indexed selection and rejects arrow callback`() {
+        val indexed = """function render(runtime, outcomes, state) {
+  if (!runtime.isSuccess(outcomes, 'events')) return runtime.card('No events');
+  const events = runtime.getArray(outcomes, 'events', 'events');
+  if (events.length === 0) return runtime.card('No events');
+  let chosen = 0;
+  for (let i = 1; i < events.length; i++) {
+    if (events[i].year < events[chosen].year) chosen = i;
+  }
+  return runtime.card([
+    events[chosen].text,
+    runtime.linkFor(outcomes, 'events', 'events.' + chosen + '.canonicalUrl', 'Read')
+  ]);
+}"""
+        val arrow = indexed.replace("events[i].year < events[chosen].year", "events.map(x => x.year)[i] < events[chosen].year")
+        fun parse(source: String) = WidgetSourceFragmentParser.parse(
+            JsonObject().apply { addProperty("source", source) }.toString(),
+            "render",
+            "render",
+            listOf("runtime", "outcomes", "state"),
+        )
+
+        assertTrue(parse(indexed) is WidgetSourceFragmentParseResult.Valid)
+        assertEquals(
+            WidgetSourceFragmentParseResult.Invalid(WidgetAuthoringStageFailureCode.InvalidSource),
+            parse(arrow),
+        )
+    }
+
+    @Test
+    fun `presentation preflight classifies node type fields and tone separately`() {
+        assertEquals(
+            WidgetAuthoringStageFailureCode.InvalidPresentationNodeType,
+            presentationShapeFailure("""{"type":"text/value","text":"event","tone":"neutral"}"""),
+        )
+        assertEquals(
+            WidgetAuthoringStageFailureCode.InvalidPresentationFields,
+            presentationShapeFailure("""{"type":"text","text":"event"}"""),
+        )
+        assertEquals(
+            WidgetAuthoringStageFailureCode.InvalidPresentationTone,
+            presentationShapeFailure("""{"type":"text","text":"event","tone":"normal"}"""),
+        )
+        assertEquals(
+            null,
+            presentationShapeFailure("""{"type":"text","text":"event","tone":"neutral"}"""),
+        )
+    }
+
+    @Test
+    fun `attempt budget globally bounds generations and repairs`() {
+        val budget = WidgetAuthoringAttemptBudget(maximumGenerations = 3, maximumRepairs = 2)
+
+        assertTrue(budget.consumeGeneration(isRepair = false))
+        assertTrue(budget.consumeGeneration(isRepair = true))
+        assertTrue(budget.consumeGeneration(isRepair = true))
+        assertEquals(2, budget.repairCount())
+        assertEquals(false, budget.consumeGeneration(isRepair = false))
+        assertEquals(false, budget.consumeGeneration(isRepair = true))
+    }
+
+    private fun validFeasibility(): WidgetFeasibilityArtifact = (WidgetFeasibilityParser.parse(achievable().toString(), AVAILABLE_TOOLS) as WidgetFeasibilityParseResult.Valid)
+        .artifact
+
+    private fun achievable() = JsonObject().apply {
+        addProperty("outcome", "achievable")
+        addProperty("message", "Today in history")
+        addProperty("periodicIntervalHours", 24)
+        add("toolIds", JsonArray().apply { add(TOOL.id) })
+    }
+
+    private fun terminal(outcome: String, message: String) = achievable().apply {
+        addProperty("outcome", outcome)
+        addProperty("message", message)
+        addProperty("periodicIntervalHours", 5)
+        add("toolIds", JsonArray().apply { add("ignored_unavailable_tool") })
+    }
+
+    private fun algorithm() = JsonObject().apply {
+        addProperty("protocolVersion", 1)
+        add(
+            "steps",
+            JsonArray().apply {
+                add(
+                    JsonObject().apply {
+                        addProperty("id", "current_date")
+                        addProperty("kind", "runtime_input")
+                        addProperty("objective", "Read the current local date and language")
+                        add("dependsOn", JsonArray())
+                        add("toolId", JsonNull.INSTANCE)
+                        add("contractVersion", JsonNull.INSTANCE)
+                        add(
+                            "runtimeInputs",
+                            JsonArray().apply {
+                                add("locale")
+                                add("local_time")
+                            },
+                        )
+                    },
+                )
+                add(toolStep("events_call", listOf("current_date")))
+            },
+        )
+        addProperty("presentationObjective", "Show one event and a proven Wikipedia link")
+    }
+
+    private fun toolStep(id: String, dependsOn: List<String>) = JsonObject().apply {
+        addProperty("id", id)
+        addProperty("kind", "tool_call")
+        addProperty("objective", "Request the events for the current date")
+        add("dependsOn", JsonArray().apply { dependsOn.forEach(::add) })
+        addProperty("toolId", TOOL.id)
+        addProperty("contractVersion", TOOL.version)
+        add(
+            "runtimeInputs",
+            JsonArray().apply {
+                add("locale")
+                add("local_time")
+            },
+        )
+    }
+
+    private fun transformStep(id: String, dependsOn: List<String>, objective: String) = JsonObject().apply {
+        addProperty("id", id)
+        addProperty("kind", "transform")
+        addProperty("objective", objective)
+        add("dependsOn", JsonArray().apply { dependsOn.forEach(::add) })
+    }
+
+    private fun fragment(id: String, name: String, inputs: List<String>, source: String) = JsonObject().apply {
+        addProperty("protocolVersion", 1)
+        addProperty("artifactId", id)
+        addProperty("functionName", name)
+        add("inputNames", JsonArray().apply { inputs.forEach(::add) })
+        addProperty("source", source)
+    }
+
+    companion object {
+        private val TOOL = WidgetToolCapability("wikipedia_on_this_day", 1)
+        private val AVAILABLE_TOOLS = setOf(TOOL)
+        private const val VALID_CALL_SOURCE = """function buildCallEvents(runtime) {
+  const now = runtime.currentLocalDateTime();
+  return {alias:'events',toolId:'wikipedia_on_this_day',contractVersion:1,arguments:{month:now.month,day:now.day,language:runtime.language}};
+}"""
+    }
+}

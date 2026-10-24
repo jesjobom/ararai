@@ -38,6 +38,13 @@ load, memory pressure, or thermal behavior. Follow `docs/device-validation.md`
 and report device/model/build evidence explicitly; otherwise mark those checks as
 not executed.
 
+Android Gradle `connected*AndroidTest` tasks may uninstall the target package
+during cleanup and erase app-private models, preferences, conversations, and
+widget state. Never run them on JJ's SM-S901E or any data-bearing device. They
+require the explicit `-Pararai.allowDestructiveConnectedTests=true` opt-in and a
+disposable emulator/device. On a retained device, build instrumentation APKs
+without executing them and use non-destructive manual validation instead.
+
 ## Delivery
 
 Do not commit, push, archive an OpenSpec change, or copy an APK unless the task

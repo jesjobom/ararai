@@ -3,12 +3,30 @@ package com.jesjobom.ararai.chat
 import com.jesjobom.ararai.knowledge.WebSearchProvider
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelToolCapabilities
+import com.jesjobom.ararai.tools.WIKIPEDIA_ON_THIS_DAY_TOOL_NAME
+import com.jesjobom.ararai.tools.WIKIPEDIA_PAGES_TOOL_NAME
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InstructionPreferencesTest {
+    @Test
+    fun `recognizes current and legacy Wikipedia model capabilities`() {
+        fun model(vararg tools: String) = LocalModel(
+            id = tools.joinToString().ifBlank { "unsupported" },
+            name = "Model",
+            filePath = "/tmp/model",
+            toolCapabilities = ModelToolCapabilities(tools.toSet()),
+        )
+
+        assertTrue(supportsWikipediaTools(model(WIKIPEDIA_PAGES_TOOL_NAME)))
+        assertTrue(supportsWikipediaTools(model(WIKIPEDIA_ON_THIS_DAY_TOOL_NAME)))
+        assertTrue(supportsWikipediaTools(model(WIKIPEDIA_SEARCH_TOOL_NAME)))
+        assertFalse(supportsWikipediaTools(model()))
+        assertFalse(supportsWikipediaTools(null))
+    }
+
     @Test
     fun `advertises Wikipedia only when preference and model capability are both enabled`() {
         val supported =
@@ -17,12 +35,12 @@ class InstructionPreferencesTest {
                 name = "Supported",
                 filePath = "/tmp/model",
                 toolCapabilities =
-                ModelToolCapabilities(setOf(WIKIPEDIA_SEARCH_TOOL_NAME)),
+                ModelToolCapabilities(setOf(WIKIPEDIA_PAGES_TOOL_NAME, WIKIPEDIA_ON_THIS_DAY_TOOL_NAME)),
             )
         val unsupported = supported.copy(toolCapabilities = ModelToolCapabilities())
 
         assertEquals(
-            setOf(WIKIPEDIA_SEARCH_TOOL_NAME),
+            setOf(WIKIPEDIA_PAGES_TOOL_NAME, WIKIPEDIA_ON_THIS_DAY_TOOL_NAME),
             eligibleToolNames(InstructionSettings(wikipediaEnabled = true), supported),
         )
         assertEquals(
@@ -157,6 +175,34 @@ class InstructionPreferencesTest {
     }
 
     @Test
+    fun `normal Chat and Voice advertise only the supplied application tools`() {
+        val normalTools = setOf(
+            WIKIPEDIA_PAGES_TOOL_NAME,
+            WIKIPEDIA_ON_THIS_DAY_TOOL_NAME,
+            WEB_SEARCH_TOOL_NAME,
+            CALCULATOR_TOOL_NAME,
+        )
+
+        val chat = conversationTurnSettings(
+            settings = InstructionSettings(),
+            mode = InteractionMode.Chat,
+            advertisedToolNames = normalTools,
+        )
+        val voice = conversationTurnSettings(
+            settings = InstructionSettings(),
+            mode = InteractionMode.Voice,
+            advertisedToolNames = normalTools,
+        )
+
+        assertEquals(normalTools, chat.advertisedToolNames)
+        assertEquals(normalTools, voice.advertisedToolNames)
+        assertFalse("propose_widget" in chat.advertisedToolNames)
+        assertFalse("propose_widget" in voice.advertisedToolNames)
+        assertTrue(WIKIPEDIA_PAGES_TOOL_NAME in chat.advertisedToolNames)
+        assertTrue(WIKIPEDIA_ON_THIS_DAY_TOOL_NAME in voice.advertisedToolNames)
+    }
+
+    @Test
     fun `turn settings normalize an extensible advertised skill set`() {
         val turn =
             conversationTurnSettings(
@@ -167,12 +213,10 @@ class InstructionPreferencesTest {
 
         assertEquals(setOf("calendar_lookup", "wikipedia_search"), turn.advertisedToolNames)
         assertTrue(turn.systemInstruction.contains("Use wikipedia_search"))
-        assertTrue(turn.systemInstruction.contains("birth date"))
+        assertTrue(turn.systemInstruction.contains("direct, stable encyclopedic lookup"))
         assertTrue(turn.systemInstruction.contains("Do not use it for current news"))
-        assertTrue(turn.systemInstruction.contains("use web_search for those when available"))
         assertTrue(turn.systemInstruction.contains("at most three calls"))
-        assertTrue(turn.systemInstruction.contains("Search in English first"))
-        assertTrue(turn.systemInstruction.contains("detect the language"))
+        assertTrue(turn.systemInstruction.contains("never expose tool protocol or JSON"))
     }
 
     @Test
@@ -185,6 +229,23 @@ class InstructionPreferencesTest {
             )
 
         assertFalse(turn.systemInstruction.contains("wikipedia_search"))
+        assertFalse(turn.systemInstruction.contains(WIKIPEDIA_PAGES_TOOL_NAME))
+        assertFalse(turn.systemInstruction.contains(WIKIPEDIA_ON_THIS_DAY_TOOL_NAME))
+    }
+
+    @Test
+    fun `distinguishes dated events from direct wikipedia page lookup`() {
+        val turn = conversationTurnSettings(
+            settings = InstructionSettings(wikipediaEnabled = true),
+            mode = InteractionMode.Chat,
+            advertisedToolNames = setOf(WIKIPEDIA_PAGES_TOOL_NAME, WIKIPEDIA_ON_THIS_DAY_TOOL_NAME),
+            temporalContext = TemporalContext("2026-09-09", "America/Toronto", "-04:00"),
+        )
+
+        assertTrue(turn.systemInstruction.contains("actual events, not a date-index page"))
+        assertTrue(turn.systemInstruction.contains("Use wikipedia_pages only for a direct, stable"))
+        assertTrue(turn.systemInstruction.contains("Across both Wikipedia tools, use at most three calls"))
+        assertTrue(turn.systemInstruction.contains("derive month and day from the current date"))
     }
 
     @Test

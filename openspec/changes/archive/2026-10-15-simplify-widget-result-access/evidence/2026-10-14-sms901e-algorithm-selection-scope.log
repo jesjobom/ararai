@@ -1,0 +1,22 @@
+Device: Samsung SM-S901E; America/Toronto
+One active authoring session; identifier and user prompt omitted.
+Algorithm attempts: six captured InvalidAlgorithm artifacts in two revisions,
+between 2026-10-14 02:49:36 and 03:16:58 UTC. No app crash was observed.
+All six omitted dependsOn from the first independent runtime-input step.
+Four also attached selectionMode=seeded_random to an on-this-day tool call,
+which does not accept tool-level selection. The other two removed that field
+but still failed because the first dependency list was missing. The requested
+random event selection belongs after the tool result in custom_source.
+
+Fix: schema presented to the model omits selectionMode when the selected tools
+do not include wikipedia_pages@2. The algorithm context distinguishes tool
+selection from post-result selection. The parser treats an omitted dependency
+list as empty only for the first step; subsequent steps remain strict. Repair
+guidance now names both constraints. No closed vocabulary of user prompt words
+is used to block generation.
+Validation: directed contract/pipeline/stage tests, spotlessCheck, detekt,
+testDebugUnitTest, lintDebug, and assembleDebug passed.
+APK SHA-256: 872290c478558bbb0e40da2d76aa784563799b9fe3500b23c320aa2ac9fd1f20
+Install: adb install -r succeeded; lastUpdateTime 2026-10-13 23:28:22 EDT,
+versionName 202610132324. The authoring session remains persisted in
+AwaitingRetry/algorithm. Physical model retest on this APK is pending.

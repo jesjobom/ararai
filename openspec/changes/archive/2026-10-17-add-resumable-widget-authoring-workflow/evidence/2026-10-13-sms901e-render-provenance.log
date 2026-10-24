@@ -1,0 +1,24 @@
+Device: Samsung SM-S901E; timezone America/Toronto
+One persisted date-event authoring session; identifier and prompt omitted.
+After the previous install, accepted Plan was reprocessed as revision 2.
+Render revision 2 attempts (UTC):
+  02:16:41-02:18:34 attempt 1 TimedOut, no captured source.
+  02:25:43-02:26:33 attempt 2 InvalidPresentationProvenance.
+The second source selected an event by minimum year but constructed a raw
+https_link with a bare URL field as sourceField, instead of using the exact
+selected item path. It also called getArray before isSuccess, breaking the
+failure branch. The render context still advertised raw presentation-node
+shapes that the generated source copied, despite the runtime.card/linkFor
+guidance. No source fragment or user content is retained here.
+
+Fix: custom_source context no longer advertises raw presentation-node schema.
+Its objective, API, and repair guidance direct the model to check isSuccess
+before getArray, return runtime.card of display strings and runtime.linkFor
+nodes, and never construct card or link objects manually. The typed
+collection_card route is unchanged.
+Validation: directed stage/pipeline/model tests, spotlessCheck, detekt,
+testDebugUnitTest, lintDebug, and assembleDebug passed.
+APK SHA-256: 2db6f22586ad5942fe7860f9aa97ee85feaa80c2ae045f918a3270d78b0721cc
+Install: adb install -r succeeded; lastUpdateTime 2026-10-12 22:31:56 EDT,
+versionName 202610122229. Authoring session and render retry state persisted.
+The new prompt has not yet been validated by an on-device model retry.

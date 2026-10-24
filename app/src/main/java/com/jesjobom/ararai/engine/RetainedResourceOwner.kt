@@ -1,6 +1,7 @@
 package com.jesjobom.ararai.engine
 
-import java.util.IdentityHashMap
+import java.lang.ref.ReferenceQueue
+import java.lang.ref.WeakReference
 
 internal data class RetainedResource<R : Any, S>(
     val resource: R,
@@ -12,14 +13,14 @@ internal class RetainedResourceOwner<R : Any, S>(
     private val closeResource: (R) -> Unit,
 ) {
     private val lock = Any()
-    private val disposed = IdentityHashMap<R, Unit>()
+    private val disposed = WeakIdentitySet<R>()
     private var active: R? = null
     private var retained: RetainedResource<R, S>? = null
 
     fun retained(): RetainedResource<R, S>? = synchronized(lock) { retained }
 
     fun activate(resource: R): Boolean = synchronized(lock) {
-        if (disposed.containsKey(resource)) return@synchronized false
+        if (disposed.contains(resource)) return@synchronized false
         active = resource
         true
     }
@@ -28,7 +29,7 @@ internal class RetainedResourceOwner<R : Any, S>(
         resource: R,
         state: S,
     ): Boolean = synchronized(lock) {
-        if (disposed.containsKey(resource)) return@synchronized false
+        if (disposed.contains(resource)) return@synchronized false
         active = resource
         retained = RetainedResource(resource, state)
         true
@@ -53,10 +54,10 @@ internal class RetainedResourceOwner<R : Any, S>(
 
     private fun claimForDisposal(resources: List<R>): List<R> = synchronized(lock) {
         resources.filter { resource ->
-            if (disposed.containsKey(resource)) {
+            if (disposed.contains(resource)) {
                 false
             } else {
-                disposed[resource] = Unit
+                disposed.add(resource)
                 if (active === resource) active = null
                 if (retained?.resource === resource) retained = null
                 true
@@ -75,5 +76,45 @@ internal class RetainedResourceOwner<R : Any, S>(
                 closeResource(resource)
             }
         }
+    }
+}
+
+/** Identity-based membership that never keeps discarded native wrappers alive. */
+private class WeakIdentitySet<T : Any> {
+    private val queue = ReferenceQueue<T>()
+    private val references = HashSet<IdentityWeakReference<T>>()
+
+    fun contains(value: T): Boolean {
+        removeCollectedReferences()
+        return references.contains(IdentityWeakReference(value))
+    }
+
+    fun add(value: T) {
+        removeCollectedReferences()
+        references.add(IdentityWeakReference(value, queue))
+    }
+
+    private fun removeCollectedReferences() {
+        while (true) {
+            @Suppress("UNCHECKED_CAST")
+            val collected = queue.poll() as IdentityWeakReference<T>? ?: return
+            references.remove(collected)
+        }
+    }
+}
+
+private class IdentityWeakReference<T : Any>(
+    referent: T,
+    queue: ReferenceQueue<T>? = null,
+) : WeakReference<T>(referent, queue) {
+    private val identityHash = System.identityHashCode(referent)
+
+    override fun hashCode(): Int = identityHash
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is IdentityWeakReference<*>) return false
+        val referent = get() ?: return false
+        return referent === other.get()
     }
 }

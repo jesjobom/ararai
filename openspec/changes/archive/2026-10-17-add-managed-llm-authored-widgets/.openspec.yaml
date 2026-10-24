@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-04
+goal: Let users create, preview, confirm, schedule, inspect, edit, and remove
+  locally managed Wikipedia widgets through prompts.

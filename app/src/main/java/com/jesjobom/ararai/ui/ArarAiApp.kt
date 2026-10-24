@@ -66,6 +66,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -96,11 +97,14 @@ import com.jesjobom.ararai.chat.InMemoryInstructionPreferences
 import com.jesjobom.ararai.chat.InstructionPreferences
 import com.jesjobom.ararai.chat.InteractionMode
 import com.jesjobom.ararai.chat.conversationTurnSettings
+import com.jesjobom.ararai.chat.supportsWikipediaTools
 import com.jesjobom.ararai.engine.AndroidLiteRtLmBridge
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
 import com.jesjobom.ararai.engine.LiteRtLmLocalLlmEngine
+import com.jesjobom.ararai.engine.LiteRtLmRuntimeTelemetry
 import com.jesjobom.ararai.engine.LocalLlmEngine
 import com.jesjobom.ararai.engine.WebSearchKnowledgeToolResolver
+import com.jesjobom.ararai.engine.androidLocalLlmRecoveryGate
 import com.jesjobom.ararai.knowledge.FallbackKnowledgeTool
 import com.jesjobom.ararai.knowledge.InMemoryWebSearchPreferences
 import com.jesjobom.ararai.knowledge.ToolSmokeTestResult
@@ -110,6 +114,7 @@ import com.jesjobom.ararai.knowledge.WebSearchSettings
 import com.jesjobom.ararai.knowledge.WebSearchSmokeTest
 import com.jesjobom.ararai.knowledge.WebSearchToolFactory
 import com.jesjobom.ararai.knowledge.WikipediaKnowledgeTool
+import com.jesjobom.ararai.knowledge.WikipediaOnThisDayKnowledgeTool
 import com.jesjobom.ararai.knowledge.redactedProviderError
 import com.jesjobom.ararai.math.EvalExLocalMathEngine
 import com.jesjobom.ararai.model.GenerationPreferences
@@ -150,6 +155,9 @@ import com.jesjobom.ararai.voice.AndroidVoiceTurnCapture
 import com.jesjobom.ararai.voice.SequentialVoiceSpeechQueue
 import com.jesjobom.ararai.voice.VoiceChatPreferences
 import com.jesjobom.ararai.voice.VoiceChatViewModel
+import com.jesjobom.ararai.widget.managed.ManagedWidgetApplicationServices
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobController
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringWorkflowCoordinator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
@@ -157,6 +165,9 @@ import java.util.Locale
 
 private enum class AppDestination {
     Home,
+    Widgets,
+    WidgetDetail,
+    WidgetAuthoring,
     Chat,
     VoiceChat,
     Diagnostics,
@@ -210,13 +221,22 @@ internal fun ArarAiApp(
     tourPreferenceStore: TourPreferenceStore? = null,
     voiceTemporaryDirectory: File,
     openModelManagementRequest: Int = 0,
+    openWidgetAuthoringRequest: Int = 0,
+    openWidgetsRequest: Int = 0,
+    openWidgetDetailRequest: Pair<String, Int>? = null,
     liteRtLmCacheDir: String? = null,
     webSearchToolFactory: WebSearchToolFactory = WebSearchToolFactory(),
     localLlmEngineFactory: (() -> LocalLlmEngine)? = null,
+    managedWidgetServices: ManagedWidgetApplicationServices? = null,
+    onShareWidgetToolCallingDiagnostic: (String) -> Unit = {},
+    onShareRawWidgetToolCallingDiagnostic: (String) -> Unit = {},
+    widgetAuthoringJobs: WidgetAuthoringJobController<ManagedWidgetDraftUiState>? = null,
+    widgetAuthoringWorkflow: WidgetAuthoringWorkflowCoordinator? = null,
 ) {
     val resourceContext = androidx.compose.ui.platform.LocalContext.current
     val appContext = resourceContext.applicationContext
     val wikipediaTool = remember { WikipediaKnowledgeTool() }
+    val wikipediaOnThisDayTool = remember { WikipediaOnThisDayKnowledgeTool() }
     val calculatorEngine = remember { EvalExLocalMathEngine() }
     val webSearchResolver = remember(webSearchPreferences, webSearchToolFactory) {
         WebSearchKnowledgeToolResolver {
@@ -234,6 +254,7 @@ internal fun ArarAiApp(
         instructionPreferences,
         webSearchPreferences,
         wikipediaTool,
+        wikipediaOnThisDayTool,
         calculatorEngine,
         webSearchResolver,
     ) {
@@ -241,6 +262,8 @@ internal fun ArarAiApp(
             instructionPreferences = instructionPreferences,
             webSearchPreferences = webSearchPreferences,
             wikipediaTool = wikipediaTool,
+            wikipediaPagesTool = wikipediaTool,
+            wikipediaOnThisDayTool = wikipediaOnThisDayTool,
             webSearchTool = webSearchResolver::resolve,
             calculatorEngine = calculatorEngine,
             experimentalWebSearchEnabled = com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH,
@@ -249,9 +272,23 @@ internal fun ArarAiApp(
     val applicationToolDispatcher = remember(applicationToolRegistry) {
         ApplicationToolDispatcher(applicationToolRegistry)
     }
+    val liteRtLmRuntimeTelemetry = remember(appContext) {
+        LiteRtLmRuntimeTelemetry.android(
+            context = appContext,
+            enabled = com.jesjobom.ararai.BuildConfig.DEBUG,
+        )
+    }
+    val localLlmRecoveryGate = remember(appContext) {
+        (appContext as? com.jesjobom.ararai.ArarAiApplication)?.localLlmRecoveryGate
+            ?: androidLocalLlmRecoveryGate(
+                context = appContext,
+                telemetryEnabled = com.jesjobom.ararai.BuildConfig.DEBUG,
+            )
+    }
     val effectiveLocalLlmEngineFactory = remember(
         localLlmEngineFactory,
         applicationToolDispatcher,
+        liteRtLmRuntimeTelemetry,
         liteRtLmCacheDir,
         wikipediaTool,
         webSearchResolver,
@@ -270,6 +307,7 @@ internal fun ArarAiApp(
                         webSearchPreferences.settings.value.preferredProvider?.displayName
                             ?: "Web search"
                     },
+                    runtimeTelemetry = liteRtLmRuntimeTelemetry,
                 ),
             )
         }
@@ -303,7 +341,8 @@ internal fun ArarAiApp(
         modelId = modelConfig.id,
         runtime = modelConfig.runtime.name,
     )
-    var destination by remember { mutableStateOf(AppDestination.Home) }
+    var destination by rememberSaveable { mutableStateOf(AppDestination.Home) }
+    var selectedWidgetId by rememberSaveable { mutableStateOf<String?>(null) }
     var showExitConfirmation by remember { mutableStateOf(false) }
     var showInitialModelDialog by remember {
         mutableStateOf(
@@ -349,6 +388,12 @@ internal fun ArarAiApp(
     val chatViewModel = controllers.chat
     val benchmarkViewModel = controllers.benchmark
     val voiceChatViewModel = controllers.voiceChat
+    val managedWidgetsController = remember(managedWidgetServices, controllers.runtime.engine, localLlmRecoveryGate) {
+        managedWidgetServices?.let {
+            (appContext as? com.jesjobom.ararai.ArarAiApplication)?.managedWidgetsController
+                ?: ManagedWidgetsController(it, controllers.runtime.engine, recoveryGate = localLlmRecoveryGate)
+        }
+    }
     val diagnosticErrorState by diagnosticErrorReportCoordinator
         ?.state
         ?.collectAsState()
@@ -369,6 +414,9 @@ internal fun ArarAiApp(
             AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
             AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
             AppDestination.Home,
+            AppDestination.Widgets,
+            AppDestination.WidgetDetail,
+            AppDestination.WidgetAuthoring,
             AppDestination.ModelStatus,
             AppDestination.WhisperBenchmark,
             AppDestination.Settings,
@@ -380,11 +428,20 @@ internal fun ArarAiApp(
     }
 
     BackHandler(enabled = destination != AppDestination.Home) {
-        if (destination == AppDestination.WhisperBenchmark || destination == AppDestination.Diagnostics) {
-            benchmarkViewModel.onLeavingBenchmark()
-            destination = AppDestination.ModelStatus
-        } else {
-            returnHome()
+        when (destination) {
+            AppDestination.WhisperBenchmark,
+            AppDestination.Diagnostics,
+            -> {
+                benchmarkViewModel.onLeavingBenchmark()
+                destination = AppDestination.ModelStatus
+            }
+            AppDestination.WidgetDetail -> destination = AppDestination.Widgets
+            AppDestination.WidgetAuthoring -> destination = if (selectedWidgetId == null) {
+                AppDestination.Widgets
+            } else {
+                AppDestination.WidgetDetail
+            }
+            else -> returnHome()
         }
     }
 
@@ -465,6 +522,9 @@ internal fun ArarAiApp(
                 AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
                 AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
                 AppDestination.Home,
+                AppDestination.Widgets,
+                AppDestination.WidgetDetail,
+                AppDestination.WidgetAuthoring,
                 AppDestination.ModelStatus,
                 AppDestination.WhisperBenchmark,
                 AppDestination.Settings,
@@ -473,6 +533,52 @@ internal fun ArarAiApp(
                 -> Unit
             }
             destination = AppDestination.ModelStatus
+        }
+    }
+
+    LaunchedEffect(openWidgetAuthoringRequest) {
+        if (openWidgetAuthoringRequest > 0) {
+            when (destination) {
+                AppDestination.Chat -> chatViewModel.onLeavingChat()
+                AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
+                AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
+                AppDestination.Home,
+                AppDestination.Widgets,
+                AppDestination.WidgetDetail,
+                AppDestination.WidgetAuthoring,
+                AppDestination.ModelStatus,
+                AppDestination.WhisperBenchmark,
+                AppDestination.Settings,
+                AppDestination.OpenSourceLicenses,
+                AppDestination.InstructionsTools,
+                -> Unit
+            }
+            destination = AppDestination.WidgetAuthoring
+        }
+    }
+
+    LaunchedEffect(openWidgetsRequest) {
+        if (openWidgetsRequest > 0) {
+            when (destination) {
+                AppDestination.Chat -> chatViewModel.onLeavingChat()
+                AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
+                AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
+                else -> Unit
+            }
+            destination = AppDestination.Widgets
+        }
+    }
+
+    LaunchedEffect(openWidgetDetailRequest) {
+        openWidgetDetailRequest?.let { (widgetId, _) ->
+            when (destination) {
+                AppDestination.Chat -> chatViewModel.onLeavingChat()
+                AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
+                AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
+                else -> Unit
+            }
+            selectedWidgetId = widgetId
+            destination = AppDestination.WidgetDetail
         }
     }
 
@@ -494,6 +600,7 @@ internal fun ArarAiApp(
                 destination = AppDestination.Chat
             },
             onOpenVoiceChat = { destination = AppDestination.VoiceChat },
+            onOpenWidgets = { destination = AppDestination.Widgets },
             voiceChatAvailable = hasAvailableChatModel,
             onUnavailableVoiceChat = {
                 Toast.makeText(
@@ -506,6 +613,78 @@ internal fun ArarAiApp(
             onOpenInstructionsTools = { destination = AppDestination.InstructionsTools },
             onOpenSettings = { destination = AppDestination.Settings },
         )
+        AppDestination.Widgets -> {
+            val controller = managedWidgetsController
+            if (controller == null) {
+                LaunchedEffect(Unit) { returnHome() }
+            } else {
+                ManagedWidgetsRoute(
+                    controller = controller,
+                    onBack = { returnHome() },
+                    onCreate = {
+                        selectedWidgetId = null
+                        destination = AppDestination.WidgetAuthoring
+                    },
+                    onOpenWidget = { widgetId ->
+                        selectedWidgetId = widgetId
+                        destination = AppDestination.WidgetDetail
+                    },
+                )
+            }
+        }
+        AppDestination.WidgetDetail -> {
+            val controller = managedWidgetsController
+            val widgetId = selectedWidgetId
+            if (controller == null || widgetId == null) {
+                LaunchedEffect(Unit) { destination = AppDestination.Widgets }
+            } else {
+                ManagedWidgetDetailRoute(
+                    controller = controller,
+                    widgetId = widgetId,
+                    onBack = { destination = AppDestination.Widgets },
+                    onEdit = { destination = AppDestination.WidgetAuthoring },
+                    onDeleted = {
+                        selectedWidgetId = null
+                        destination = AppDestination.Widgets
+                    },
+                    onDuplicated = { duplicateId ->
+                        selectedWidgetId = duplicateId
+                        destination = AppDestination.WidgetDetail
+                    },
+                )
+            }
+        }
+        AppDestination.WidgetAuthoring -> {
+            val controller = managedWidgetsController
+            if (controller == null) {
+                LaunchedEffect(Unit) { destination = AppDestination.Widgets }
+            } else {
+                val available = startupState as? ModelStartupState.Available
+                ManagedWidgetAuthoringRoute(
+                    controller = controller,
+                    model = available?.model,
+                    inference = available?.inference ?: available?.model?.let { modelConfig.requireInference() },
+                    modelArtifactSha256 = modelConfig.sha256,
+                    widgetId = selectedWidgetId,
+                    jobController = widgetAuthoringJobs,
+                    workflowCoordinator = widgetAuthoringWorkflow,
+                    onBack = {
+                        destination = if (selectedWidgetId == null) {
+                            AppDestination.Widgets
+                        } else {
+                            AppDestination.WidgetDetail
+                        }
+                    },
+                    onConfirmed = { widgetId ->
+                        selectedWidgetId = widgetId
+                        destination = AppDestination.WidgetDetail
+                    },
+                    onOpenToolSettings = { destination = AppDestination.InstructionsTools },
+                    onShareDiagnosticReport = onShareWidgetToolCallingDiagnostic,
+                    onShareRawDiagnosticReport = onShareRawWidgetToolCallingDiagnostic,
+                )
+            }
+        }
         AppDestination.Chat -> ChatScreen(
             viewModel = chatViewModel,
             mediaServices = chatMediaServices,
@@ -652,10 +831,7 @@ internal fun ArarAiApp(
                 )
             },
             wikipediaCompatible =
-            (startupState as? ModelStartupState.Available)
-                ?.model
-                ?.toolCapabilities
-                ?.supports(com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME) == true,
+            supportsWikipediaTools((startupState as? ModelStartupState.Available)?.model),
             calculatorCompatible =
             (startupState as? ModelStartupState.Available)?.model?.toolCapabilities
                 ?.supports(com.jesjobom.ararai.chat.CALCULATOR_TOOL_NAME) == true,
@@ -1436,9 +1612,9 @@ private fun ToolsTab(
                     Text(stringResource(R.string.tools_use_wikipedia))
                     Text(
                         if (wikipediaCompatible) {
-                            stringResource(R.string.tools_available_model)
+                            stringResource(R.string.tools_wikipedia_available_model)
                         } else {
-                            stringResource(R.string.tools_unavailable_model)
+                            stringResource(R.string.tools_wikipedia_unavailable_model)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1447,7 +1623,6 @@ private fun ToolsTab(
                 Switch(
                     checked = settings.wikipediaEnabled,
                     onCheckedChange = onWikipediaEnabledChange,
-                    enabled = wikipediaCompatible || settings.wikipediaEnabled,
                     modifier = Modifier.testTag("wikipedia-enabled"),
                 )
             }

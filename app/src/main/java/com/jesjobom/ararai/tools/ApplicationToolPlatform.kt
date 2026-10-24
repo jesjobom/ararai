@@ -37,12 +37,19 @@ data class ApplicationToolContract(
     val consumers: Set<ApplicationToolConsumer>,
     val inputSchemaJson: String,
     val outputSchemaJson: String,
+    val authoringSummary: String? = null,
 ) {
     init {
         require(TOOL_ID_PATTERN.matches(id)) { "Invalid application tool id" }
         require(version > 0) { "Application tool version must be positive" }
         require(displayName.isNotBlank()) { "Application tool display name is required" }
         require(consumers.isNotEmpty()) { "Application tool must have an eligible consumer" }
+        val validSummary = authoringSummary?.let {
+            it.isNotBlank() && it.length <= 240 && it.none(Char::isISOControl)
+        } ?: true
+        require(validSummary) {
+            "Application tool authoring summary must be concise text"
+        }
         requireValidSchema(inputSchemaJson, "input")
         requireValidSchema(outputSchemaJson, "output")
     }
@@ -113,11 +120,14 @@ class RegisteredApplicationTool internal constructor(
     val contract: ApplicationToolContract,
     val policy: ApplicationToolExecutionPolicy,
     private val stateProvider: () -> ApplicationToolOperationalState,
+    private val acceptsArguments: (JsonObject) -> Boolean,
     private val invoke: suspend (JsonObject) -> ApplicationToolDispatchResult.Executed,
 ) {
     fun operationalState(): ApplicationToolOperationalState = stateProvider()
 
     internal suspend fun execute(arguments: JsonObject): ApplicationToolDispatchResult.Executed = invoke(arguments)
+
+    internal fun accepts(arguments: JsonObject): Boolean = acceptsArguments(arguments)
 }
 
 fun <Request : Any, Result : Any> applicationToolBinding(
@@ -130,14 +140,25 @@ fun <Request : Any, Result : Any> applicationToolBinding(
 ): RegisteredApplicationTool {
     require(executor.displayName == contract.displayName) { "Tool display metadata is inconsistent" }
     require(executor.category == contract.category) { "Tool category metadata is inconsistent" }
-    return RegisteredApplicationTool(contract, policy, state) { arguments ->
-        val request = decodeArguments(arguments) ?: throw InvalidApplicationToolArgumentsException()
-        val result = executor.execute(request)
-        ApplicationToolDispatchResult.Executed(
-            payloadJson = encodeResult(result),
-            domainResult = result,
-        )
-    }
+    return RegisteredApplicationTool(
+        contract = contract,
+        policy = policy,
+        stateProvider = state,
+        acceptsArguments = { decodeArguments(it) != null },
+        invoke = { arguments ->
+            val request = decodeArguments(arguments) ?: throw InvalidApplicationToolArgumentsException()
+            val result = executor.execute(request)
+            ApplicationToolDispatchResult.Executed(
+                payloadJson = encodeResult(result),
+                domainResult = result,
+            )
+        },
+    )
+}
+
+internal sealed interface WidgetDraftToolValidation {
+    data class Valid(val operationalState: ApplicationToolOperationalState) : WidgetDraftToolValidation
+    data class Invalid(val rejection: ApplicationToolRejection) : WidgetDraftToolValidation
 }
 
 class ApplicationToolRegistry(bindings: Collection<RegisteredApplicationTool>) {
@@ -170,6 +191,46 @@ class ApplicationToolRegistry(bindings: Collection<RegisteredApplicationTool>) {
         .mapTo(sortedSetOf()) { it.contract.id }
 
     internal fun versions(id: String): Map<Int, RegisteredApplicationTool>? = bindingsById[id]
+
+    @Suppress("ReturnCount")
+    internal fun validateWidgetDraftCall(
+        id: String,
+        version: Int,
+        argumentsJson: String,
+    ): WidgetDraftToolValidation {
+        val binding = bindingsById[id]?.get(version)
+            ?: return WidgetDraftToolValidation.Invalid(
+                if (bindingsById.containsKey(id)) {
+                    ApplicationToolRejection.UnsupportedVersion
+                } else {
+                    ApplicationToolRejection.UnknownTool
+                },
+            )
+        if (ApplicationToolConsumer.Widget !in binding.contract.consumers) {
+            return WidgetDraftToolValidation.Invalid(ApplicationToolRejection.IneligibleConsumer)
+        }
+        if (argumentsJson.utf8Size() > binding.policy.maxArgumentsBytes) {
+            return WidgetDraftToolValidation.Invalid(ApplicationToolRejection.InvalidArguments)
+        }
+        val arguments = runCatching { JsonParser.parseString(argumentsJson) }
+            .getOrNull()
+            ?.takeIf { it.isJsonObject }
+            ?.asJsonObject
+            ?: return WidgetDraftToolValidation.Invalid(ApplicationToolRejection.InvalidArguments)
+        return if (runCatching { binding.accepts(arguments) }.getOrDefault(false)) {
+            WidgetDraftToolValidation.Valid(binding.operationalState())
+        } else {
+            WidgetDraftToolValidation.Invalid(ApplicationToolRejection.InvalidArguments)
+        }
+    }
+
+    internal fun widgetToolOperationalState(
+        id: String,
+        version: Int,
+    ): ApplicationToolOperationalState? = bindingsById[id]
+        ?.get(version)
+        ?.takeIf { ApplicationToolConsumer.Widget in it.contract.consumers }
+        ?.operationalState()
 }
 
 class ApplicationToolDispatcher(private val registry: ApplicationToolRegistry) {

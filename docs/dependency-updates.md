@@ -16,7 +16,8 @@ dependency update.
    ```
 
 3. Review every changed module/version in `gradle.lockfile`,
-   `app/gradle.lockfile`, and `whisper-runtime/gradle.lockfile`.
+   `app/gradle.lockfile`, `quickjs-runtime/gradle.lockfile`, and
+   `whisper-runtime/gradle.lockfile`.
 4. Review new or changed components and checksums in
    `gradle/verification-metadata.xml`. Check the artifact origin and release
    independently; never accept metadata solely because Gradle downloaded it.
@@ -45,3 +46,17 @@ Android SDK/NDK packages, CMake-provisioned native sources, signing keys, and AP
 provenance require separate controls. Release signing and distribution are not
 enabled by this workflow.
 
+Vendored QuickJS updates follow the additional checksum, file-selection,
+license, ABI, adversarial, R8, size, and physical-device procedure in
+`quickjs-runtime/ORIGIN.md` and `docs/widget-script-runtime.md`.
+
+## Update Node test tooling
+
+The root `package.json` contains only development dependencies for Firebase
+rules/emulator tests and widget-helper tests. Keep direct versions exact, refresh
+`package-lock.json` with npm rather than editing it manually, and run
+`npm ci --include=dev --ignore-scripts` plus `npm audit --include=dev` when
+reviewing updates. Run the full quality gate before accepting the new lockfile.
+The current unresolved advisory groups and their exposure are recorded in
+`docs/npm-test-tooling-audit.md`; do not use `npm audit fix --force` merely to
+lower the count if it downgrades the Firebase SDK or CLI.

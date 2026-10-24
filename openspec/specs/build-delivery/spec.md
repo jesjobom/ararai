@@ -1,7 +1,8 @@
 # build-delivery Specification
 
 ## Purpose
-TBD - created by archiving change harden-build-supply-chain. Update Purpose after archive.
+Define the reproducible, verified build and delivery controls that protect the
+Android artifacts and their dependency supply chain.
 
 ## Requirements
 
@@ -85,3 +86,65 @@ Compose, persistence, and local model execution boundaries.
 
 - **WHEN** a shrunk release-like artifact is evaluated for delivery
 - **THEN** critical runtime smoke checks pass on a physical device in addition to automated build checks
+
+### Requirement: Connected instrumentation requires destructive-test consent
+
+The build SHALL treat connected Android instrumentation as destructive because
+the Android Gradle runner may uninstall the target package during cleanup and
+erase app-private data. Connected test execution SHALL be blocked by default and
+require an explicit opt-in intended only for a disposable emulator or device.
+
+#### Scenario: Connected test is requested without destructive-test consent
+
+- **WHEN** a maintainer invokes a `connected*AndroidTest` task without the
+  destructive-test opt-in
+- **THEN** the task fails before its device-side test action starts
+- **AND** the target application is not installed, replaced, or uninstalled by
+  that task
+
+#### Scenario: Connected test is explicitly run on a disposable target
+
+- **GIVEN** the selected emulator or device has no application data to retain
+- **WHEN** a maintainer supplies the documented destructive-test opt-in and runs
+  a `connected*AndroidTest` task
+- **THEN** the build permits the Android instrumentation runner to execute
+- **AND** the retained-device workflow continues to use build-only and
+  non-destructive manual validation paths
+
+### Requirement: CI actions use reviewed immutable revisions
+
+The Android quality workflow SHALL reference each external GitHub Action by a
+full commit SHA rather than a mutable version tag. It SHALL retain readable
+version context and support reviewable update proposals without adding a
+per-release APK generation step.
+
+#### Scenario: CI runs without an action update
+
+- **WHEN** the Android quality workflow runs on a pull request, main push, or manual dispatch
+- **THEN** every external action resolves to its reviewed commit SHA
+- **AND** generating an APK requires no action-version maintenance step
+
+#### Scenario: An upstream action version changes
+
+- **WHEN** an updated GitHub Action becomes available
+- **THEN** an automated update can propose a new pin for review
+- **AND** the existing CI pin remains unchanged until the proposal is accepted
+
+### Requirement: Node test tooling remains locked and reviewable
+
+The repository SHALL keep exact top-level versions and a checked-in npm lockfile
+for Node-based quality-gate tooling. Non-forced security updates SHALL preserve
+the test contract, and unresolved advisories SHALL be recorded with their
+development-only exposure and update path.
+
+#### Scenario: Test-tooling dependency is updated
+
+- **WHEN** a maintainer updates an npm dependency used by the quality gate
+- **THEN** the lockfile records the complete resolved graph
+- **AND** a clean `npm ci --include=dev --ignore-scripts` and the quality gate pass
+
+#### Scenario: An advisory has no compatible upstream fix
+
+- **WHEN** a current direct dependency still contains a vulnerable transitive package
+- **THEN** the maintainer records the affected tool and exposure
+- **AND** does not force a major downgrade or untested override solely to make the audit count zero

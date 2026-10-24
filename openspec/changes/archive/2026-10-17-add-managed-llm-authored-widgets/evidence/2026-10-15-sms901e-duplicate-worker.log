@@ -1,0 +1,4 @@
+10-15 09:23:17.576 D/WM-SystemJobService(15994): onStartJob for WorkGenerationalId(workSpecId=418b0051-3e0e-448b-89fc-f890cad80c20, generation=0)
+10-15 09:23:17.618 D/WM-WorkerWrapper(15994): Starting work for com.jesjobom.ararai.widget.managed.ManagedWidgetWorker
+10-15 09:23:18.609 I/WM-WorkerWrapper(15994): Worker result SUCCESS for Work [ id=418b0051-3e0e-448b-89fc-f890cad80c20, tags={ com.jesjobom.ararai.widget.managed.ManagedWidgetWorker,managed-widget-periodic,managed-widget-id:ba66444f-c87b-425f-b129-325adf1fe7b5,managed-widget-schedule-v1:[redacted] } ]
+10-15 09:23:18.612 D/WM-SystemJobService(15994): 418b0051-3e0e-448b-89fc-f890cad80c20 executed on JobScheduler

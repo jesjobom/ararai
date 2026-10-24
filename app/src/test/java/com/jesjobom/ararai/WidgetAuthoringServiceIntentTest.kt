@@ -1,0 +1,215 @@
+package com.jesjobom.ararai
+
+import android.app.Application
+import android.app.Notification
+import androidx.test.core.app.ApplicationProvider
+import com.jesjobom.ararai.model.InferenceConfig
+import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.widget.managed.WIDGET_AUTHORING_PROTOCOL_VERSION
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringAttempt
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringCheckpoint
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobRequest
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobState
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringNotificationAction
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringNotificationProjector
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringSession
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringSessionSnapshot
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringSessionStatus
+import com.jesjobom.ararai.widget.managed.WidgetAuthoringStageKey
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(application = Application::class, sdk = [35])
+class WidgetAuthoringServiceIntentTest {
+    @Test
+    fun `workflow intent accepts exact revision and rejects stale redelivery`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val snapshot = snapshot(revision = 4)
+        val intent = WidgetAuthoringService.workflowActionIntent(
+            context,
+            snapshot,
+            WidgetAuthoringNotificationAction.Retry,
+        )
+
+        assertTrue(intent.matchesWidgetAuthoringSession(snapshot))
+        assertFalse(intent.matchesWidgetAuthoringSession(snapshot(revision = 5)))
+        assertFalse(intent.matchesWidgetAuthoringSession(null))
+    }
+
+    @Test
+    fun `stale notification actions leave a newer running attempt foreground`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val old = snapshot(revision = 4, status = WidgetAuthoringSessionStatus.AttemptRunning)
+        val current = snapshot(revision = 5, status = WidgetAuthoringSessionStatus.AttemptRunning)
+
+        listOf(
+            WidgetAuthoringNotificationAction.Cancel,
+            WidgetAuthoringNotificationAction.Continue,
+            WidgetAuthoringNotificationAction.Retry,
+        ).forEach { action ->
+            val staleIntent = WidgetAuthoringService.workflowActionIntent(context, old, action)
+            assertFalse(staleIntent.matchesWidgetAuthoringSession(current))
+            assertEquals(
+                WidgetAuthoringForegroundDisposition.Keep,
+                widgetAuthoringForegroundDisposition(current, null),
+            )
+        }
+    }
+
+    @Test
+    fun `matching cancel targets the current attempt and keeps foreground until cancellation completes`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val running = snapshot(revision = 5, status = WidgetAuthoringSessionStatus.AttemptRunning)
+        val cancel = WidgetAuthoringService.workflowActionIntent(
+            context,
+            running,
+            WidgetAuthoringNotificationAction.Cancel,
+        )
+
+        assertTrue(cancel.matchesWidgetAuthoringSession(running))
+        assertEquals(
+            WidgetAuthoringForegroundDisposition.Keep,
+            widgetAuthoringForegroundDispositionForStart(7, 7, running, null),
+        )
+        assertTrue(WidgetAuthoringNotificationProjector.project(running).ongoing)
+        assertTrue(
+            WidgetAuthoringNotificationProjector.project(running).actions.contains(
+                WidgetAuthoringNotificationAction.Cancel,
+            ),
+        )
+        val notification = ResumableWidgetAuthoringNotificationPresenter(context).notification(running)
+        assertTrue(notification.flags and Notification.FLAG_ONGOING_EVENT != 0)
+        assertEquals(1, notification.actions.size)
+    }
+
+    @Test
+    fun `duplicate notification delivery retains stable action identity but rejects a newer revision`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val current = snapshot(revision = 5, status = WidgetAuthoringSessionStatus.AttemptRunning)
+        val first = WidgetAuthoringService.workflowActionIntent(
+            context,
+            current,
+            WidgetAuthoringNotificationAction.Cancel,
+        )
+        val redelivered = WidgetAuthoringService.workflowActionIntent(
+            context,
+            current,
+            WidgetAuthoringNotificationAction.Cancel,
+        )
+
+        assertEquals(first.action, redelivered.action)
+        assertEquals(first.extras?.getString("action_id"), redelivered.extras?.getString("action_id"))
+        assertTrue(redelivered.matchesWidgetAuthoringSession(current))
+        assertFalse(redelivered.matchesWidgetAuthoringSession(snapshot(revision = 6)))
+    }
+
+    @Test
+    fun `older asynchronous completion cannot alter a newer service start`() {
+        val newerRunning = snapshot(revision = 6, status = WidgetAuthoringSessionStatus.AttemptRunning)
+
+        assertNull(widgetAuthoringForegroundDispositionForStart(7, 8, newerRunning, null))
+        assertEquals(
+            WidgetAuthoringForegroundDisposition.Keep,
+            widgetAuthoringForegroundDispositionForStart(8, 8, newerRunning, null),
+        )
+    }
+
+    @Test
+    fun `foreground refresh is explicit and survives a rapid terminal transition`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+
+        assertEquals(
+            WidgetAuthoringService.ACTION_REFRESH,
+            WidgetAuthoringService.refreshIntent(context).action,
+        )
+        assertEquals(
+            WidgetAuthoringForegroundDisposition.Keep,
+            widgetAuthoringForegroundDisposition(
+                snapshot(revision = 4, status = WidgetAuthoringSessionStatus.AttemptRunning),
+                null,
+            ),
+        )
+        assertEquals(
+            WidgetAuthoringForegroundDisposition.DetachAndStop,
+            widgetAuthoringForegroundDisposition(
+                snapshot(revision = 5, status = WidgetAuthoringSessionStatus.AwaitingReview),
+                null,
+            ),
+        )
+        assertEquals(
+            WidgetAuthoringForegroundDisposition.RemoveAndStop,
+            widgetAuthoringForegroundDisposition(null, null),
+        )
+    }
+
+    @Test
+    fun `resumable presenter refreshes instead of stopping a pending foreground start`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val presenter = ResumableWidgetAuthoringNotificationPresenter(context)
+        val services = Shadows.shadowOf(context)
+
+        presenter.onStateChanged(snapshot(revision = 4, status = WidgetAuthoringSessionStatus.AttemptRunning))
+        presenter.onStateChanged(snapshot(revision = 5, status = WidgetAuthoringSessionStatus.AwaitingReview))
+
+        assertEquals(WidgetAuthoringService.ACTION_REFRESH, services.nextStartedService.action)
+        assertEquals(WidgetAuthoringService.ACTION_REFRESH, services.nextStartedService.action)
+        assertNull(services.nextStoppedService)
+    }
+
+    @Test
+    fun `legacy presenter refreshes instead of stopping a pending foreground start`() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val presenter = WidgetAuthoringNotificationPresenter(context)
+        val services = Shadows.shadowOf(context)
+        val request = WidgetAuthoringJobRequest(
+            model = LocalModel("test", "Test", "/model"),
+            inference = InferenceConfig(contextTokens = 2048, temperature = 0.7f, topP = 0.9f),
+            instruction = "Create widget",
+            widgetId = null,
+        )
+
+        presenter.onStateChanged(WidgetAuthoringJobState.Queued(request))
+        presenter.onStateChanged(WidgetAuthoringJobState.Cancelled(request))
+
+        assertEquals(WidgetAuthoringService.ACTION_REFRESH, services.nextStartedService.action)
+        assertEquals(WidgetAuthoringService.ACTION_REFRESH, services.nextStartedService.action)
+        assertNull(services.nextStoppedService)
+    }
+
+    private fun snapshot(
+        revision: Int,
+        status: WidgetAuthoringSessionStatus = WidgetAuthoringSessionStatus.AwaitingRetry,
+    ) = WidgetAuthoringSessionSnapshot(
+        session = WidgetAuthoringSession(
+            id = "session",
+            revision = revision,
+            status = status,
+            instruction = "Create widget",
+            targetWidgetId = null,
+            modelId = "model",
+            modelArtifactDigest = DIGEST,
+            inferenceConfigJson = "{}",
+            protocolVersion = WIDGET_AUTHORING_PROTOCOL_VERSION,
+            schemaVersion = 1,
+            toolContractDigest = DIGEST,
+            currentStage = WidgetAuthoringStageKey.Feasibility,
+            activeAttemptId = null,
+            createdAtMillis = 1,
+            updatedAtMillis = 2,
+        ),
+        attempts = emptyList<WidgetAuthoringAttempt>(),
+        checkpoints = emptyList<WidgetAuthoringCheckpoint>(),
+    )
+
+    private companion object {
+        val DIGEST = "a".repeat(64)
+    }
+}

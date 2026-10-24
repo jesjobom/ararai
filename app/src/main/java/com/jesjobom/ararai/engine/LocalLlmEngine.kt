@@ -31,6 +31,25 @@ interface LocalLlmEngine {
 
     fun generate(request: PromptRequest): Flow<GenerationEvent>
 
+    suspend fun reload(
+        model: LocalModel,
+        config: InferenceConfig,
+    ) {
+        unload()
+        load(model, config)
+    }
+
+    suspend fun reloadWhenReady(
+        model: LocalModel,
+        config: InferenceConfig,
+        awaitReady: suspend () -> Boolean,
+    ): Boolean {
+        unload()
+        if (!awaitReady()) return false
+        load(model, config)
+        return true
+    }
+
     suspend fun unload()
 }
 
@@ -49,6 +68,7 @@ data class PromptRequest(
     val reasoningEnabled: Boolean = false,
     val chatSessionId: String? = null,
     val advertisedToolNames: Set<String> = emptySet(),
+    val ephemeralTools: List<EphemeralLocalLlmTool> = emptyList(),
 ) {
     constructor(prompt: String) : this(MessageContent.TextPrompt(prompt), userChatMessages(prompt))
 
@@ -86,6 +106,13 @@ data class PromptRequest(
             listOf(PromptChatMessage(PromptChatRole.User, prompt))
         }
     }
+}
+
+interface EphemeralLocalLlmTool {
+    val name: String
+    val descriptionJson: String
+
+    fun execute(argumentsJson: String): String
 }
 
 data class PromptChatMessage(

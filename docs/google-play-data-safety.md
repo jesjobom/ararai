@@ -118,6 +118,15 @@ Do not mark the following as collected on account of reporting alone:
 This list does not replace review of optional network tools or future SDKs in the
 actual production artifact.
 
+Managed-widget source, definitions, cached presentations, observations,
+sanitized run metadata, and foreground authoring prompts are app-private local
+data and are not collected by ArarAI. A confirmed Wikipedia widget can transmit
+only a bounded query or numeric month/day plus a language code to a fixed
+official Wikipedia API path, just as the optional model tools do. Recheck the current Play
+Console definitions for provider-side network/security processing, but do not
+classify the locally stored widget program or presentation as collected solely
+because it exists on the device.
+
 ## Pre-submission verification
 
 - Verify the production dependency graph and merged manifest, including every

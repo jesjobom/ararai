@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-04
+goal: Execute LLM-authored widget logic through an isolated, resource-bounded
+  JavaScript runtime without exposing Android or application internals.

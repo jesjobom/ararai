@@ -17,8 +17,10 @@ backend configuration.
 
 ArarAI runs supported language models on the device. Conversations, prompts,
 generated responses, images, audio recordings, transcripts, downloaded models,
-preferences, and runtime caches remain in app-owned local storage during normal
-use. Android backup and device transfer are disabled for the application.
+preferences, managed-widget definitions and JavaScript revisions, cached widget
+presentations, typed observations, sanitized widget run history, and runtime
+caches remain in app-owned local storage during normal use. Android backup and
+device transfer are disabled for the application.
 
 Network access may still occur for features the user invokes, including model
 downloads, optional knowledge tools, and generated-content reporting. Their
@@ -134,6 +136,26 @@ catalog. Optional Wikipedia and experimental web-search providers have separate
 in-app controls and bounded disclosures. Provider credentials supplied by a user
 are stored with Android Keystore-backed encryption and are not included in
 model context, conversation history, reports, logs, backup, or export.
+
+Managed in-app widgets may contact only application-owned providers for the
+versioned tools and schedule the user explicitly confirms. Wikipedia page
+lookup sends only a program-derived bounded query and language code. Wikipedia
+events-by-date sends only numeric month/day and language code. Both contact a
+fixed official Wikipedia HTTPS API path. Scheduled and manual refreshes execute the stored validated program without
+loading or prompting a model. Widget JavaScript has no direct network, file,
+database, Android intent, or credential access.
+
+Widget authoring prompts, bounded captured stage artifacts, controlled failure
+codes, and checkpoint metadata remain on-device in app-private storage and are
+excluded from backup and device transfer. They are not added to Chat, reports,
+analytics, execution logs, or exports. Reasoning tokens, internal prompts,
+credentials, provider results, model paths, stack traces, and raw exception
+messages are not persisted in the authoring workflow. Confirming or discarding
+removes the transient session; only a confirmed normalized source revision and
+consent record remain durable. Users can disable a widget to cancel future work
+or confirm deletion to remove its definition, all source revisions, cache,
+observations, run history, and schedule. Widgets do not sync, export, share,
+notify, or appear as Android launcher widgets.
 
 ## Security and incidents
 

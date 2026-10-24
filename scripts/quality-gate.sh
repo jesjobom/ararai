@@ -13,12 +13,20 @@ if [[ "$gradle_java_major" != "17" ]]; then
 fi
 
 npm ci --include=dev --ignore-scripts
+npm run test:widget-runtime-helpers
 scripts/run-firestore-rules-tests.sh
+scripts/run-quickjs-host-tests.sh
 ./gradlew spotlessCheck detekt
 ./gradlew testDebugUnitTest
 ./gradlew lintDebug
 ./gradlew assembleDebug
 ./gradlew assembleDebugAndroidTest
+./gradlew \
+    -Pararai.appInstrumentationBuildType=releaseCandidate \
+    -Pararai.quickJsInstrumentationBuildType=release \
+    :app:assembleReleaseCandidateAndroidTest \
+    :quickjs-runtime:assembleReleaseAndroidTest
 ./gradlew assembleReleaseCandidate
 scripts/verify-release-artifacts.sh releaseCandidate
+scripts/verify-runtime-validation-apk.sh
 openspec validate --all --strict

@@ -14,9 +14,29 @@ allprojects {
     }
 }
 
+val allowDestructiveConnectedTests =
+    providers
+        .gradleProperty("ararai.allowDestructiveConnectedTests")
+        .map(String::toBoolean)
+        .orElse(false)
+
+subprojects {
+    tasks.configureEach {
+        if (name.startsWith("connected") && name.endsWith("AndroidTest")) {
+            doFirst {
+                check(allowDestructiveConnectedTests.get()) {
+                    "Connected Android tests may uninstall the target package and erase its private data. " +
+                        "Use only a disposable emulator/device and opt in with " +
+                        "-Pararai.allowDestructiveConnectedTests=true."
+                }
+            }
+        }
+    }
+}
+
 spotless {
     kotlin {
-        target("app/src/**/*.kt", "whisper-runtime/src/**/*.kt")
+        target("app/src/**/*.kt", "quickjs-runtime/src/**/*.kt", "whisper-runtime/src/**/*.kt")
         ktlint("1.7.1").editorConfigOverride(
             mapOf("ktlint_standard_function-naming" to "disabled"),
         )
@@ -24,7 +44,7 @@ spotless {
         endWithNewline()
     }
     kotlinGradle {
-        target("*.gradle.kts", "app/*.gradle.kts", "whisper-runtime/*.gradle.kts")
+        target("*.gradle.kts", "app/*.gradle.kts", "quickjs-runtime/*.gradle.kts", "whisper-runtime/*.gradle.kts")
         ktlint("1.7.1")
         trimTrailingWhitespace()
         endWithNewline()

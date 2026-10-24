@@ -51,6 +51,8 @@ val releaseSigningRequested =
     }
 
 val liteRtLmVersion = "0.14.0"
+val instrumentationBuildType =
+    providers.gradleProperty("ararai.appInstrumentationBuildType").orNull ?: "debug"
 
 android {
     namespace = "com.jesjobom.ararai"
@@ -131,6 +133,8 @@ android {
         unitTests.isIncludeAndroidResources = true
     }
 
+    testBuildType = instrumentationBuildType
+
     sourceSets
         .getByName("releaseCandidate")
         .kotlin.directories
@@ -158,6 +162,7 @@ dependencies {
 
     implementation(composeBom)
     implementation(firebaseBom)
+    implementation(project(":quickjs-runtime"))
     implementation(project(":whisper-runtime"))
     androidTestImplementation(composeBom)
 

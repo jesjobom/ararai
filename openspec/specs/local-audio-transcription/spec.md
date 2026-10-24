@@ -1,7 +1,9 @@
 # local-audio-transcription Specification
 
 ## Purpose
-TBD - created by archiving change adopt-whisper-cpp-transcription. Update Purpose after archive.
+Define private, on-device audio transcription through a managed Whisper runtime
+and a validated local model lifecycle.
+
 ## Requirements
 ### Requirement: Managed Local Whisper Runtime
 

@@ -213,7 +213,10 @@ class CriticalComposeJourneysTest {
             "Uses Wikipedia/MediaWiki for eligible factual searches. Inference and conversation storage remain local.",
         ).assertIsDisplayed()
         composeRule.onNodeWithTag("wikipedia-enabled").assertIsOff().performClick().assertIsOn()
-        composeRule.onAllNodesWithText("Available for the selected model.").assertCountEquals(2)
+        composeRule.onNodeWithText(
+            "Available to the selected model in chat and to enabled widgets.",
+        ).assertIsDisplayed()
+        composeRule.onAllNodesWithText("Available for the selected model.").assertCountEquals(1)
         composeRule.onAllNodesWithText("Smoke test").assertCountEquals(0)
         composeRule
             .onNodeWithTag("web-provider-token-tavily")
@@ -256,8 +259,16 @@ class CriticalComposeJourneysTest {
         compatible = false
         composeRule.waitForIdle()
         composeRule.onNodeWithText(
-            "Unavailable for the selected model.",
+            "Unavailable to the selected model in chat. Enabled widgets can still use it.",
         ).performScrollTo().assertIsDisplayed()
+        composeRule.runOnIdle { settings = settings.copy(wikipediaEnabled = false) }
+        composeRule
+            .onNodeWithTag("wikipedia-enabled")
+            .performScrollTo()
+            .assertIsEnabled()
+            .assertIsOff()
+            .performClick()
+            .assertIsOn()
 
         composeRule.onNodeWithText("Generation").performClick()
         composeRule.onNodeWithText("Gemma E2B").performScrollTo().assertIsDisplayed()
@@ -419,6 +430,7 @@ class CriticalComposeJourneysTest {
                     appVersionLabel = "test",
                     onOpenChat = { opened += "chat" },
                     onOpenVoiceChat = { opened += "voice" },
+                    onOpenWidgets = { opened += "widgets" },
                     onOpenModelStatus = { opened += "models" },
                     onOpenInstructionsTools = { opened += "assistant" },
                     onOpenSettings = { opened += "settings" },
@@ -429,6 +441,7 @@ class CriticalComposeJourneysTest {
         listOf(
             "Chat" to "chat",
             "Voice Chat" to "voice",
+            "Widgets" to "widgets",
             "Model Manager" to "models",
             "Assistant configuration" to "assistant",
             "Settings" to "settings",

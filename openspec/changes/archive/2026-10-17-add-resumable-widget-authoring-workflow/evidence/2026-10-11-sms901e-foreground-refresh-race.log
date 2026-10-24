@@ -1,0 +1,9 @@
+Source: adb logcat -d -v time (main, system, crash, events); filtered to service lifecycle and crash markers.
+Device local time zone: America/Toronto (UTC-04:00). APK at capture: 202610102354.
+10-11 21:32:10.408 ActivityManager: Background started FGS: Allowed; action=REFRESH_WIDGET_AUTHORING; service=WidgetAuthoringService; startForegroundCount=0
+10-11 21:32:10.438 ActivityManager: Bringing down service while still waiting for start foreground: WidgetAuthoringService
+10-11 21:32:10.499 am_crash: com.jesjobom.ararai; ForegroundServiceDidNotStartInTimeException; WidgetAuthoringService
+10-11 21:32:26.659 ActivityManager: Background started FGS: Allowed; action=REFRESH_WIDGET_AUTHORING; service=WidgetAuthoringService; startForegroundCount=0
+10-11 21:32:26.684 ActivityManager: Bringing down service while still waiting for start foreground: WidgetAuthoringService
+10-11 21:32:26.740 am_crash: com.jesjobom.ararai; ForegroundServiceDidNotStartInTimeException; WidgetAuthoringService
+Earlier crash-buffer entries with the same exception: 10-06 22:37, 10-06 23:29, 10-07 21:54, 10-08 21:40, 10-08 23:54, 10-09 00:13, 10-09 16:06.

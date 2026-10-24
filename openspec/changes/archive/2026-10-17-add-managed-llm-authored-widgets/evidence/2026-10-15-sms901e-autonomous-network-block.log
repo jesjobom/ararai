@@ -1,0 +1,18 @@
+10-15 09:45:52.921 D/ConnectivityService( 2440): Returning BLOCKED NetworkInfo to uid=10492
+10-15 09:45:52.976 D/WM-WorkerWrapper(17843): Starting work for com.jesjobom.ararai.widget.managed.ManagedWidgetWorker
+10-15 09:45:52.980 D/WM-WorkerWrapper(17843): Starting work for com.jesjobom.ararai.widget.managed.ManagedWidgetWorker
+10-15 09:45:53.098 D/NetdEventListenerService( 2440): DNS Requested by 100, 10492(com.jesjobom.ararai), 4(FAIL), isBlocked=true, 0ms
+10-15 09:45:53.100 D/NetdEventListenerService( 2440): DNS Requested by 100, 10492(com.jesjobom.ararai), 4(FAIL), isBlocked=true, 0ms
+10-15 09:45:53.138 I/WM-WorkerWrapper(17843): Worker result RETRY for Work [ id=dddb34ae-5174-43f4-98e4-8981613faacb, tags={ com.jesjobom.ararai.widget.managed.ManagedWidgetWorker,managed-widget-periodic,managed-widget-id:b1a8bd03-efe4-403e-8ee5-7120ead037ed } ]
+10-15 09:45:53.145 I/WM-WorkerWrapper(17843): Worker result RETRY for Work [ id=4f2b8ebf-d829-4a3a-ac3e-1a72804b7abe, tags={ com.jesjobom.ararai.widget.managed.ManagedWidgetWorker,managed-widget-periodic,managed-widget-id:e537e172-a300-4837-a3a1-a07b28bfc41f } ]
+10-15 09:45:53.195 D/WM-SystemJobService(17843): onStartJob for WorkGenerationalId(workSpecId=4f2b8ebf-d829-4a3a-ac3e-1a72804b7abe, generation=29)
+10-15 09:45:53.254 D/WM-SystemJobService(17843): onStartJob for WorkGenerationalId(workSpecId=3ad11f9a-1082-4faf-967e-3f6991ae309f, generation=16)
+10-15 09:45:53.269 D/ConnectivityService( 2440): Returning UNBLOCKED NetworkInfo to uid=10492
+10-15 09:45:53.284 D/WM-WorkerWrapper(17843): Starting work for com.jesjobom.ararai.widget.managed.ManagedWidgetWorker
+10-15 09:45:53.322 D/WM-WorkerWrapper(17843): Starting work for com.jesjobom.ararai.widget.managed.ManagedWidgetWorker
+10-15 09:45:53.344 D/WM-WorkerWrapper(17843): Starting work for com.jesjobom.ararai.widget.managed.ManagedWidgetWorker
+10-15 09:45:53.361 I/WM-WorkerWrapper(17843): Worker result RETRY for Work [ id=3ad11f9a-1082-4faf-967e-3f6991ae309f, tags={ com.jesjobom.ararai.widget.managed.ManagedWidgetWorker,managed-widget-periodic,managed-widget-id:fce5a1f4-964d-405d-af94-e73c14c3d458 } ]
+10-15 09:45:53.395 D/WM-SystemJobService(17843): onStartJob for WorkGenerationalId(workSpecId=08f2a6d5-2901-41f1-87da-1c878ce5c5d3, generation=24)
+10-15 09:45:53.396 D/WM-SystemJobService(17843): onStartJob for WorkGenerationalId(workSpecId=a05e5da3-bc06-4a97-9275-d259323158c6, generation=27)
+10-15 09:45:53.400 I/WM-WorkerWrapper(17843): Worker result RETRY for Work [ id=a05e5da3-bc06-4a97-9275-d259323158c6, tags={ com.jesjobom.ararai.widget.managed.ManagedWidgetWorker,managed-widget-periodic,managed-widget-id:a2337f1a-8fe4-40f8-800a-f4acdd2efad8 } ]
+10-15 09:45:53.451 I/WM-WorkerWrapper(17843): Worker result RETRY for Work [ id=08f2a6d5-2901-41f1-87da-1c878ce5c5d3, tags={ com.jesjobom.ararai.widget.managed.ManagedWidgetWorker,managed-widget-periodic,managed-widget-id:90e68f7f-99ab-476d-8e80-b40befba1876 } ]

@@ -1,0 +1,23 @@
+Device: Samsung SM-S901E, America/Toronto
+Session: one persisted date-event authoring session (identifier omitted)
+Stage: RenderFunction / custom_source
+UTC attempts:
+  01:50:30-01:52:29 TimedOut, no captured source
+  02:00:33-02:01:28 InvalidSource, captured source
+  02:04:06-02:04:49 InvalidSource, captured source
+The two captured sources used arrow callbacks (`=>`), which the source-fragment
+parser rejects. Both also selected an oldest event and then called
+runtime.collectionCard, discarding that selection. The generation context and
+repair message incorrectly recommended collectionCard for custom_source.
+No raw prompt, source fragment, or user data is retained in this evidence.
+
+Fix: custom_source objectives, render API, and repair guidance now require
+indexed iteration, runtime.card, and a result-proven runtime.linkFor path.
+They explicitly forbid arrow callbacks, runtime.textNode, and collectionCard
+for this route. The typed collection_card route remains unchanged.
+Validation: directed Kotlin tests, Node runtime-helper tests (12 passed),
+spotlessCheck, detekt, testDebugUnitTest, lintDebug, assembleDebug passed.
+APK SHA-256: 027fedba582a950ef95ab0f543c8f95a3872f60b30a0de6740b96959831917bd
+Install: adb install -r succeeded; lastUpdateTime 2026-10-12 22:14:07 EDT,
+versionName 202610122211. One authoring session remained in app storage.
+End-to-end render generation on this APK remains for a user retest.

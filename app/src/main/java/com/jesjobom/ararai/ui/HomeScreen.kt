@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -44,6 +45,7 @@ internal fun HomeScreen(
     appVersionLabel: String,
     onOpenChat: () -> Unit,
     onOpenVoiceChat: () -> Unit,
+    onOpenWidgets: () -> Unit = {},
     voiceChatAvailable: Boolean = modelStatus.isReady,
     onUnavailableVoiceChat: () -> Unit = {},
     onOpenModelStatus: () -> Unit,
@@ -84,6 +86,13 @@ internal fun HomeScreen(
                 icon = Icons.Filled.Mic,
                 available = voiceChatAvailable,
                 onClick = if (voiceChatAvailable) onOpenVoiceChat else onUnavailableVoiceChat,
+            )
+            StatusCard(
+                title = stringResource(R.string.home_widgets_title),
+                value = stringResource(R.string.home_widgets_value),
+                detail = stringResource(R.string.home_widgets_description),
+                icon = Icons.Filled.Widgets,
+                onAction = onOpenWidgets,
             )
             StatusCard(
                 title = stringResource(R.string.home_model_manager_title),
