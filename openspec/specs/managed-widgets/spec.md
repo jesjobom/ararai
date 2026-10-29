@@ -9,25 +9,33 @@ rendering, observations, diagnostics, and complete deletion.
 
 ### Requirement: Dedicated in-app widget management
 
-The application SHALL expose a Widgets destination from Home where users can
-view empty state, list managed widgets and their current status, create a
-widget, inspect its active revision and permissions, enable or disable it,
-request an immediate refresh, edit it, duplicate it, and delete it. Managed
-widgets SHALL remain app-owned and rendered inside ArarAI; a user MAY also
-place a bounded snapshot of an existing managed widget on the Android launcher.
+The application SHALL expose a Widgets destination from Home that opens the managed-widget list directly, with creation, empty state, current status, and navigation to detail. The list's top-right app bar SHALL provide an accessible icon action opening widget tools. Users SHALL be able to inspect a widget's active revision and permissions, enable or disable it, request an immediate refresh, edit it, duplicate it, and delete it. Managed widgets SHALL remain app-owned and rendered inside ArarAI; a user MAY also place a bounded snapshot of an existing managed widget on the Android launcher. A launcher action targeting an existing widget SHALL still open that widget's detail directly.
+
+#### Scenario: Open Widgets from Home
+
+- **WHEN** the user opens Widgets from Home
+- **THEN** the application shows the managed-widget list with its creation action and a top-right icon for widget tools.
 
 #### Scenario: Open an empty manager
 
 - **WHEN** the user opens Widgets before creating any widget
-- **THEN** the application shows an empty state and an action to start
-  prompt-based creation.
+- **THEN** the application shows an empty state and an action to start prompt-based creation.
 
 #### Scenario: Inspect a managed widget
 
 - **WHEN** the user opens an existing widget
-- **THEN** the application shows its current presentation or empty state,
-  enabled/schedule status, last execution status and time, declared tools and
-  capabilities, active revision, and available management actions.
+- **THEN** the application shows its current presentation or empty state, enabled/schedule status, last execution status and time, declared tools and capabilities, active revision, and available management actions.
+
+#### Scenario: Open from an Android launcher instance
+
+- **WHEN** the user taps a launcher instance bound to an existing managed widget
+- **THEN** the application opens that widget's detail directly.
+
+#### Scenario: Open widget tools from the list
+
+- **WHEN** the user activates the top-right tools icon on the Widgets list
+- **THEN** the application opens widget tool management
+- **AND** Back returns to the Widgets list.
 
 #### Scenario: Observe and cancel multi-round authorship
 
@@ -338,3 +346,90 @@ The system widget picker SHALL offer an ArarAI widget. The user SHALL choose an 
 - **THEN** the app schedules one coalesced execution of the confirmed widget program
 - **AND** a committed result updates the card
 - **AND** repeated taps do not create concurrent executions.
+
+### Requirement: Widget tool management surface
+
+The Widgets area SHALL show the registered widget tool contracts and their widget-specific eligibility, user enablement, operational readiness, and understandable unavailable reasons. It SHALL distinguish global widget availability from the tools permitted by any individual widget's confirmed revision. A blocked-tool action during widget authoring SHALL open this widget tool surface and preserve a return path to the authoring workflow.
+
+#### Scenario: Review widget tools
+
+- **WHEN** the user opens widget tools
+- **THEN** each widget-eligible tool shows its availability and setup state
+- **AND** only the newest version of each tool is listed for new widgets; older versions remain executable and available when editing a revision that uses them
+- **AND** a tool that is not eligible for widgets is not presented as usable merely because it is configured for Chat.
+
+#### Scenario: Resolve a blocked authoring tool
+
+- **WHEN** widget authoring reports a blocked tool and the user opens tool settings
+- **THEN** the application opens widget tool management rather than Chat tools
+- **AND** the user can return to the same authoring workflow.
+
+#### Scenario: Enable a widget tool globally
+
+- **WHEN** a user enables a widget-eligible tool in widget tool management
+- **THEN** only widget-consumer availability changes
+- **AND** existing widget revisions do not gain a tool absent from their confirmed permissions.
+
+### Requirement: Search-only web results for widgets
+
+Managed widget authoring SHALL offer a widget-only `web_search_top_results@1` contract that searches a bounded query through a configured provider and returns up to ten provider-ranked title and validated HTTPS URL results. It SHALL support presentation of the first ranked result or multiple results without fetching site content. Widget enablement SHALL be independent of Chat and default off; a confirmed revision SHALL still explicitly permit the tool. Provider credentials and readiness are shared, but Chat's `web_search@1` behavior SHALL remain unchanged. Refreshes SHALL use the existing inexact schedule and SHALL not load a model.
+
+#### Scenario: First ranked result
+
+- **WHEN** an enabled widget requests one result for a query and refreshes on its one-hour schedule
+- **THEN** the tool returns at most the provider's first ranked result with a result-proven link
+- **AND** the UI does not claim the result is independently verified.
+
+#### Scenario: Up to ten results
+
+- **WHEN** an enabled widget requests ten results for a query and refreshes on its twelve-hour schedule
+- **THEN** the tool returns at most ten bounded ranked result entries
+- **AND** neither provider content extraction nor direct site fetching runs.
+
+#### Scenario: Unconfigured or disabled
+
+- **WHEN** no verified provider is configured or widget web search is disabled
+- **THEN** widget dispatch returns a controlled failure without a network request
+- **AND** Chat's independent availability is unchanged.
+
+### Requirement: Parallel bounded web search modes
+
+Managed widget authoring SHALL offer both the search-only `web_search_top_results@1` contract and a content-bearing `web_search_content@1` contract. The content tool SHALL reuse the configured Chat web-search provider chain to return at most three source-linked results with bounded excerpts, not full page content. The existing Chat contract and top-results behavior SHALL remain unchanged. Both widget tools SHALL require widget web-search enablement, configured credentials, and revision-specific consent.
+
+#### Scenario: Content-bearing result
+
+- **WHEN** a widget using `web_search_content` refreshes with a valid query and a provider returns focused evidence
+- **THEN** its tool result contains at most three ranked title, HTTPS URL, and excerpt entries
+- **AND** any presented link matches a returned URL and passes the widget destination policy.
+
+#### Scenario: Parallel selection
+
+- **WHEN** a new widget is authored for web search
+- **THEN** it can select `web_search_top_results` for up to ten link-only results or `web_search_content` for up to three results with excerpts
+- **AND** the Chat-only `web_search` contract is not offered as a widget tool.
+
+#### Scenario: Disabled or unavailable
+
+- **WHEN** widget web search is disabled or no usable credential is configured
+- **THEN** neither widget tool sends a provider request
+- **AND** existing confirmed revisions retain their exact recorded version and permission.
+
+### Requirement: Consistent widget source review and edit prompt
+
+Before confirming a generated widget, the application SHALL show its JavaScript using the same selectable, syntax-highlighted, line-wrapped code surface as saved-widget detail. Editing a saved widget SHALL prefill the editable instruction field with the active revision's stored prompt, when one exists, without automatically changing the saved widget.
+
+#### Scenario: Review a generated draft
+
+- **WHEN** a valid draft is ready for confirmation
+- **THEN** its full JavaScript source is selectable, syntax-highlighted, and line-wrapped in the same code surface used by widget detail.
+
+#### Scenario: Edit an existing widget
+
+- **WHEN** the user selects Edit from a saved widget's detail
+- **THEN** the creation/editing screen opens with the active revision's original prompt already in its editable instruction field
+- **AND** the user can modify it before starting a new authoring workflow.
+
+#### Scenario: Edit a legacy widget without a saved prompt
+
+- **WHEN** the active revision has no stored prompt
+- **THEN** the editable instruction field starts blank.

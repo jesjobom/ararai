@@ -56,12 +56,38 @@ internal class WidgetAuthoringStageRunner(
                     deterministicPlanCompletion(requireNotNull(repository.activeSession.value), attempt, runtimeContext),
                 )
             }
+            if (attempt.stage == WidgetAuthoringStageKey.Render) {
+                val snapshot = requireNotNull(repository.activeSession.value)
+                val accepted = AcceptedArtifacts(snapshot, registry)
+                val algorithm = accepted.algorithm(accepted.feasibility())
+                val raw = WidgetCollectionListArtifact.rankedWebResults(algorithm)
+                    ?: WidgetCollectionCardArtifact.rankedWebContent(algorithm, prompt, accepted.feasibility())
+                    ?: WidgetCollectionCardArtifact.eventYearTitle(algorithm, prompt, accepted.feasibility())
+                    ?: WidgetCollectionCardArtifact.selectedWikipediaPage(algorithm)
+                if (raw != null) {
+                    repository.markAttemptRunning(initial.session.id, attempt.id)
+                    return repository.completeAttempt(
+                        deterministicRenderCompletion(snapshot, attempt, raw, runtimeContext),
+                    )
+                }
+            }
             val current = requireNotNull(repository.activeSession.value)
             val plan = try {
                 stagePlan(current, attempt, prompt, runtimeContext)
             } catch (_: RuntimeException) {
                 return repository.completeAttempt(
                     attempt.failure(WidgetAuthoringStageFailureCode.InvalidSchema),
+                )
+            }
+            // Chat and authoring share the engine. A previous session may still hold its GPU
+            // allocation; waiting for low process PSS before unloading it can never recover.
+            try {
+                modelController.unload()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: RuntimeException) {
+                return repository.completeAttempt(
+                    attempt.failure(WidgetAuthoringStageFailureCode.RuntimeUnavailable),
                 )
             }
             if (!recoveryGate.awaitReady(LocalLlmRecoveryRequirement.forModel(model))) {
@@ -166,6 +192,35 @@ internal class WidgetAuthoringStageRunner(
         }
     }
 
+    private suspend fun deterministicRenderCompletion(
+        snapshot: WidgetAuthoringSessionSnapshot,
+        attempt: WidgetAuthoringAttempt,
+        raw: String,
+        runtimeContext: WidgetRuntimeContext,
+    ): CompleteWidgetAuthoringAttempt {
+        val accepted = AcceptedArtifacts(snapshot, registry)
+        val feasibility = accepted.feasibility()
+        val algorithm = accepted.algorithm(feasibility)
+        val failure = stageValidators.render(
+            raw,
+            accepted.callFunctions(algorithm) + accepted.plan(),
+            algorithm,
+            feasibility,
+            runtimeContext,
+        ).failureOrNull()
+        return if (failure == null) {
+            CompleteWidgetAuthoringAttempt(
+                snapshot.session.id,
+                attempt.id,
+                WidgetAuthoringAttemptStatus.Succeeded,
+                raw,
+                null,
+            )
+        } else {
+            attempt.failure(failure, raw)
+        }
+    }
+
     private fun stagePlan(
         snapshot: WidgetAuthoringSessionSnapshot,
         attempt: WidgetAuthoringAttempt,
@@ -185,20 +240,25 @@ internal class WidgetAuthoringStageRunner(
                     repair.first,
                     repair.second,
                 ),
-            ) { raw -> stageValidators.feasibility(raw, accepted.availableTools).failureOrNull() }
+            ) { raw ->
+                stageValidators.feasibility(
+                    raw,
+                    registry.authoringToolCapabilities(prompt.existingWidgetTools),
+                ).failureOrNull()
+            }
             WidgetAuthoringStageKey.Algorithm -> {
                 val feasibility = accepted.feasibility()
                 StagePlan(
                     WidgetAuthoringRoundRequest(
                         WidgetAuthoringStage.Algorithm,
                         SUBMIT_WIDGET_ALGORITHM_TOOL,
-                        algorithmCaptureSchema(feasibility),
+                        algorithmCaptureSchema(feasibility, prompt),
                         WIDGET_ALGORITHM_OBJECTIVE,
                         algorithmContext(prompt, feasibility),
                         repair.first,
                         repair.second,
                     ),
-                ) { raw -> stageValidators.algorithm(raw, feasibility).failureOrNull() }
+                ) { raw -> stageValidators.algorithm(raw, feasibility, prompt).failureOrNull() }
             }
             is WidgetAuthoringStageKey.CallFunction -> {
                 val feasibility = accepted.feasibility()
@@ -221,6 +281,7 @@ internal class WidgetAuthoringStageRunner(
                         step,
                         feasibility,
                         runtimeContext,
+                        requestedWebResultsCount(prompt, feasibility),
                     ).failureOrNull()
                 }
             }
@@ -396,10 +457,16 @@ internal class AcceptedArtifacts(
     }
 
     fun render(algorithm: WidgetAlgorithmArtifact): WidgetSourceFragmentArtifact = when (
-        val parsed = if (algorithm.renderCapability == WidgetRenderCapability.CollectionCard) {
-            WidgetCollectionCardArtifact.parse(artifact(WidgetAuthoringStageKey.Render), algorithm)
-        } else {
-            WidgetSourceFragmentParser.parse(
+        val parsed = when (algorithm.renderCapability) {
+            WidgetRenderCapability.CollectionCard -> WidgetCollectionCardArtifact.parse(
+                artifact(WidgetAuthoringStageKey.Render),
+                algorithm,
+            )
+            WidgetRenderCapability.CollectionList -> WidgetCollectionListArtifact.parse(
+                artifact(WidgetAuthoringStageKey.Render),
+                algorithm,
+            )
+            else -> WidgetSourceFragmentParser.parse(
                 artifact(WidgetAuthoringStageKey.Render),
                 "render",
                 "render",
@@ -456,8 +523,13 @@ internal fun renderFunctionObjective(
 }
 
 internal fun collectionCardObjective(): String = "Submit one collection card configuration. Copy alias, items, title, " +
-    "optional body and url from the allowed tool-result property names; only fallback is literal display text. " +
+    "optional titleSuffixField, body and url from the allowed tool-result property names; " +
+    "titleSuffixField appends its string or integer value in parentheses. Only fallback is literal display text. " +
     "Set selection=first or seeded_random according to the user request. Do not write JavaScript."
+
+internal fun collectionListObjective(): String = "Submit one collection list configuration. Copy alias, items, title, " +
+    "optional body and url from the allowed tool-result property names; only fallback is literal display text. " +
+    "The application displays every returned result in order, up to ten. Do not write JavaScript."
 
 private fun WidgetAuthoringSessionSnapshot.repairContext(
     attempt: WidgetAuthoringAttempt,

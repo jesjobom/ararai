@@ -143,6 +143,7 @@ import com.jesjobom.ararai.settings.InMemoryTranscriptionLanguagePreferences
 import com.jesjobom.ararai.settings.ThemeMode
 import com.jesjobom.ararai.settings.TranscriptionLanguage
 import com.jesjobom.ararai.settings.TranscriptionLanguagePreferences
+import com.jesjobom.ararai.tools.ApplicationToolContract
 import com.jesjobom.ararai.tools.ApplicationToolDispatcher
 import com.jesjobom.ararai.tools.defaultApplicationToolRegistry
 import com.jesjobom.ararai.ui.tour.ScreenTour
@@ -155,6 +156,8 @@ import com.jesjobom.ararai.voice.AndroidVoiceTurnCapture
 import com.jesjobom.ararai.voice.SequentialVoiceSpeechQueue
 import com.jesjobom.ararai.voice.VoiceChatPreferences
 import com.jesjobom.ararai.voice.VoiceChatViewModel
+import com.jesjobom.ararai.widget.InMemoryWidgetToolPreferences
+import com.jesjobom.ararai.widget.WidgetToolPreferences
 import com.jesjobom.ararai.widget.managed.ManagedWidgetApplicationServices
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringJobController
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringWorkflowCoordinator
@@ -166,6 +169,7 @@ import java.util.Locale
 private enum class AppDestination {
     Home,
     Widgets,
+    WidgetTools,
     WidgetDetail,
     WidgetAuthoring,
     Chat,
@@ -197,6 +201,8 @@ internal fun ArarAiApp(
     reportDeliveryScheduler: ReportDeliveryScheduler = ReportDeliveryScheduler { },
     diagnosticErrorReportCoordinator: DiagnosticErrorReportCoordinator? = null,
     instructionPreferences: InstructionPreferences = InMemoryInstructionPreferences(),
+    widgetToolPreferences: WidgetToolPreferences = InMemoryWidgetToolPreferences(),
+    widgetToolContracts: List<ApplicationToolContract> = emptyList(),
     generationPreferences: GenerationPreferences = InMemoryGenerationPreferences(),
     modelDownloadPromptPreferenceStore: ModelDownloadPromptPreferenceStore =
         InMemoryModelDownloadPromptPreferenceStore(),
@@ -314,6 +320,8 @@ internal fun ArarAiApp(
     }
     val modelCatalogState by modelController.state.collectAsState()
     val instructionSettings by instructionPreferences.settings.collectAsState()
+    val widgetWikipediaEnabled by widgetToolPreferences.wikipediaEnabled.collectAsState()
+    val widgetWebSearchEnabled by widgetToolPreferences.webSearchEnabled.collectAsState()
     val generationSettings by generationPreferences.state.collectAsState()
     val transcriptionLanguage by transcriptionLanguagePreferences.language.collectAsState()
     val webSearchSettings by webSearchPreferences.settings.collectAsState()
@@ -343,6 +351,9 @@ internal fun ArarAiApp(
     )
     var destination by rememberSaveable { mutableStateOf(AppDestination.Home) }
     var selectedWidgetId by rememberSaveable { mutableStateOf<String?>(null) }
+    var widgetEditInitialPrompt by rememberSaveable { mutableStateOf<String?>(null) }
+    var widgetToolsFromAuthoring by rememberSaveable { mutableStateOf(false) }
+    var providerSettingsFromWidgetTools by rememberSaveable { mutableStateOf(false) }
     var showExitConfirmation by remember { mutableStateOf(false) }
     var showInitialModelDialog by remember {
         mutableStateOf(
@@ -415,6 +426,7 @@ internal fun ArarAiApp(
             AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
             AppDestination.Home,
             AppDestination.Widgets,
+            AppDestination.WidgetTools,
             AppDestination.WidgetDetail,
             AppDestination.WidgetAuthoring,
             AppDestination.ModelStatus,
@@ -436,10 +448,18 @@ internal fun ArarAiApp(
                 destination = AppDestination.ModelStatus
             }
             AppDestination.WidgetDetail -> destination = AppDestination.Widgets
+            AppDestination.WidgetTools -> {
+                destination = if (widgetToolsFromAuthoring) AppDestination.WidgetAuthoring else AppDestination.Widgets
+                widgetToolsFromAuthoring = false
+            }
             AppDestination.WidgetAuthoring -> destination = if (selectedWidgetId == null) {
                 AppDestination.Widgets
             } else {
                 AppDestination.WidgetDetail
+            }
+            AppDestination.InstructionsTools -> {
+                destination = if (providerSettingsFromWidgetTools) AppDestination.WidgetTools else AppDestination.Home
+                providerSettingsFromWidgetTools = false
             }
             else -> returnHome()
         }
@@ -523,6 +543,7 @@ internal fun ArarAiApp(
                 AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
                 AppDestination.Home,
                 AppDestination.Widgets,
+                AppDestination.WidgetTools,
                 AppDestination.WidgetDetail,
                 AppDestination.WidgetAuthoring,
                 AppDestination.ModelStatus,
@@ -544,6 +565,7 @@ internal fun ArarAiApp(
                 AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
                 AppDestination.Home,
                 AppDestination.Widgets,
+                AppDestination.WidgetTools,
                 AppDestination.WidgetDetail,
                 AppDestination.WidgetAuthoring,
                 AppDestination.ModelStatus,
@@ -613,6 +635,22 @@ internal fun ArarAiApp(
             onOpenInstructionsTools = { destination = AppDestination.InstructionsTools },
             onOpenSettings = { destination = AppDestination.Settings },
         )
+        AppDestination.WidgetTools -> WidgetToolsScreen(
+            contracts = widgetToolContracts,
+            wikipediaEnabled = widgetWikipediaEnabled,
+            onWikipediaEnabledChange = widgetToolPreferences::setWikipediaEnabled,
+            webSearchEnabled = widgetWebSearchEnabled,
+            webProviderConfigured = webSearchSettings.configuredProviders.isNotEmpty(),
+            onWebSearchEnabledChange = widgetToolPreferences::setWebSearchEnabled,
+            onConfigureWebProviders = {
+                providerSettingsFromWidgetTools = true
+                destination = AppDestination.InstructionsTools
+            },
+            onBack = {
+                destination = if (widgetToolsFromAuthoring) AppDestination.WidgetAuthoring else AppDestination.Widgets
+                widgetToolsFromAuthoring = false
+            },
+        )
         AppDestination.Widgets -> {
             val controller = managedWidgetsController
             if (controller == null) {
@@ -621,8 +659,13 @@ internal fun ArarAiApp(
                 ManagedWidgetsRoute(
                     controller = controller,
                     onBack = { returnHome() },
+                    onOpenTools = {
+                        widgetToolsFromAuthoring = false
+                        destination = AppDestination.WidgetTools
+                    },
                     onCreate = {
                         selectedWidgetId = null
+                        widgetEditInitialPrompt = null
                         destination = AppDestination.WidgetAuthoring
                     },
                     onOpenWidget = { widgetId ->
@@ -642,7 +685,10 @@ internal fun ArarAiApp(
                     controller = controller,
                     widgetId = widgetId,
                     onBack = { destination = AppDestination.Widgets },
-                    onEdit = { destination = AppDestination.WidgetAuthoring },
+                    onEdit = { initialPrompt ->
+                        widgetEditInitialPrompt = initialPrompt
+                        destination = AppDestination.WidgetAuthoring
+                    },
                     onDeleted = {
                         selectedWidgetId = null
                         destination = AppDestination.Widgets
@@ -666,6 +712,7 @@ internal fun ArarAiApp(
                     inference = available?.inference ?: available?.model?.let { modelConfig.requireInference() },
                     modelArtifactSha256 = modelConfig.sha256,
                     widgetId = selectedWidgetId,
+                    initialInstruction = widgetEditInitialPrompt,
                     jobController = widgetAuthoringJobs,
                     workflowCoordinator = widgetAuthoringWorkflow,
                     onBack = {
@@ -679,7 +726,10 @@ internal fun ArarAiApp(
                         selectedWidgetId = widgetId
                         destination = AppDestination.WidgetDetail
                     },
-                    onOpenToolSettings = { destination = AppDestination.InstructionsTools },
+                    onOpenToolSettings = {
+                        widgetToolsFromAuthoring = true
+                        destination = AppDestination.WidgetTools
+                    },
                     onShareDiagnosticReport = onShareWidgetToolCallingDiagnostic,
                     onShareRawDiagnosticReport = onShareRawWidgetToolCallingDiagnostic,
                 )
@@ -890,7 +940,10 @@ internal fun ArarAiApp(
                 webSmokeErrors = webSmokeErrors - provider
             },
             tourPreferenceStore = tourPreferenceStore,
-            onBack = { returnHome() },
+            onBack = {
+                destination = if (providerSettingsFromWidgetTools) AppDestination.WidgetTools else AppDestination.Home
+                providerSettingsFromWidgetTools = false
+            },
         )
     }
 }
@@ -950,6 +1003,7 @@ internal fun ArarAiScaffold(
     subtitle: String? = null,
     onBack: (() -> Unit)? = null,
     showTopBar: Boolean = true,
+    topBarActions: @Composable () -> Unit = {},
     content: @Composable (Modifier) -> Unit,
 ) {
     Scaffold(
@@ -983,6 +1037,7 @@ internal fun ArarAiScaffold(
                             }
                         }
                     },
+                    actions = { topBarActions() },
                 )
             }
         },
@@ -1549,6 +1604,11 @@ private fun ToolsTab(
     onWebProviderEnabledChange: (WebSearchProvider, Boolean) -> Unit,
     onRemoveWebProvider: (WebSearchProvider) -> Unit,
 ) {
+    Text(
+        stringResource(R.string.tools_chat_scope),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
@@ -1678,15 +1738,35 @@ private fun WebSearchProviderCard(
 ) {
     var token by remember(provider, configured, unreadable) { mutableStateOf("") }
     var disclosureAccepted by remember(provider, configured, unreadable) { mutableStateOf(false) }
+    var showConfiguration by remember(provider) { mutableStateOf(false) }
+    LaunchedEffect(smokeResult) {
+        if (smokeResult?.passed == true) showConfiguration = false
+    }
+    LaunchedEffect(configured) {
+        if (configured) showConfiguration = false
+    }
     val uriHandler = LocalUriHandler.current
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(provider.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            TextButton(onClick = { uriHandler.openUri(provider.accountUrl) }) {
-                Text(stringResource(R.string.tools_create_token))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    provider.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(
+                    onClick = { showConfiguration = true },
+                    modifier = Modifier.testTag("web-provider-settings-${provider.name.lowercase()}"),
+                ) {
+                    Icon(
+                        Icons.Filled.Settings,
+                        contentDescription = stringResource(R.string.tools_configure_provider, provider.displayName),
+                    )
+                }
             }
             Text(
                 when {
@@ -1702,58 +1782,7 @@ private fun WebSearchProviderCard(
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
-            if (!configured) {
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = { token = it },
-                    label = { Text(stringResource(R.string.tools_api_token_label, provider.displayName)) },
-                    singleLine = true,
-                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    keyboardOptions =
-                    androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
-                    ),
-                    modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .testTag("web-provider-token-${provider.name.lowercase()}"),
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Checkbox(
-                        checked = disclosureAccepted,
-                        onCheckedChange = { disclosureAccepted = it },
-                        modifier =
-                        Modifier.testTag(
-                            "web-provider-disclosure-${provider.name.lowercase()}",
-                        ),
-                    )
-                    Text(
-                        stringResource(R.string.tools_disclosure, provider.displayName),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Button(
-                    onClick = { onVerify(token) },
-                    enabled =
-                    token.isNotBlank() &&
-                        disclosureAccepted &&
-                        !verifying &&
-                        !anotherVerificationRunning,
-                    modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .testTag("web-provider-verify-${provider.name.lowercase()}"),
-                ) {
-                    Text(
-                        stringResource(
-                            if (verifying) R.string.tools_verifying else R.string.tools_verify_enable,
-                        ),
-                    )
-                }
-            } else {
+            if (configured) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1781,15 +1810,6 @@ private fun WebSearchProviderCard(
                         modifier = Modifier.testTag("web-provider-enabled-${provider.name.lowercase()}"),
                     )
                 }
-                OutlinedButton(
-                    onClick = onRemove,
-                    modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .testTag("web-provider-remove-${provider.name.lowercase()}"),
-                ) {
-                    Text(stringResource(R.string.tools_remove_credential))
-                }
             }
             if (verifying) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             smokeResult?.let { result ->
@@ -1810,6 +1830,78 @@ private fun WebSearchProviderCard(
                 Text(stringResource(R.string.tools_fail_result, it), color = MaterialTheme.colorScheme.error)
             }
         }
+    }
+    if (showConfiguration) {
+        AlertDialog(
+            onDismissRequest = { if (!verifying) showConfiguration = false },
+            title = { Text(stringResource(R.string.tools_configure_provider, provider.displayName)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        stringResource(
+                            if (configured) R.string.tools_credential_configured else R.string.tools_enter_token,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { uriHandler.openUri(provider.accountUrl) }) {
+                        Text(stringResource(R.string.tools_create_token))
+                    }
+                    OutlinedTextField(
+                        value = token,
+                        onValueChange = { token = it },
+                        label = { Text(stringResource(R.string.tools_api_token_label, provider.displayName)) },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("web-provider-token-${provider.name.lowercase()}"),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = disclosureAccepted,
+                            onCheckedChange = { disclosureAccepted = it },
+                            modifier = Modifier.testTag("web-provider-disclosure-${provider.name.lowercase()}"),
+                        )
+                        Text(
+                            stringResource(R.string.tools_disclosure, provider.displayName),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    smokeError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    smokeResult?.takeUnless { it.passed }?.let {
+                        Text(it.detail, color = MaterialTheme.colorScheme.error)
+                    }
+                    if (verifying) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { onVerify(token) },
+                    enabled = token.isNotBlank() && disclosureAccepted && !verifying && !anotherVerificationRunning,
+                    modifier = Modifier.testTag("web-provider-verify-${provider.name.lowercase()}"),
+                ) { Text(stringResource(if (verifying) R.string.tools_verifying else R.string.tools_verify_enable)) }
+            },
+            dismissButton = {
+                Row {
+                    if (configured) {
+                        TextButton(
+                            onClick = {
+                                onRemove()
+                                showConfiguration = false
+                            },
+                            enabled = !verifying,
+                            modifier = Modifier.testTag("web-provider-remove-${provider.name.lowercase()}"),
+                        ) {
+                            Text(stringResource(R.string.tools_remove_credential))
+                        }
+                    }
+                    TextButton(onClick = { showConfiguration = false }, enabled = !verifying) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                }
+            },
+        )
     }
 }
 

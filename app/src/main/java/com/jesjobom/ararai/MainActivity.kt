@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
         val pendingReportQueue = app.pendingReportQueue
         val reportDeliveryReceiptStore = app.reportDeliveryReceiptStore
         val instructionPreferences = app.instructionPreferences
+        val widgetToolPreferences = app.widgetToolPreferences
         val generationPreferences = SharedPreferencesGenerationPreferences(this)
         val modelDownloadPromptPreferenceStore = SharedPreferencesModelDownloadPromptPreferenceStore(this)
         val transcriptionLanguagePreferences = SharedPreferencesTranscriptionLanguagePreferences(this)
@@ -149,6 +150,8 @@ class MainActivity : ComponentActivity() {
                         reportDeliveryScheduler = app.reportDeliveryScheduler,
                         diagnosticErrorReportCoordinator = app.diagnosticErrorReportCoordinator,
                         instructionPreferences = instructionPreferences,
+                        widgetToolPreferences = widgetToolPreferences,
+                        widgetToolContracts = app.widgetToolContracts,
                         generationPreferences = generationPreferences,
                         modelDownloadPromptPreferenceStore = modelDownloadPromptPreferenceStore,
                         transcriptionLanguagePreferences = transcriptionLanguagePreferences,

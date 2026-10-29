@@ -1161,6 +1161,7 @@ private fun String.diagnosticStage(): WidgetAuthoringStage = when (this) {
     SUBMIT_WIDGET_PLAN_FUNCTION_TOOL -> WidgetAuthoringStage.PlanFunction
     SUBMIT_WIDGET_RENDER_FUNCTION_TOOL -> WidgetAuthoringStage.RenderFunction
     SUBMIT_WIDGET_COLLECTION_CARD_TOOL -> WidgetAuthoringStage.RenderFunction
+    SUBMIT_WIDGET_COLLECTION_LIST_TOOL -> WidgetAuthoringStage.RenderFunction
     else -> error("Unexpected diagnostic tool")
 }
 

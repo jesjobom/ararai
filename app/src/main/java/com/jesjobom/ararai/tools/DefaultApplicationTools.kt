@@ -10,9 +10,13 @@ import com.jesjobom.ararai.chat.WEB_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.knowledge.KnowledgeSource
 import com.jesjobom.ararai.knowledge.KnowledgeTool
+import com.jesjobom.ararai.knowledge.ToolFailureReason
 import com.jesjobom.ararai.knowledge.ToolRequest
 import com.jesjobom.ararai.knowledge.ToolResult
 import com.jesjobom.ararai.knowledge.WebSearchPreferences
+import com.jesjobom.ararai.knowledge.WebSearchResultsRequest
+import com.jesjobom.ararai.knowledge.WebSearchResultsResult
+import com.jesjobom.ararai.knowledge.WebSearchResultsTool
 import com.jesjobom.ararai.knowledge.WikipediaHistoricalEvent
 import com.jesjobom.ararai.knowledge.WikipediaOnThisDayRequest
 import com.jesjobom.ararai.knowledge.WikipediaOnThisDayResult
@@ -25,6 +29,7 @@ import com.jesjobom.ararai.knowledge.WikipediaPageSummaryTool
 import com.jesjobom.ararai.knowledge.WikipediaPagesResult
 import com.jesjobom.ararai.knowledge.WikipediaPagesTool
 import com.jesjobom.ararai.knowledge.validWebSearchRequest
+import com.jesjobom.ararai.knowledge.validWidgetExternalUrl
 import com.jesjobom.ararai.math.EvalExLocalMathEngine
 import com.jesjobom.ararai.math.LocalMathEngine
 import com.jesjobom.ararai.math.MathEvaluationResult
@@ -96,17 +101,28 @@ fun defaultApplicationToolRegistry(
     ),
 )
 
-/** Curated widget tool set. Only Wikipedia bindings are approved at present. */
+/** Curated widget tool set; Chat bindings are not implicitly widget eligible. */
 internal fun defaultWidgetApplicationToolRegistry(
     pagesTool: WikipediaPagesTool,
     onThisDayTool: WikipediaOnThisDayTool,
     state: () -> ApplicationToolOperationalState,
     summaryTool: WikipediaPageSummaryTool? = null,
+    webResultsTool: (() -> WebSearchResultsTool?)? = null,
+    webSearchState: (() -> ApplicationToolOperationalState)? = null,
+    webContentTool: (() -> KnowledgeTool?)? = null,
 ): ApplicationToolRegistry = ApplicationToolRegistry(
     listOf(
         wikipediaPagesApplicationTool(pagesTool, state),
         wikipediaOnThisDayApplicationTool(onThisDayTool, state),
-    ) + listOfNotNull(summaryTool?.let { wikipediaPageSummaryApplicationTool(it, state) }),
+    ) + listOfNotNull(
+        summaryTool?.let { wikipediaPageSummaryApplicationTool(it, state) },
+        webResultsTool?.let { tool ->
+            webSearchResultsApplicationTool(tool, requireNotNull(webSearchState))
+        },
+        webContentTool?.let { tool ->
+            webSearchContentApplicationTool(tool, requireNotNull(webSearchState))
+        },
+    ),
 )
 
 internal fun wikipediaPageSummaryApplicationTool(
@@ -299,6 +315,135 @@ internal fun webSearchApplicationTool(
     },
     encodeResult = ::encodeKnowledgeResult,
 )
+
+internal fun webSearchResultsApplicationTool(
+    tool: () -> WebSearchResultsTool?,
+    state: () -> ApplicationToolOperationalState,
+): RegisteredApplicationTool = applicationToolBinding(
+    contract = ApplicationToolContract(
+        id = WEB_SEARCH_TOP_RESULTS_TOOL_NAME,
+        version = CURRENT_TOOL_CONTRACT_VERSION,
+        displayName = "Web search — titles and links",
+        category = ApplicationToolCategory.ExternalKnowledge,
+        consumers = setOf(ApplicationToolConsumer.Widget),
+        inputSchemaJson = WEB_SEARCH_RESULTS_INPUT_SCHEMA,
+        outputSchemaJson = WEB_SEARCH_RESULTS_OUTPUT_SCHEMA,
+        authoringSummary = "Search current web rankings without fetching site content. Return up to limit (1-10) " +
+            "title and canonicalUrl results; results[0] is provider-ranked, not a verified answer.",
+    ),
+    state = state,
+    executor = ApplicationTool(
+        displayName = "Web search — titles and links",
+        category = ApplicationToolCategory.ExternalKnowledge,
+    ) { request: WebSearchResultsRequest ->
+        tool()?.search(request)
+            ?: WebSearchResultsResult.Failure(ToolFailureReason.Unavailable)
+    },
+    decodeArguments = { arguments ->
+        arguments.takeIf { it.keySet() == setOf("query", "limit") }?.let {
+            val query = it.strictString("query")?.trim()
+                ?.takeIf { value -> value.isNotBlank() && value.length <= 400 && value.none(Char::isISOControl) }
+                ?: return@let null
+            val limit = it.strictInt("limit")?.takeIf { value -> value in 1..10 } ?: return@let null
+            WebSearchResultsRequest(query, limit)
+        }
+    },
+    encodeResult = { result ->
+        when (result) {
+            is WebSearchResultsResult.Success -> JsonObject().apply {
+                addProperty("kind", "success")
+                addProperty("provider", result.provider.displayName)
+                addProperty("retrievedAtMillis", result.retrievedAtMillis)
+                add(
+                    "results",
+                    JsonArray().apply {
+                        result.results.forEach { item ->
+                            add(
+                                JsonObject().apply {
+                                    addProperty("title", item.title)
+                                    addProperty("canonicalUrl", item.canonicalUrl)
+                                },
+                            )
+                        }
+                    },
+                )
+            }.toString()
+            is WebSearchResultsResult.Failure -> JsonObject().apply {
+                addProperty("kind", "failure")
+                addProperty("reason", result.reason.name)
+            }.toString()
+        }
+    },
+)
+
+/** Reuses the Chat provider chain and its bounded excerpts, but exposes a widget-shaped result. */
+internal fun webSearchContentApplicationTool(
+    tool: () -> KnowledgeTool?,
+    state: () -> ApplicationToolOperationalState,
+    languageProvider: () -> String = { Locale.getDefault().language },
+): RegisteredApplicationTool = applicationToolBinding(
+    contract = ApplicationToolContract(
+        id = WEB_SEARCH_CONTENT_TOOL_NAME,
+        version = CURRENT_TOOL_CONTRACT_VERSION,
+        displayName = "Web search — excerpts",
+        category = ApplicationToolCategory.ExternalKnowledge,
+        consumers = setOf(ApplicationToolConsumer.Widget),
+        inputSchemaJson = WEB_SEARCH_INPUT_SCHEMA,
+        outputSchemaJson = WEB_SEARCH_CONTENT_OUTPUT_SCHEMA,
+        authoringSummary = "Return up to three web results with title, canonicalUrl, excerpt text for simple cards, " +
+            "and excerpts array. These are provider extracts, not full pages or verified facts.",
+    ),
+    state = state,
+    executor = ApplicationTool(
+        displayName = "Web search — excerpts",
+        category = ApplicationToolCategory.ExternalKnowledge,
+    ) { request: ToolRequest ->
+        tool()?.execute(request) ?: ToolResult.Failure(ToolFailureReason.Unavailable)
+    },
+    decodeArguments = { arguments ->
+        arguments.takeIf { it.keySet() == setOf("query") }
+            ?.strictString("query")
+            ?.let { query ->
+                ToolRequest(query = query, language = normalizedLanguage(languageProvider()), focus = query)
+                    .takeIf(::validWebSearchRequest)
+            }
+    },
+    encodeResult = ::encodeWebSearchContentResult,
+)
+
+private fun encodeWebSearchContentResult(result: ToolResult): String = when (result) {
+    is ToolResult.Success -> {
+        val evidence = result.webEvidence.filter { validWidgetExternalUrl(it.source.canonicalUrl) }
+        if (evidence.isEmpty()) {
+            encodeWebSearchContentResult(ToolResult.Failure(ToolFailureReason.NoResults))
+        } else {
+            JsonObject().apply {
+                addProperty("kind", "success")
+                add(
+                    "results",
+                    JsonArray().apply {
+                        evidence.forEach { item ->
+                            add(
+                                JsonObject().apply {
+                                    addProperty("title", item.source.title)
+                                    addProperty("canonicalUrl", item.source.canonicalUrl)
+                                    addProperty("provider", item.source.provider)
+                                    addProperty("retrievedAtMillis", item.source.retrievedAtMillis)
+                                    addProperty("excerpt", item.excerpts.first())
+                                    add("excerpts", JsonArray().apply { item.excerpts.forEach(::add) })
+                                },
+                            )
+                        }
+                    },
+                )
+            }.toString()
+        }
+    }
+    is ToolResult.Failure -> JsonObject().apply {
+        addProperty("kind", "failure")
+        addProperty("reason", result.reason.name)
+    }.toString()
+}
 
 internal fun calculatorApplicationTool(
     engine: LocalMathEngine,
@@ -527,6 +672,8 @@ internal const val WIKIPEDIA_PAGE_SUMMARY_DISPLAY_NAME = "Wikipedia page summary
 internal const val WIKIPEDIA_ON_THIS_DAY_TOOL_NAME = "wikipedia_on_this_day"
 internal const val WIKIPEDIA_ON_THIS_DAY_DISPLAY_NAME = "Wikipedia events by date"
 internal const val WEB_SEARCH_DISPLAY_NAME = "Web search"
+internal const val WEB_SEARCH_TOP_RESULTS_TOOL_NAME = "web_search_top_results"
+internal const val WEB_SEARCH_CONTENT_TOOL_NAME = "web_search_content"
 internal const val CALCULATOR_DISPLAY_NAME = "Local calculator"
 
 private const val DEFAULT_LANGUAGE = "en"
@@ -540,6 +687,12 @@ private const val WIKIPEDIA_ON_THIS_DAY_INPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"month":{"type":"integer","minimum":1,"maximum":12},"day":{"type":"integer","minimum":1,"maximum":31},"language":{"type":"string","pattern":"^[a-z]{2,3}$"}},"required":["month","day","language"]}"""
 private const val WEB_SEARCH_INPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"]}"""
+private const val WEB_SEARCH_RESULTS_INPUT_SCHEMA =
+    """{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","minLength":1,"maxLength":400},"limit":{"type":"integer","minimum":1,"maximum":10}},"required":["query","limit"]}"""
+private const val WEB_SEARCH_RESULTS_OUTPUT_SCHEMA =
+    """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"results":{"type":"array","maxItems":10,"items":{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string","maxLength":200},"canonicalUrl":{"type":"string","maxLength":2048}},"required":["title","canonicalUrl"]}},"provider":{"type":"string"},"retrievedAtMillis":{"type":"integer"},"reason":{"type":"string"}},"required":["kind"]}"""
+private const val WEB_SEARCH_CONTENT_OUTPUT_SCHEMA =
+    """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"results":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string","maxLength":200},"canonicalUrl":{"type":"string","maxLength":2048},"provider":{"type":"string"},"retrievedAtMillis":{"type":"integer"},"excerpt":{"type":"string","maxLength":500},"excerpts":{"type":"array","maxItems":2,"items":{"type":"string","maxLength":500}}},"required":["title","canonicalUrl","provider","retrievedAtMillis","excerpt","excerpts"]}},"reason":{"type":"string"}},"required":["kind"]}"""
 private const val CALCULATOR_INPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"expression":{"type":"string","maxLength":512}},"required":["expression"]}"""
 private const val KNOWLEDGE_OUTPUT_SCHEMA =

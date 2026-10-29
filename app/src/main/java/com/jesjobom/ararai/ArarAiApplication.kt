@@ -16,6 +16,9 @@ import com.jesjobom.ararai.engine.androidLocalLlmRecoveryGate
 import com.jesjobom.ararai.engine.prepareLiteRtLmCacheDir
 import com.jesjobom.ararai.knowledge.EncryptedWebSearchPreferences
 import com.jesjobom.ararai.knowledge.FallbackKnowledgeTool
+import com.jesjobom.ararai.knowledge.FallbackWebSearchResultsTool
+import com.jesjobom.ararai.knowledge.ProviderWebSearchResultsTool
+import com.jesjobom.ararai.knowledge.WebSearchProvider
 import com.jesjobom.ararai.knowledge.WebSearchToolFactory
 import com.jesjobom.ararai.knowledge.WikipediaKnowledgeTool
 import com.jesjobom.ararai.knowledge.WikipediaOnThisDayKnowledgeTool
@@ -114,6 +117,8 @@ class ArarAiApplication :
 
     val instructionPreferences by lazy { SharedPreferencesInstructionPreferences(this) }
 
+    val widgetToolPreferences by lazy { com.jesjobom.ararai.widget.SharedPreferencesWidgetToolPreferences(this) }
+
     val reportDeliveryReceiptStore by lazy { SharedPreferencesReportDeliveryReceiptStore(this) }
 
     val reportDeliveryScheduler by lazy {
@@ -186,13 +191,43 @@ class ArarAiApplication :
             wikipediaOnThisDayTool,
             state = {
                 ApplicationToolOperationalState(
-                    enabled = instructionPreferences.settings.value.wikipediaEnabled,
+                    enabled = widgetToolPreferences.wikipediaEnabled.value,
                     ready = true,
                 )
             },
             summaryTool = wikipediaPageSummaryTool,
+            webResultsTool = {
+                val configured = webSearchPreferences.settings.value.configuredProviders
+                listOf(
+                    WebSearchProvider.Exa,
+                    WebSearchProvider.Tavily,
+                ).filter(configured::contains)
+                    .map { provider ->
+                        ProviderWebSearchResultsTool(provider, token = { webSearchPreferences.token(provider) })
+                    }.takeIf(List<*>::isNotEmpty)
+                    ?.let(::FallbackWebSearchResultsTool)
+            },
+            webSearchState = {
+                ApplicationToolOperationalState(
+                    enabled = widgetToolPreferences.webSearchEnabled.value && BuildConfig.EXPERIMENTAL_WEB_SEARCH,
+                    ready = webSearchPreferences.settings.value.configuredProviders.isNotEmpty(),
+                )
+            },
+            webContentTool = {
+                webSearchPreferences.settings.value.configuredProviders
+                    .let { configured ->
+                        listOf(WebSearchProvider.Exa, WebSearchProvider.Tavily).filter(configured::contains)
+                    }
+                    .map { provider ->
+                        webSearchToolFactory.create(provider) { webSearchPreferences.token(provider) }
+                    }
+                    .takeIf(List<*>::isNotEmpty)
+                    ?.let(::FallbackKnowledgeTool)
+            },
         )
     }
+
+    val widgetToolContracts get() = managedWidgetToolRegistry.descriptors()
 
     val liteRtLmRuntimeTelemetry by lazy {
         LiteRtLmRuntimeTelemetry.android(

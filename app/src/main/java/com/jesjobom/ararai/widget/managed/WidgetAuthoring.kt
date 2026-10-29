@@ -117,6 +117,7 @@ internal object WidgetProposalParser {
 internal data class WidgetAuthoringPrompt(
     val userInstruction: String,
     val apiContextJson: String,
+    val existingWidgetTools: Set<WidgetToolCapability> = emptySet(),
 ) {
     init {
         require(userInstruction.isNotBlank() && userInstruction.length <= MAX_AUTHORING_PROMPT_CHARS)
@@ -139,14 +140,7 @@ internal object WidgetAuthoringContextBuilder {
             (WidgetProgramParser.parse(revision.manifestJson, revision.source) as? WidgetProgramValidationResult.Valid)
                 ?.program?.manifest?.capabilities?.tools.orEmpty()
         }.orEmpty()
-        val widgetToolContracts = toolContracts
-            .filter { ApplicationToolConsumer.Widget in it.consumers }
-            .groupBy(ApplicationToolContract::id)
-            .values
-            .flatMap { versions ->
-                val latest = versions.maxBy(ApplicationToolContract::version)
-                versions.filter { it == latest || WidgetToolCapability(it.id, it.version) in currentTools }
-            }
+        val widgetToolContracts = toolContracts.authoringWidgetContracts(currentTools)
         val root = JsonObject().apply {
             addProperty("widgetApiVersion", WidgetRuntimePolicy.WIDGET_API_VERSION)
             add("authoringTask", authoringTaskContext(isEdit = currentDefinition != null))
@@ -179,7 +173,7 @@ internal object WidgetAuthoringContextBuilder {
             }
             add("currentWidget", currentDefinition?.toAuthoringJson(currentRevision!!) ?: JsonNull.INSTANCE)
         }
-        return WidgetAuthoringPrompt(userInstruction, StrictJson.canonical(root))
+        return WidgetAuthoringPrompt(userInstruction, StrictJson.canonical(root), currentTools)
     }
 
     private fun authoringTaskContext(isEdit: Boolean): JsonObject = JsonObject().apply {

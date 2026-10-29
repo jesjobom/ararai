@@ -34,9 +34,41 @@ import org.junit.Test
 
 class WidgetAuthoringTest {
     @Test
+    fun `new authoring offers both web search tools but not Chat contract`() {
+        val contracts = listOf(
+            widgetContract().copy(id = "web_search", version = 1, consumers = setOf(ApplicationToolConsumer.Model)),
+            widgetContract().copy(id = "web_search_top_results", version = 1),
+            widgetContract().copy(id = "web_search_content", version = 1),
+        )
+
+        assertEquals(
+            listOf("web_search_top_results", "web_search_content"),
+            contracts.authoringWidgetContracts().map(ApplicationToolContract::id),
+        )
+        val prompt = WidgetAuthoringContextBuilder.build("Show three page excerpts", contracts)
+        assertEquals(
+            listOf("web_search_content", "web_search_top_results"),
+            JsonParser.parseString(prompt.apiContextJson).asJsonObject.getAsJsonArray("tools")
+                .map { it.asJsonObject["id"].asString },
+        )
+    }
+
+    @Test
     fun `new authoring shows latest page contract while editing keeps referenced legacy version`() {
         val v2 = widgetContract().copy(version = 2)
         val contracts = listOf(widgetContract(), v2, onThisDayContract())
+        assertEquals(
+            listOf(2),
+            contracts.authoringWidgetContracts()
+                .filter { it.id == "wikipedia_pages" }
+                .map { it.version },
+        )
+        assertEquals(
+            listOf(1, 2),
+            contracts.authoringWidgetContracts(setOf(WidgetToolCapability("wikipedia_pages", 1)))
+                .filter { it.id == "wikipedia_pages" }
+                .map { it.version },
+        )
 
         val newTools = JsonParser.parseString(
             WidgetAuthoringContextBuilder.build("Show a page", contracts).apiContextJson,

@@ -17,10 +17,17 @@ data class KnowledgeSource(
     val retrievedAtMillis: Long,
 )
 
+/** Evidence already admitted to the bounded Chat context, retained structurally for other consumers. */
+data class WebEvidenceItem(
+    val source: KnowledgeSource,
+    val excerpts: List<String>,
+)
+
 sealed interface ToolResult {
     data class Success(
         val untrustedContext: String,
         val sources: List<KnowledgeSource>,
+        val webEvidence: List<WebEvidenceItem> = emptyList(),
     ) : ToolResult
 
     data class Failure(
@@ -76,7 +83,7 @@ class FallbackKnowledgeTool(
     }
 }
 
-private fun ToolFailureReason.allowsProviderFallback(): Boolean = when (this) {
+internal fun ToolFailureReason.allowsProviderFallback(): Boolean = when (this) {
     ToolFailureReason.InvalidArguments,
     ToolFailureReason.Cancelled,
     -> false

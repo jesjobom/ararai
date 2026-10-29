@@ -62,7 +62,9 @@ internal class QuickJsWidgetJavaScriptEngine(
 
 internal object WidgetRuntimeStandardLibrary {
     const val WRAPPER_ENTRYPOINT = "__araraiInvokeWithRuntime"
-    const val MAX_WRAPPER_BYTES = 8 * 1024
+
+    // Includes the application-owned bounded collection renderers as well as the invocation shim.
+    const val MAX_WRAPPER_BYTES = 12 * 1024
 
     fun wrap(source: String, entrypoint: String): String {
         require(ENTRYPOINT_PATTERN.matches(entrypoint))
@@ -192,7 +194,19 @@ internal object WidgetRuntimeStandardLibrary {
     const __araraiTitle = __araraiRuntime.get(__araraiOutcomes, __araraiName,
       __araraiPicked.path+'.'+__araraiConfig.title);
     if (typeof __araraiTitle !== 'string') throw new TypeError('card title is not text');
-    const __araraiContent = [__araraiTitle];
+    let __araraiDisplayTitle = __araraiTitle;
+    if (__araraiConfig.titleSuffixField !== undefined) {
+      if (typeof __araraiConfig.titleSuffixField !== 'string') throw new TypeError('invalid title suffix field');
+      const __araraiSuffixValue = __araraiRuntime.get(__araraiOutcomes, __araraiName,
+        __araraiPicked.path+'.'+__araraiConfig.titleSuffixField);
+      if (!(typeof __araraiSuffixValue === 'string' && __araraiSuffixValue.length > 0 &&
+          __araraiSuffixValue.length <= 20) &&
+          !(typeof __araraiSuffixValue === 'number' && Number.isSafeInteger(__araraiSuffixValue))) {
+        throw new TypeError('invalid title suffix');
+      }
+      __araraiDisplayTitle += ' (' + __araraiSuffixValue + ')';
+    }
+    const __araraiContent = [__araraiDisplayTitle];
     const __araraiResult = __araraiOutcome(__araraiOutcomes, __araraiName);
     const __araraiDefaultBody = __araraiResult && __araraiResult.payload &&
       __araraiResult.payload.defaultBodyField === 'extract' ? 'extract' : undefined;
@@ -211,12 +225,53 @@ internal object WidgetRuntimeStandardLibrary {
       ? 'canonicalUrl' : __araraiConfig.url;
     if (__araraiUrlField !== undefined) {
       if (typeof __araraiUrlField !== 'string') throw new TypeError('invalid URL field');
-      const __araraiLabel = __araraiConfig.linkLabel === undefined ? __araraiTitle : __araraiConfig.linkLabel;
+      const __araraiLabel = __araraiConfig.linkLabel === undefined ? __araraiDisplayTitle : __araraiConfig.linkLabel;
       if (typeof __araraiLabel !== 'string') throw new TypeError('invalid link label');
       __araraiContent.push(__araraiRuntime.linkFor(__araraiOutcomes, __araraiName,
         __araraiPicked.path+'.'+__araraiUrlField, __araraiLabel));
     }
     return __araraiRuntime.card(__araraiContent);
+  };
+  __araraiRuntime.collectionList = function(__araraiOutcomes, __araraiName, __araraiConfig) {
+    if (!__araraiConfig || typeof __araraiConfig !== 'object' ||
+        typeof __araraiConfig.items !== 'string' ||
+        typeof __araraiConfig.title !== 'string' ||
+        typeof __araraiConfig.fallback !== 'string') throw new TypeError('invalid list configuration');
+    if (!__araraiRuntime.isSuccess(__araraiOutcomes, __araraiName)) {
+      return __araraiRuntime.card(__araraiConfig.fallback);
+    }
+    const __araraiItems = __araraiRuntime.getArray(__araraiOutcomes, __araraiName, __araraiConfig.items);
+    if (__araraiItems.length === 0) return __araraiRuntime.card(__araraiConfig.fallback);
+    const __araraiRows = [];
+    for (let __araraiIndex = 0; __araraiIndex < __araraiItems.length && __araraiIndex < 10; __araraiIndex++) {
+      const __araraiPath = __araraiConfig.items + '.' + __araraiIndex;
+      const __araraiTitle = __araraiRuntime.get(__araraiOutcomes, __araraiName,
+        __araraiPath + '.' + __araraiConfig.title);
+      if (typeof __araraiTitle !== 'string') throw new TypeError('list title is not text');
+      const __araraiContent = [];
+      const __araraiLabel = (__araraiIndex + 1) + '. ' + __araraiTitle;
+      const __araraiUrlField = __araraiConfig.url === undefined &&
+        __araraiItems[__araraiIndex] &&
+        typeof __araraiItems[__araraiIndex].canonicalUrl === 'string' &&
+        __araraiItems[__araraiIndex].canonicalUrl.startsWith('https://')
+        ? 'canonicalUrl' : __araraiConfig.url;
+      if (__araraiUrlField === undefined) {
+        __araraiContent.push(__araraiLabel);
+      } else {
+        if (typeof __araraiUrlField !== 'string') throw new TypeError('invalid list URL field');
+        __araraiContent.push(__araraiRuntime.linkFor(__araraiOutcomes, __araraiName,
+          __araraiPath + '.' + __araraiUrlField, __araraiLabel));
+      }
+      if (__araraiConfig.body !== undefined) {
+        if (typeof __araraiConfig.body !== 'string') throw new TypeError('invalid list body field');
+        const __araraiBody = __araraiRuntime.get(__araraiOutcomes, __araraiName,
+          __araraiPath + '.' + __araraiConfig.body);
+        if (typeof __araraiBody !== 'string') throw new TypeError('list body is not text');
+        __araraiContent.push(__araraiBody);
+      }
+      __araraiRows.push(__araraiRuntime.card(__araraiContent).child);
+    }
+    return __araraiRuntime.card(__araraiRows);
   };
   return Object.freeze(__araraiRuntime);
 }"""

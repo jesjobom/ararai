@@ -339,7 +339,7 @@ class ManagedWidgetEndToEndTest {
             assertTrue(repository.listDefinitions().none { it.id == created.id })
             assertTrue(created.id in scheduler.cancelled)
         }
-        assertEquals(model.loadCount, model.unloadCount)
+        assertEquals(model.loadCount * 2, model.unloadCount)
         assertEquals(18, model.loadCount)
         assertEquals(2, repairsObserved)
     }

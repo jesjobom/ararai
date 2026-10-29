@@ -90,8 +90,52 @@ class WidgetAuthoringWorkflowCoordinatorTest {
             }
         }
         assertEquals(snapshot.session.revision, coordinator.activeSession.value?.session?.revision)
-        assertTrue(coordinator.acceptCurrent("accept") is AcceptWidgetAuthoringStageResult.FeasibilityStopped)
+        val stopped = coordinator.advanceAndStartNext(MODEL, INFERENCE, DIGEST, "accept", "next")
+        assertTrue(stopped.accepted is AcceptWidgetAuthoringStageResult.FeasibilityStopped)
+        assertEquals(null, stopped.nextAttempt)
         assertTrue(snapshot.checkpoints.isEmpty())
+    }
+
+    @Test
+    fun `one advance accepts a successful stage and starts the next attempt`() = runTest {
+        val workflowRepository = DispatcherWidgetAuthoringWorkflowRepository(store, UnconfinedTestDispatcher())
+        var executions = 0
+        val controller = ResumableWidgetAuthoringController(
+            this,
+            workflowRepository,
+            WidgetAuthoringAttemptExecutor { _, _, _, _ ->
+                executions++
+                val active = requireNotNull(workflowRepository.activeSession.value)
+                val attemptId = requireNotNull(active.session.activeAttemptId)
+                workflowRepository.markAttemptRunning(active.session.id, attemptId)
+                val firstStage = executions == 1
+                workflowRepository.completeAttempt(
+                    CompleteWidgetAuthoringAttempt(
+                        active.session.id,
+                        attemptId,
+                        if (firstStage) WidgetAuthoringAttemptStatus.Succeeded else WidgetAuthoringAttemptStatus.Failed,
+                        if (firstStage) ACHIEVABLE else null,
+                        if (firstStage) null else WidgetAuthoringStageFailureCode.InvalidAlgorithm,
+                    ),
+                )
+            },
+        )
+        controller.initialize()
+        val coordinator = coordinator(controller)
+        coordinator.begin(MODEL, INFERENCE, DIGEST, "Build a widget", null)
+        coordinator.startCurrent(MODEL, INFERENCE, DIGEST, "first")
+        runCurrent()
+
+        val advanced = coordinator.advanceAndStartNext(MODEL, INFERENCE, DIGEST, "accept", "next")
+        assertTrue(advanced.accepted is AcceptWidgetAuthoringStageResult.Advanced)
+        assertTrue(advanced.nextAttempt is RunWidgetAuthoringStageResult.Submitted)
+        runCurrent()
+
+        val snapshot = requireNotNull(coordinator.activeSession.value)
+        assertEquals(2, executions)
+        assertEquals(WidgetAuthoringStageKey.Algorithm, snapshot.session.currentStage)
+        assertEquals(2, snapshot.attempts.size)
+        assertEquals(WidgetAuthoringSessionStatus.AwaitingRetry, snapshot.session.status)
     }
 
     @Test
@@ -165,5 +209,8 @@ class WidgetAuthoringWorkflowCoordinatorTest {
         val DIGEST = "a".repeat(64)
         const val UNACHIEVABLE =
             "{\"outcome\":\"unachievable\",\"message\":\"No tools\",\"periodicIntervalHours\":null,\"toolIds\":[]}"
+        const val ACHIEVABLE =
+            "{\"outcome\":\"achievable\",\"message\":\"Use local context\"," +
+                "\"periodicIntervalHours\":null,\"toolIds\":[]}"
     }
 }

@@ -24,6 +24,7 @@ internal const val SUBMIT_WIDGET_CALL_FUNCTION_TOOL = "submit_widget_call_functi
 internal const val SUBMIT_WIDGET_PLAN_FUNCTION_TOOL = "submit_widget_plan_function"
 internal const val SUBMIT_WIDGET_RENDER_FUNCTION_TOOL = "submit_widget_render_function"
 internal const val SUBMIT_WIDGET_COLLECTION_CARD_TOOL = "submit_widget_collection_card"
+internal const val SUBMIT_WIDGET_COLLECTION_LIST_TOOL = "submit_widget_collection_list"
 
 internal object WidgetAuthoringPipelinePolicy {
     const val MAX_TOOLS = WidgetRuntimePolicy.MAX_TOOL_CALLS
@@ -202,6 +203,7 @@ internal enum class WidgetAlgorithmStepKind(val wireName: String) {
 
 internal enum class WidgetRenderCapability(val wireName: String) {
     CollectionCard("collection_card"),
+    CollectionList("collection_list"),
     CustomSource("custom_source"),
 }
 
@@ -273,8 +275,12 @@ internal object WidgetAlgorithmParser {
             WidgetRenderCapability.entries.single { it.wireName == value.asString }
         }
         require(!requireRenderCapability || renderCapability != null)
-        require(renderCapability != WidgetRenderCapability.CollectionCard || calls.isNotEmpty())
-        if (requireRenderCapability && renderCapability == WidgetRenderCapability.CollectionCard) {
+        require(renderCapability !in setOf(WidgetRenderCapability.CollectionCard, WidgetRenderCapability.CollectionList) || calls.isNotEmpty())
+        if (requireRenderCapability && renderCapability in setOf(
+                WidgetRenderCapability.CollectionCard,
+                WidgetRenderCapability.CollectionList,
+            )
+        ) {
             require(canUseCollectionCard(steps))
         }
         WidgetAlgorithmParseResult.Valid(
@@ -531,11 +537,13 @@ internal data class WidgetAuthoringAttemptBudget(
 internal object WidgetAuthoringStageSchemas {
     val feasibility: String = """{"name":"$SUBMIT_WIDGET_FEASIBILITY_TOOL","description":"Submit one small feasibility decision. For achievable, message is a concise display title of at most 80 characters, not a copy of the instruction. The application derives protocol metadata, tool versions, runtime grants, presentation grants, enablement, and terminal normalization.","parameters":{"type":"object","additionalProperties":false,"properties":{"outcome":{"type":"string","enum":["achievable","unachievable","needs_clarification"]},"message":{"type":"string","minLength":1,"maxLength":512},"periodicIntervalHours":{"type":["integer","null"],"enum":[null,1,6,12,24]},"toolIds":{"type":"array","maxItems":4,"uniqueItems":true,"items":{"type":"string"}}},"required":["outcome","message","periodicIntervalHours","toolIds"]}}"""
 
-    val algorithm: String = """{"name":"$SUBMIT_WIDGET_ALGORITHM_TOOL","description":"Submit one bounded typed algorithm. Protocol metadata, runtime authority, and tool versions are application-derived. This captures data only.","parameters":{"type":"object","additionalProperties":false,"properties":{"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"kind":{"type":"string","enum":["runtime_input","transform","tool_call"]},"objective":{"type":"string","minLength":1,"maxLength":512},"dependsOn":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"selectionMode":{"type":"string","enum":["first","seeded_random"],"description":"Required for wikipedia_pages version 2 tool calls; omit for other steps."},"toolId":{"type":["string","null"],"description":"Required only when kind is tool_call; otherwise omit."}},"required":["id","kind","objective","dependsOn"]}},"presentationObjective":{"type":"string","minLength":1,"maxLength":512},"renderCapability":{"type":"string","enum":["collection_card","custom_source"]}},"required":["steps","presentationObjective","renderCapability"]}}"""
+    val algorithm: String = """{"name":"$SUBMIT_WIDGET_ALGORITHM_TOOL","description":"Submit one bounded typed algorithm. Protocol metadata, runtime authority, and tool versions are application-derived. This captures data only.","parameters":{"type":"object","additionalProperties":false,"properties":{"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"kind":{"type":"string","enum":["runtime_input","transform","tool_call"]},"objective":{"type":"string","minLength":1,"maxLength":512},"dependsOn":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"selectionMode":{"type":"string","enum":["first","seeded_random"],"description":"Required for wikipedia_pages version 2 tool calls; omit for other steps."},"toolId":{"type":["string","null"],"description":"Required only when kind is tool_call; otherwise omit."}},"required":["id","kind","objective","dependsOn"]}},"presentationObjective":{"type":"string","minLength":1,"maxLength":512},"renderCapability":{"type":"string","enum":["collection_card","collection_list","custom_source"]}},"required":["steps","presentationObjective","renderCapability"]}}"""
 
     fun sourceFragment(toolName: String): String = """{"name":"$toolName","description":"Submit one bounded JavaScript function source. Artifact identity and signature are fixed by the application. This captures source only and executes nothing.","parameters":{"type":"object","additionalProperties":false,"properties":{"source":{"type":"string","minLength":1,"maxLength":6144}},"required":["source"]}}"""
 
-    val collectionCard: String = """{"name":"$SUBMIT_WIDGET_COLLECTION_CARD_TOOL","description":"Submit one declarative collection card. Copy alias, array path and item property names from the supplied choices; only fallback is literal display text. Do not write JavaScript.","parameters":{"type":"object","additionalProperties":false,"properties":{"alias":{"type":"string","description":"Exact tool-result alias, not tool id"},"items":{"type":"string","description":"Exact array path relative to payload"},"title":{"type":"string","description":"Exact text property name on an array item, not display text"},"body":{"type":"string","description":"Optional text property name on an array item, not display text"},"url":{"type":"string","description":"Optional HTTPS URL property name on an array item"},"fallback":{"type":"string","minLength":1,"maxLength":256,"description":"Literal text for failure or empty array"},"selection":{"type":"string","enum":["first","seeded_random"]}},"required":["alias","items","title","fallback","selection"]}}"""
+    val collectionCard: String = """{"name":"$SUBMIT_WIDGET_COLLECTION_CARD_TOOL","description":"Submit one declarative collection card. Copy alias, array path and item property names from the supplied choices; only fallback is literal display text. Do not write JavaScript.","parameters":{"type":"object","additionalProperties":false,"properties":{"alias":{"type":"string","description":"Exact tool-result alias, not tool id"},"items":{"type":"string","description":"Exact array path relative to payload"},"title":{"type":"string","description":"Exact text property name on an array item, not display text"},"titleSuffixField":{"type":"string","description":"Optional item string or integer property to append in parentheses to the title"},"body":{"type":"string","description":"Optional text property name on an array item, not display text"},"url":{"type":"string","description":"Optional HTTPS URL property name on an array item"},"fallback":{"type":"string","minLength":1,"maxLength":256,"description":"Literal text for failure or empty array"},"selection":{"type":"string","enum":["first","seeded_random"]}},"required":["alias","items","title","fallback","selection"]}}"""
+
+    val collectionList: String = """{"name":"$SUBMIT_WIDGET_COLLECTION_LIST_TOOL","description":"Submit one declarative list of up to ten unmodified results from one tool array. Copy alias, array path and item property names; only fallback is literal display text. Do not write JavaScript.","parameters":{"type":"object","additionalProperties":false,"properties":{"alias":{"type":"string","description":"Exact tool-result alias, not tool id"},"items":{"type":"string","description":"Exact array path relative to payload"},"title":{"type":"string","description":"Exact text property name on an array item, not display text"},"body":{"type":"string","description":"Optional text property name on an array item, not display text"},"url":{"type":"string","description":"Optional HTTPS URL property name on an array item"},"fallback":{"type":"string","minLength":1,"maxLength":256,"description":"Literal text for failure or empty array"}},"required":["alias","items","title","fallback"]}}"""
 }
 
 internal fun WidgetFeasibilityArtifact.toUntrustedProposal(source: String): UntrustedWidgetProposal = UntrustedWidgetProposal(

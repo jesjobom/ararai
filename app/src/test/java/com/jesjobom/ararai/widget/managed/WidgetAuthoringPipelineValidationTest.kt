@@ -23,6 +23,69 @@ import org.junit.Test
 
 class WidgetAuthoringPipelineValidationTest {
     @Test
+    fun `top ten web request rejects a call that fetches only one result`() = runTest {
+        val web = WidgetToolCapability("web_search_top_results", 1)
+        val registry = ApplicationToolRegistry(
+            listOf(
+                applicationToolBinding(
+                    contract = ApplicationToolContract(
+                        id = web.id,
+                        version = web.version,
+                        displayName = "Web search",
+                        category = ApplicationToolCategory.ExternalKnowledge,
+                        consumers = setOf(ApplicationToolConsumer.Widget),
+                        inputSchemaJson = """{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query","limit"]}""",
+                        outputSchemaJson = """{"type":"object"}""",
+                    ),
+                    state = { ApplicationToolOperationalState(enabled = true, ready = true) },
+                    executor = ApplicationTool("Web search", ApplicationToolCategory.ExternalKnowledge) { _: Unit -> Unit },
+                    decodeArguments = { arguments -> Unit.takeIf { arguments.get("limit")?.asInt in 1..10 } },
+                    encodeResult = { "{}" },
+                ),
+            ),
+        )
+        val step = ALGORITHM.toolCallSteps.single().copy(tool = web)
+        val feasibility = FEASIBILITY.copy(tools = listOf(WidgetSelectedTool(web, "fixture")))
+        val call = WidgetSourceFragmentArtifact(
+            "events",
+            "buildCallEvents",
+            listOf("runtime"),
+            "function buildCallEvents(runtime) { return {query:'Petrobras',limit:10}; }",
+        )
+        var resultCount = 1
+        val validator = WidgetAuthoringPipelineValidator(
+            registry,
+            WidgetJavaScriptEngine { _, _, _, _ ->
+                WidgetScriptResult.Success("""{"query":"Petrobras","limit":$resultCount}""")
+            },
+        )
+
+        assertEquals(
+            WidgetAuthoringStageFailureCode.InvalidToolArguments,
+            validator.validateCallFunction(call, step, feasibility, RUNTIME, requiredWebResultsLimit = 10),
+        )
+        resultCount = 10
+        assertEquals(null, validator.validateCallFunction(call, step, feasibility, RUNTIME, requiredWebResultsLimit = 10))
+    }
+
+    @Test
+    fun `collection list rejects a presentation that drops returned items`() = runTest {
+        val algorithm = ALGORITHM.copy(renderCapability = WidgetRenderCapability.CollectionList)
+        val validator = validator { outcomes ->
+            if (outcomes.contains("\"events\":[]") || outcomes.contains("\"status\":\"failure\"")) {
+                WidgetScriptResult.Success("""{"type":"card","child":{"type":"text","text":"No events","tone":"neutral"}}""")
+            } else {
+                WidgetScriptResult.Success("""{"type":"column","children":[{"type":"card","child":{"type":"text","text":"One event","tone":"neutral"}}]}""")
+            }
+        }
+
+        assertEquals(
+            WidgetAuthoringStageFailureCode.InvalidPresentationSuccessHandling,
+            validator.validateRenderFunction(emptyList(), RENDER, algorithm, FEASIBILITY, RUNTIME),
+        )
+    }
+
+    @Test
     fun `nonempty success must not render the empty-result fallback`() = runTest {
         assertEquals(
             WidgetAuthoringStageFailureCode.InvalidPresentationSuccessHandling,

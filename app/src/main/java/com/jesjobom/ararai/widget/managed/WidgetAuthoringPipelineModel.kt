@@ -325,8 +325,8 @@ internal fun WidgetAuthoringRoundRequest.toUserText(): String = buildString {
         }
         append("\nCorrection: ")
         append(
-            if (toolName == SUBMIT_WIDGET_COLLECTION_CARD_TOOL) {
-                "Return the complete collection card configuration. Copy title, optional body and url " +
+            if (toolName == SUBMIT_WIDGET_COLLECTION_CARD_TOOL || toolName == SUBMIT_WIDGET_COLLECTION_LIST_TOOL) {
+                "Return the complete collection configuration. Copy title, optional body and url " +
                     "as exact itemFields property names, never as a title or instruction sentence. " +
                     "Only fallback is literal text. Use the enum choices in the tool schema; do not write JavaScript."
             } else if (toolName == SUBMIT_WIDGET_CALL_FUNCTION_TOOL) {
@@ -404,6 +404,10 @@ private val REPAIR_INSTRUCTIONS = mapOf(
     WidgetAuthoringStageFailureCode.InvalidAlgorithm to
         "Preserve each required data operation in the step graph. Give dependent steps a dependsOn list; " +
         "selectionMode belongs only to wikipedia_pages version 2 tool calls, never to other tools. " +
+        "For a best/first ranked web_search_content result, the provider already ranks the array: " +
+        "use one tool call and collection_card without a post-result transform. " +
+        "For a Wikipedia date event with year in title, use one wikipedia_on_this_day call and " +
+        "collection_card; the application appends the year. " +
         "Use collection_card only for one direct item " +
         "from one tool result; use custom_source when a transform depends on tool results or multiple results " +
         "must be considered. A runtime-dependent query before the tool call may still use collection_card.",
@@ -491,4 +495,5 @@ private val STAGE_TOOL_NAMES = setOf(
     SUBMIT_WIDGET_PLAN_FUNCTION_TOOL,
     SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
     SUBMIT_WIDGET_COLLECTION_CARD_TOOL,
+    SUBMIT_WIDGET_COLLECTION_LIST_TOOL,
 )

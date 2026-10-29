@@ -25,6 +25,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.R
+import com.jesjobom.ararai.knowledge.validWidgetExternalUrl
 import com.jesjobom.ararai.knowledge.validWikipediaArticleUrl
 import com.jesjobom.ararai.widget.runtime.WidgetPresentationCodec
 import com.jesjobom.ararai.widget.runtime.WidgetPresentationNode
@@ -35,15 +36,17 @@ internal fun decodeManagedWidgetPresentationOrNull(raw: String): WidgetPresentat
 
 internal fun allowedManagedWidgetArticleUrl(url: String): String? = url.takeIf(::validWikipediaArticleUrl)
 
+internal fun allowedManagedWidgetLinkUrl(url: String): String? = url.takeIf(::validWidgetExternalUrl)
+
 @Composable
 internal fun ManagedWidgetPresentation(
     presentation: WidgetPresentationNode,
-    onOpenWikipediaArticle: (String) -> Unit,
+    onOpenLink: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     WidgetPresentationContent(
         node = presentation,
-        onOpenWikipediaArticle = onOpenWikipediaArticle,
+        onOpenLink = onOpenLink,
         modifier = modifier,
     )
 }
@@ -51,14 +54,14 @@ internal fun ManagedWidgetPresentation(
 @Composable
 private fun WidgetPresentationContent(
     node: WidgetPresentationNode,
-    onOpenWikipediaArticle: (String) -> Unit,
+    onOpenLink: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (node) {
         is WidgetPresentationNode.Card -> Card(modifier = modifier) {
             WidgetPresentationContent(
                 node = node.child,
-                onOpenWikipediaArticle = onOpenWikipediaArticle,
+                onOpenLink = onOpenLink,
                 modifier = Modifier.padding(16.dp),
             )
         }
@@ -67,7 +70,7 @@ private fun WidgetPresentationContent(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             node.children.forEach { child ->
-                WidgetPresentationContent(child, onOpenWikipediaArticle)
+                WidgetPresentationContent(child, onOpenLink)
             }
         }
         is WidgetPresentationNode.Row -> Row(
@@ -76,7 +79,7 @@ private fun WidgetPresentationContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             node.children.forEach { child ->
-                WidgetPresentationContent(child, onOpenWikipediaArticle)
+                WidgetPresentationContent(child, onOpenLink)
             }
         }
         is WidgetPresentationNode.Text -> Text(
@@ -98,10 +101,10 @@ private fun WidgetPresentationContent(
             modifier = modifier,
         )
         is WidgetPresentationNode.HttpsLink -> {
-            val allowedUrl = allowedManagedWidgetArticleUrl(node.url)
+            val allowedUrl = allowedManagedWidgetLinkUrl(node.url)
             if (allowedUrl != null) {
                 TextButton(
-                    onClick = { onOpenWikipediaArticle(allowedUrl) },
+                    onClick = { onOpenLink(allowedUrl) },
                     modifier = modifier,
                 ) {
                     Icon(Icons.Filled.Link, contentDescription = null)

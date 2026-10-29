@@ -100,11 +100,11 @@ class LauncherWidgetSnapshotTest {
     }
 
     @Test
-    fun `does not expose a cached link outside the Wikipedia allowlist`() {
+    fun `does not expose unsafe cached links`() {
         val presentation = WidgetPresentationNode.Column(
             listOf(
                 WidgetPresentationNode.Text("Event", "neutral"),
-                WidgetPresentationNode.HttpsLink("Unsafe", "https://evil.example/wiki/Event", "today", "page.url"),
+                WidgetPresentationNode.HttpsLink("Unsafe", "https://en.wikipedia.org/w/api.php", "today", "page.url"),
                 WidgetPresentationNode.HttpsLink(
                     "Read article",
                     "https://pt.wikipedia.org/wiki/Evento",
@@ -117,6 +117,42 @@ class LauncherWidgetSnapshotTest {
         val snapshot = LauncherWidgetSnapshotProjector.project(definition(), cache(presentation))
         assertEquals("Read article", snapshot.link?.label)
         assertTrue(snapshot.link?.url?.startsWith("https://pt.wikipedia.org/wiki/") == true)
+    }
+
+    @Test
+    fun `projects a public web search result link`() {
+        val presentation = WidgetPresentationNode.HttpsLink(
+            "Petrobras result",
+            "https://www.example.com/stocks/petrobras",
+            "search",
+            "results.0.canonicalUrl",
+        )
+
+        val snapshot = LauncherWidgetSnapshotProjector.project(definition(), cache(presentation))
+        assertEquals("Petrobras result", snapshot.headline)
+        assertEquals("https://www.example.com/stocks/petrobras", snapshot.link?.url)
+    }
+
+    @Test
+    fun `projects link-only result lists as visible launcher text`() {
+        val presentation = WidgetPresentationNode.Card(
+            WidgetPresentationNode.Column(
+                (1..10).map { index ->
+                    WidgetPresentationNode.HttpsLink(
+                        "$index. Result $index",
+                        "https://example.org/$index",
+                        "search",
+                        "results.${index - 1}.canonicalUrl",
+                    )
+                },
+            ),
+        )
+
+        val snapshot = LauncherWidgetSnapshotProjector.project(definition(), cache(presentation))
+        assertEquals("1. Result 1", snapshot.headline)
+        assertEquals((2..10).joinToString("\n") { "$it. Result $it" }, snapshot.body)
+        assertEquals("https://example.org/1", snapshot.link?.url)
+        assertEquals(LauncherWidgetState.Ready, snapshot.state)
     }
 
     @Test

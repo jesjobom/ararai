@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
@@ -52,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -75,6 +77,7 @@ import java.util.Date
 internal fun ManagedWidgetsRoute(
     controller: ManagedWidgetsController,
     onBack: () -> Unit,
+    onOpenTools: () -> Unit = {},
     onCreate: () -> Unit,
     onOpenWidget: (String) -> Unit,
 ) {
@@ -96,6 +99,7 @@ internal fun ManagedWidgetsRoute(
         items = items,
         loadFailed = failed,
         onBack = onBack,
+        onOpenTools = onOpenTools,
         onCreate = onCreate,
         onOpenWidget = onOpenWidget,
         onRetry = { reload += 1 },
@@ -130,6 +134,7 @@ internal fun ManagedWidgetsScreen(
     items: List<ManagedWidgetListItemUiState>?,
     loadFailed: Boolean,
     onBack: () -> Unit,
+    onOpenTools: () -> Unit = {},
     onCreate: () -> Unit,
     onOpenWidget: (String) -> Unit,
     onRetry: () -> Unit,
@@ -137,7 +142,15 @@ internal fun ManagedWidgetsScreen(
     toggleErrorWidgetId: String? = null,
     onEnabledChange: (String, Boolean) -> Unit,
 ) {
-    ArarAiScaffold(title = stringResource(R.string.widgets_title), onBack = onBack) { modifier ->
+    ArarAiScaffold(
+        title = stringResource(R.string.widgets_title),
+        onBack = onBack,
+        topBarActions = {
+            IconButton(onClick = onOpenTools, modifier = Modifier.testTag("widgets-open-tools")) {
+                Icon(Icons.Filled.Build, contentDescription = stringResource(R.string.widgets_tools_title))
+            }
+        },
+    ) { modifier ->
         Column(
             modifier = modifier
                 .verticalScroll(rememberScrollState())
@@ -253,7 +266,7 @@ internal fun ManagedWidgetDetailRoute(
     controller: ManagedWidgetsController,
     widgetId: String,
     onBack: () -> Unit,
-    onEdit: () -> Unit,
+    onEdit: (String?) -> Unit,
     onDeleted: () -> Unit,
     onDuplicated: (String) -> Unit,
 ) {
@@ -323,7 +336,7 @@ internal fun ManagedWidgetDetailScreen(
     loadFailed: Boolean,
     busy: Boolean,
     onBack: () -> Unit,
-    onEdit: () -> Unit,
+    onEdit: (String?) -> Unit,
     onRefresh: () -> Unit,
     onEnabledChange: (Boolean) -> Unit,
     onDuplicate: () -> Unit,
@@ -366,7 +379,7 @@ internal fun ManagedWidgetDetailScreen(
                         state = state,
                         busy = busy,
                         onEnabledChange = onEnabledChange,
-                        onEdit = onEdit,
+                        onEdit = { onEdit(state.revision.initialPrompt) },
                         onDuplicate = onDuplicate,
                         onDelete = { confirmDelete = true },
                     )
@@ -401,7 +414,7 @@ private fun WidgetPresentationSection(
         )
         state.presentation != null -> ManagedWidgetPresentation(
             presentation = state.presentation,
-            onOpenWikipediaArticle = onOpenArticle,
+            onOpenLink = onOpenArticle,
             modifier = Modifier.fillMaxWidth(),
         )
         else -> Text(stringResource(R.string.widget_no_presentation))
@@ -558,7 +571,7 @@ private fun WidgetRunHistory(widgetId: String, runs: List<WidgetRunRecord>) {
 }
 
 @Composable
-private fun WidgetSourceSection(source: String) {
+internal fun WidgetSourceSection(source: String) {
     Text(stringResource(R.string.widget_source), style = MaterialTheme.typography.titleMedium)
     val keywordColor = MaterialTheme.colorScheme.primary
     val stringColor = MaterialTheme.colorScheme.tertiary

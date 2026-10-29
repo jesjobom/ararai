@@ -1,6 +1,6 @@
 package com.jesjobom.ararai.widget.launcher
 
-import com.jesjobom.ararai.knowledge.validWikipediaArticleUrl
+import com.jesjobom.ararai.knowledge.validWidgetExternalUrl
 import com.jesjobom.ararai.widget.managed.ManagedWidgetDefinition
 import com.jesjobom.ararai.widget.managed.ManagedWidgetStatus
 import com.jesjobom.ararai.widget.managed.WidgetPresentationCache
@@ -50,6 +50,7 @@ internal object LauncherWidgetSnapshotProjector {
 
     private fun projectContent(presentation: WidgetPresentationNode): ProjectedContent {
         val text = mutableListOf<String>()
+        val linkLabels = mutableListOf<String>()
         var firstLink: LauncherWidgetLink? = null
         fun visit(node: WidgetPresentationNode) {
             when (node) {
@@ -58,14 +59,16 @@ internal object LauncherWidgetSnapshotProjector {
                 is WidgetPresentationNode.Row -> node.children.forEach(::visit)
                 is WidgetPresentationNode.Text -> node.text.trim().takeIf(String::isNotEmpty)?.let(text::add)
                 is WidgetPresentationNode.Value -> node.text.trim().takeIf(String::isNotEmpty)?.let(text::add)
-                is WidgetPresentationNode.HttpsLink -> if (firstLink == null && validWikipediaArticleUrl(node.url)) {
-                    firstLink = LauncherWidgetLink(node.label, node.url)
+                is WidgetPresentationNode.HttpsLink -> if (validWidgetExternalUrl(node.url)) {
+                    node.label.trim().takeIf(String::isNotEmpty)?.let(linkLabels::add)
+                    if (firstLink == null) firstLink = LauncherWidgetLink(node.label, node.url)
                 }
                 is WidgetPresentationNode.Icon -> Unit
             }
         }
         visit(presentation)
-        return ProjectedContent(text.firstOrNull().orEmpty(), text.drop(1).joinToString("\n"), firstLink)
+        val visibleText = text.ifEmpty { linkLabels }
+        return ProjectedContent(visibleText.firstOrNull().orEmpty(), visibleText.drop(1).joinToString("\n"), firstLink)
     }
 
     private data class ProjectedContent(val headline: String, val body: String, val link: LauncherWidgetLink?)

@@ -217,7 +217,7 @@ private suspend fun guardedProviderCall(
 }
 
 @Suppress("ReturnCount")
-private fun providerFailure(response: KnowledgeHttpResponse): ToolResult.Failure? {
+internal fun providerFailure(response: KnowledgeHttpResponse): ToolResult.Failure? {
     if (response.body.size > MAX_PROVIDER_RESPONSE_BYTES) {
         return ToolResult.Failure(ToolFailureReason.Unavailable)
     }
@@ -235,7 +235,7 @@ private fun providerFailure(response: KnowledgeHttpResponse): ToolResult.Failure
 }
 
 @Suppress("ReturnCount")
-private fun parseJsonObject(response: KnowledgeHttpResponse): JsonObject? {
+internal fun parseJsonObject(response: KnowledgeHttpResponse): JsonObject? {
     val decoded =
         runCatching {
             StandardCharsets.UTF_8
@@ -254,7 +254,7 @@ private fun String?.isJsonContentType(): Boolean = this
     ?.trim()
     ?.equals("application/json", ignoreCase = true) == true
 
-private fun JsonObject.string(name: String): String {
+internal fun JsonObject.string(name: String): String {
     val value = get(name) ?: return ""
     return value.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
         ?.asString
@@ -262,7 +262,7 @@ private fun JsonObject.string(name: String): String {
         .orEmpty()
 }
 
-private fun JsonObject.array(name: String): JsonArray? = get(name)?.takeIf { it.isJsonArray }?.asJsonArray
+internal fun JsonObject.array(name: String): JsonArray? = get(name)?.takeIf { it.isJsonArray }?.asJsonArray
 
 private fun splitProviderChunks(raw: String): List<String> = raw
     .split(Regex("\\s*\\[\\.\\.\\.]\\s*"))

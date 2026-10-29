@@ -214,24 +214,25 @@ class CriticalComposeJourneysTest {
         ).assertIsDisplayed()
         composeRule.onNodeWithTag("wikipedia-enabled").assertIsOff().performClick().assertIsOn()
         composeRule.onNodeWithText(
-            "Available to the selected model in chat and to enabled widgets.",
+            "Available to the selected model in Chat.",
         ).assertIsDisplayed()
         composeRule.onAllNodesWithText("Available for the selected model.").assertCountEquals(1)
         composeRule.onAllNodesWithText("Smoke test").assertCountEquals(0)
+        composeRule.onNodeWithTag("web-provider-settings-tavily").performScrollTo().performClick()
         composeRule
             .onNodeWithTag("web-provider-token-tavily")
-            .performScrollTo()
             .performTextInput("tvly-user-token")
-        composeRule.onNodeWithTag("web-provider-disclosure-tavily").performScrollTo().performClick().assertIsOn()
-        composeRule.onNodeWithTag("web-provider-verify-tavily").performScrollTo().assertIsEnabled().performClick()
+        composeRule.onNodeWithTag("web-provider-disclosure-tavily").performClick().assertIsOn()
+        composeRule.onNodeWithTag("web-provider-verify-tavily").assertIsEnabled().performClick()
         composeRule.runOnIdle { assertTrue(webSearchSettings.isConfigured(WebSearchProvider.Tavily)) }
         composeRule.onNodeWithTag("web-provider-enabled-tavily").assertIsOn()
         composeRule.onNodeWithText(
             "Credential configured. The stored token is never displayed again.",
         ).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithTag("web-provider-token-exa").performScrollTo().performTextInput("exa-user-token")
-        composeRule.onNodeWithTag("web-provider-disclosure-exa").performScrollTo().performClick().assertIsOn()
-        composeRule.onNodeWithTag("web-provider-verify-exa").performScrollTo().assertIsEnabled().performClick()
+        composeRule.onNodeWithTag("web-provider-settings-exa").performScrollTo().performClick()
+        composeRule.onNodeWithTag("web-provider-token-exa").performTextInput("exa-user-token")
+        composeRule.onNodeWithTag("web-provider-disclosure-exa").performClick().assertIsOn()
+        composeRule.onNodeWithTag("web-provider-verify-exa").assertIsEnabled().performClick()
         composeRule.runOnIdle {
             assertEquals(
                 listOf(WebSearchProvider.Exa, WebSearchProvider.Tavily),
@@ -241,10 +242,10 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithText("Enabled as preferred provider.").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Enabled as fallback provider.").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("web-provider-enabled-exa").performClick().assertIsOff()
+        composeRule.onNodeWithTag("web-provider-settings-exa").performClick()
         composeRule.onNodeWithTag("web-provider-remove-exa").performClick()
-        composeRule.onNodeWithTag("web-provider-token-exa").assertIsDisplayed()
+        composeRule.onNodeWithTag("web-provider-settings-tavily").performScrollTo().performClick()
         composeRule.onNodeWithTag("web-provider-remove-tavily").performClick()
-        composeRule.onNodeWithTag("web-provider-token-tavily").assertIsDisplayed()
         composeRule.runOnIdle {
             webSearchSettings =
                 webSearchSettings.copy(

@@ -10,9 +10,8 @@ import com.google.gson.JsonParser
 import com.google.gson.JsonPrimitive
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
-import com.jesjobom.ararai.tools.ApplicationToolConsumer
-import com.jesjobom.ararai.tools.ApplicationToolContract
 import com.jesjobom.ararai.tools.ApplicationToolRegistry
+import com.jesjobom.ararai.tools.WEB_SEARCH_CONTENT_TOOL_NAME
 import com.jesjobom.ararai.widget.runtime.StrictJson
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeContext
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeValue
@@ -40,23 +39,68 @@ internal const val WIDGET_FEASIBILITY_OBJECTIVE =
         "return unachievable or needs_clarification rather than substitute a different request."
 
 internal const val WIDGET_ALGORITHM_OBJECTIVE =
-    "Preserve every essential user constraint in the ordered steps. " +
-        "Represent post-result operations as transform steps depending on the tool call. " +
-        "Choose collection_card only for one unmodified item from one tool result; " +
-        "choose custom_source for filtering, comparison, conditional selection after results, " +
-        "multiple results, or other layouts. A runtime-conditioned query before the call can still use collection_card. " +
-        "Tool calls may not depend on live tool results."
+    "Preserve user constraints in ordered steps. " +
+        "Best/first web result: one web_search_content call and collection_card; provider order selects first. " +
+        "Date-event year in title: one wikipedia_on_this_day call and collection_card; app appends year. " +
+        "Use collection_list for several unmodified items, custom_source for other layouts or filtering. " +
+        "Other post-result operations need dependent transform steps. " +
+        "Runtime-conditioned queries may use collection modes; tool calls cannot read live results."
 
-internal fun algorithmCaptureSchema(feasibility: WidgetFeasibilityArtifact): String {
-    if (feasibility.tools.any { it.capability.id == "wikipedia_pages" && it.capability.version == 2 }) {
-        return WidgetAuthoringStageSchemas.algorithm
-    }
-    return JsonParser.parseString(WidgetAuthoringStageSchemas.algorithm).asJsonObject.apply {
-        getAsJsonObject("parameters").getAsJsonObject("properties")
-            .getAsJsonObject("steps").getAsJsonObject("items")
-            .getAsJsonObject("properties").remove("selectionMode")
-    }.toString()
+/** A single best/first web hit means the provider's highest-ranked item, not a model comparison. */
+internal fun requestedRankedWebContentCard(
+    prompt: WidgetAuthoringPrompt,
+    feasibility: WidgetFeasibilityArtifact,
+): Boolean = feasibility.tools.singleOrNull()?.capability?.id == WEB_SEARCH_CONTENT_TOOL_NAME &&
+    RANKED_WEB_CONTENT_CARD_REQUEST.containsMatchIn(
+        prompt.userInstruction.replace(QUOTED_WEB_QUERY, " "),
+    )
+
+private val QUOTED_WEB_QUERY = Regex("\"[^\"]*\"|'[^']*'")
+private val RANKED_WEB_CONTENT_CARD_REQUEST =
+    Regex("(?i)\\b(?:melhor|primeiro|best|first)\\s+(?:resultado|result)\\b|\\btop\\s*1\\b")
+
+/** An event year is supplied by the date-event tool and can be appended without model-authored JS. */
+internal fun requestedEventYearTitle(
+    prompt: WidgetAuthoringPrompt,
+    feasibility: WidgetFeasibilityArtifact,
+): Boolean {
+    if (feasibility.tools.singleOrNull()?.capability != WidgetToolCapability("wikipedia_on_this_day", 1)) return false
+    val instruction = prompt.userInstruction.replace(QUOTED_WEB_QUERY, " ")
+    if (EVENT_YEAR_TITLE_NEGATION.containsMatchIn(instruction)) return false
+    return EVENT_YEAR_TITLE_ACTION.containsMatchIn(instruction) &&
+        EVENT_YEAR_TITLE_YEAR.containsMatchIn(instruction) &&
+        EVENT_YEAR_TITLE_FIELD.containsMatchIn(instruction)
 }
+
+private val EVENT_YEAR_TITLE_ACTION = Regex("(?i)\\b(?:adicione|acrescente|inclua|insira|coloque|mostre|add|append|include|put|show)\\b")
+private val EVENT_YEAR_TITLE_YEAR = Regex("(?i)\\b(?:ano|year)\\b")
+private val EVENT_YEAR_TITLE_FIELD = Regex("(?i)\\b(?:t[ií]tulo|title)\\b")
+private val EVENT_YEAR_TITLE_NEGATION =
+    Regex("(?i)\\b(?:(?:n[aã]o|do not|don't)\\s+(?:adicione|acrescente|inclua|insira|coloque|add|append|include|put)|(?:sem|without)\\s+(?:o\\s+|the\\s+)?(?:ano|year))\\b")
+
+internal fun requestedWebResultsCount(prompt: WidgetAuthoringPrompt, feasibility: WidgetFeasibilityArtifact): Int? {
+    if (feasibility.tools.none { it.capability.id == "web_search_top_results" }) return null
+    val instruction = prompt.userInstruction
+    if (!Regex("(?i)resultados|results|links").containsMatchIn(instruction)) return null
+    val count = Regex("(?i)\\b(?:top|até|ate|up to|first|primeiros?)\\s*(\\d{1,2})\\b")
+        .find(instruction)?.groupValues?.get(1)?.toIntOrNull()
+    return count?.takeIf { it in 2..10 }
+}
+
+internal fun algorithmCaptureSchema(feasibility: WidgetFeasibilityArtifact, prompt: WidgetAuthoringPrompt? = null): String = JsonParser.parseString(WidgetAuthoringStageSchemas.algorithm).asJsonObject.apply {
+    val properties = getAsJsonObject("parameters").getAsJsonObject("properties")
+    if (feasibility.tools.none { it.capability.id == "wikipedia_pages" && it.capability.version == 2 }) {
+        properties.getAsJsonObject("steps").getAsJsonObject("items")
+            .getAsJsonObject("properties").remove("selectionMode")
+    }
+    if (prompt != null && requestedWebResultsCount(prompt, feasibility) != null) {
+        properties.getAsJsonObject("renderCapability").add("enum", JsonArray().apply { add("collection_list") })
+    } else if (prompt != null && requestedRankedWebContentCard(prompt, feasibility)) {
+        properties.getAsJsonObject("renderCapability").add("enum", JsonArray().apply { add("collection_card") })
+    } else if (prompt != null && requestedEventYearTitle(prompt, feasibility)) {
+        properties.getAsJsonObject("renderCapability").add("enum", JsonArray().apply { add("collection_card") })
+    }
+}.toString()
 
 internal class ManagedWidgetAuthoringPipeline(
     private val modelController: WidgetAuthoringPipelineModelController,
@@ -114,7 +158,7 @@ internal class ManagedWidgetAuthoringPipeline(
         }
         val budget = WidgetAuthoringAttemptBudget()
         val generationRecovery = WidgetAuthoringGenerationRecovery(modelController, model, inference)
-        val availableTools = widgetContracts().keys
+        val availableTools = registry.authoringToolCapabilities(prompt.existingWidgetTools)
 
         onProgress(WidgetAuthoringProgress.AnalyzingFeasibility)
         val feasibility = captureValidated(
@@ -153,14 +197,14 @@ internal class ManagedWidgetAuthoringPipeline(
             stage = WidgetAuthoringStage.Algorithm,
             stageProgress = WidgetAuthoringProgress.DesigningAlgorithm,
             toolName = SUBMIT_WIDGET_ALGORITHM_TOOL,
-            schema = algorithmCaptureSchema(feasibility),
+            schema = algorithmCaptureSchema(feasibility, prompt),
             objective = WIDGET_ALGORITHM_OBJECTIVE,
             baseContext = algorithmContext(prompt, feasibility),
             budget = budget,
             generationRecovery = generationRecovery,
             onProgress = onProgress,
         ) { raw ->
-            when (val validated = stageValidators.algorithm(raw, feasibility)) {
+            when (val validated = stageValidators.algorithm(raw, feasibility, prompt)) {
                 is WidgetAuthoringArtifactValidation.Valid -> StageValidation.Valid(validated.artifact)
                 is WidgetAuthoringArtifactValidation.Invalid -> StageValidation.Invalid(validated.code)
             }
@@ -189,6 +233,7 @@ internal class ManagedWidgetAuthoringPipeline(
                         step,
                         feasibility,
                         runtimeContext,
+                        requestedWebResultsCount(prompt, feasibility),
                     )
                 ) {
                     is WidgetAuthoringArtifactValidation.Valid -> StageValidation.Valid(validated.artifact)
@@ -219,32 +264,54 @@ internal class ManagedWidgetAuthoringPipeline(
         activeArtifacts += planFunction
 
         onProgress(WidgetAuthoringProgress.GeneratingPresentation)
-        val renderRequest = renderRoundRequest(prompt, feasibility, algorithm, callFunctions)
-        val renderFunction = captureValidated(
-            model = model,
-            stage = WidgetAuthoringStage.RenderFunction,
-            stageProgress = WidgetAuthoringProgress.GeneratingPresentation,
-            toolName = renderRequest.toolName,
-            schema = renderRequest.toolDescriptionJson,
-            objective = renderRequest.objective,
-            baseContext = renderRequest.contextJson,
-            budget = budget,
-            generationRecovery = generationRecovery,
-            onProgress = onProgress,
-        ) { raw ->
+        val deterministicRender = WidgetCollectionListArtifact.rankedWebResults(algorithm)
+            ?: WidgetCollectionCardArtifact.rankedWebContent(algorithm, prompt, feasibility)
+            ?: WidgetCollectionCardArtifact.eventYearTitle(algorithm, prompt, feasibility)
+            ?: WidgetCollectionCardArtifact.selectedWikipediaPage(algorithm)
+        val renderFunction = if (deterministicRender != null) {
             when (
                 val validated = stageValidators.render(
-                    raw,
+                    deterministicRender,
                     callFunctions + planFunction,
                     algorithm,
                     feasibility,
                     runtimeContext,
                 )
             ) {
-                is WidgetAuthoringArtifactValidation.Valid -> StageValidation.Valid(validated.artifact)
-                is WidgetAuthoringArtifactValidation.Invalid -> StageValidation.Invalid(validated.code)
+                is WidgetAuthoringArtifactValidation.Valid -> validated.artifact
+                is WidgetAuthoringArtifactValidation.Invalid -> return WidgetAuthoringPipelineResult.StageFailed(
+                    WidgetAuthoringStage.RenderFunction,
+                    validated.code,
+                )
             }
-        }.valueOrReturn { return it }
+        } else {
+            val renderRequest = renderRoundRequest(prompt, feasibility, algorithm, callFunctions)
+            captureValidated(
+                model = model,
+                stage = WidgetAuthoringStage.RenderFunction,
+                stageProgress = WidgetAuthoringProgress.GeneratingPresentation,
+                toolName = renderRequest.toolName,
+                schema = renderRequest.toolDescriptionJson,
+                objective = renderRequest.objective,
+                baseContext = renderRequest.contextJson,
+                budget = budget,
+                generationRecovery = generationRecovery,
+                onProgress = onProgress,
+            ) { raw ->
+                when (
+                    val validated = stageValidators.render(
+                        raw,
+                        callFunctions + planFunction,
+                        algorithm,
+                        feasibility,
+                        runtimeContext,
+                    )
+                ) {
+                    is WidgetAuthoringArtifactValidation.Valid -> StageValidation.Valid(validated.artifact)
+                    is WidgetAuthoringArtifactValidation.Invalid -> StageValidation.Invalid(validated.code)
+                }
+            }.valueOrReturn { return it }
+        }
         activeArtifacts += renderFunction
 
         onProgress(WidgetAuthoringProgress.ValidatingAssembly)
@@ -359,10 +426,6 @@ internal class ManagedWidgetAuthoringPipeline(
         )
     }
 
-    private fun widgetContracts(): Map<WidgetToolCapability, ApplicationToolContract> = registry.descriptors()
-        .filter { ApplicationToolConsumer.Widget in it.consumers }
-        .associateBy { WidgetToolCapability(it.id, it.version) }
-
     private sealed interface StageValidation<out T> {
         data class Valid<T>(val value: T) : StageValidation<T>
         data class Invalid(val code: WidgetAuthoringStageFailureCode) : StageValidation<Nothing>
@@ -437,8 +500,9 @@ private fun compactFeasibilityContext(prompt: WidgetAuthoringPrompt): String {
         ).forEach { name -> api.get(name)?.let { add(name, it.deepCopy()) } }
         addProperty(
             "renderModes",
-            "collection_card directly shows one first or seeded-random item from one result array. " +
-                "custom_source supports bounded filtering, comparisons, and conditional display over returned data only. " +
+            "collection_card shows one first or seeded-random item from one result array, with an optional bounded item-field title suffix. " +
+                "collection_list shows up to ten unmodified items from one result array in order. " +
+                "custom_source supports filtering, comparisons, and conditional display over returned data only. " +
                 "If no tool supplies required data, report unachievable rather than substitute data.",
         )
         api.getAsJsonObject("programApi")
@@ -495,6 +559,20 @@ internal fun algorithmContext(
     JsonObject().apply {
         addProperty("userInstruction", prompt.userInstruction)
         add("feasibility", feasibility.toJson())
+        if (requestedRankedWebContentCard(prompt, feasibility)) {
+            addProperty(
+                "rankedSearchPolicy",
+                "Best/first web result is results[0] in provider rank order. Use one web_search_content " +
+                    "tool_call and collection_card; do not add a transform after the call.",
+            )
+        }
+        if (requestedEventYearTitle(prompt, feasibility)) {
+            addProperty(
+                "eventYearTitlePolicy",
+                "The event tool returns a year for each event. Use one wikipedia_on_this_day tool_call " +
+                    "and collection_card without a transform step; the application appends the selected event's year to its title.",
+            )
+        }
         if (feasibility.tools.none { it.capability.id == "wikipedia_pages" && it.capability.version == 2 }) {
             addProperty(
                 "selectionPolicy",
@@ -526,13 +604,19 @@ internal fun algorithmContext(
                 add(
                     JsonObject().apply {
                         addProperty("id", WidgetRenderCapability.CollectionCard.wireName)
-                        addProperty("summary", "One unmodified item from one tool-result array, selected first or seeded-random; fixed title, body, link and fallback. No post-result filtering or conditional selection.")
+                        addProperty("summary", "One item from one tool-result array, selected first or seeded-random; fixed title, optional bounded title suffix field, body, link and fallback. No post-result filtering or conditional selection.")
+                    },
+                )
+                add(
+                    JsonObject().apply {
+                        addProperty("id", WidgetRenderCapability.CollectionList.wireName)
+                        addProperty("summary", "Up to ten unmodified items from one tool-result array, in order; fixed title, body, link and fallback. No post-result filtering.")
                     },
                 )
                 add(
                     JsonObject().apply {
                         addProperty("id", WidgetRenderCapability.CustomSource.wireName)
-                        addProperty("summary", "Bounded deterministic JavaScript render function for filtering, comparisons, conditional selection, multiple results, or other layouts over returned data only.")
+                        addProperty("summary", "Bounded deterministic JavaScript render function for filtering, comparisons, conditional selection, or other layouts over returned data only.")
                     },
                 )
             },
@@ -551,6 +635,11 @@ internal fun callContext(
         add("runtimeApi", runtimeApi(feasibility.runtimeValues))
         add("algorithm", algorithm.toJson())
         add("currentStep", step.toJson())
+        if (step.tool?.id == "web_search_top_results") {
+            requestedWebResultsCount(prompt, feasibility)?.let { count ->
+                addProperty("resultCountContract", "Set limit=$count exactly. The widget must receive up to $count results.")
+            }
+        }
         if (step.selectionMode != null) {
             addProperty(
                 "selectionContract",
@@ -626,16 +715,22 @@ internal fun renderRoundRequest(
     feasibility: WidgetFeasibilityArtifact,
     algorithm: WidgetAlgorithmArtifact,
     callFunctions: List<WidgetSourceFragmentArtifact>,
-): WidgetAuthoringRoundRequest = if (algorithm.renderCapability == WidgetRenderCapability.CollectionCard) {
-    WidgetAuthoringRoundRequest(
+): WidgetAuthoringRoundRequest = when (algorithm.renderCapability) {
+    WidgetRenderCapability.CollectionCard -> WidgetAuthoringRoundRequest(
         WidgetAuthoringStage.RenderFunction,
         SUBMIT_WIDGET_COLLECTION_CARD_TOOL,
         collectionCardSchema(prompt, algorithm),
         collectionCardObjective(),
         collectionCardContext(prompt, algorithm),
     )
-} else {
-    WidgetAuthoringRoundRequest(
+    WidgetRenderCapability.CollectionList -> WidgetAuthoringRoundRequest(
+        WidgetAuthoringStage.RenderFunction,
+        SUBMIT_WIDGET_COLLECTION_LIST_TOOL,
+        collectionListSchema(prompt, algorithm),
+        collectionListObjective(),
+        collectionListContext(prompt, algorithm),
+    )
+    else -> WidgetAuthoringRoundRequest(
         WidgetAuthoringStage.RenderFunction,
         SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
         WidgetAuthoringStageSchemas.sourceFragment(SUBMIT_WIDGET_RENDER_FUNCTION_TOOL),
@@ -643,6 +738,20 @@ internal fun renderRoundRequest(
         renderContext(prompt, feasibility, algorithm),
     )
 }
+
+internal fun collectionListContext(prompt: WidgetAuthoringPrompt, algorithm: WidgetAlgorithmArtifact): String = StrictJson.canonical(
+    JsonObject().apply {
+        addProperty("userInstruction", prompt.userInstruction)
+        add("toolResults", renderToolResults(prompt, algorithm))
+        addProperty(
+            "fields",
+            "Copy alias, items, title, optional body and url from toolResults. " +
+                "These are property names, not display text. The application renders each returned item in order, up to ten.",
+        )
+    },
+)
+
+internal fun collectionListSchema(prompt: WidgetAuthoringPrompt, algorithm: WidgetAlgorithmArtifact): String = collectionSchema(prompt, algorithm, WidgetAuthoringStageSchemas.collectionList)
 
 internal fun collectionCardContext(prompt: WidgetAuthoringPrompt, algorithm: WidgetAlgorithmArtifact): String = StrictJson.canonical(
     JsonObject().apply {
@@ -655,15 +764,18 @@ internal fun collectionCardContext(prompt: WidgetAuthoringPrompt, algorithm: Wid
         )
         addProperty(
             "fields",
-            "Copy alias, items, title, optional body, and optional url from toolResults alias/path/itemFields. " +
+            "Copy alias, items, title, optional titleSuffixField, body, and url from toolResults alias/path/itemFields. " +
                 "These are property names, never display text or sample values. Only fallback is literal text. " +
                 "For example, itemFields ['text:string', 'canonicalUrl:string'] means title='text' and " +
-                "url='canonicalUrl'. The application handles selection, failure and links.",
+                "url='canonicalUrl'. A string or integer titleSuffixField is appended in parentheses; " +
+                "for an event year use titleSuffixField='year'. The application handles selection, failure and links.",
         )
     },
 )
 
-internal fun collectionCardSchema(prompt: WidgetAuthoringPrompt, algorithm: WidgetAlgorithmArtifact): String {
+internal fun collectionCardSchema(prompt: WidgetAuthoringPrompt, algorithm: WidgetAlgorithmArtifact): String = collectionSchema(prompt, algorithm, WidgetAuthoringStageSchemas.collectionCard)
+
+private fun collectionSchema(prompt: WidgetAuthoringPrompt, algorithm: WidgetAlgorithmArtifact, baseSchema: String): String {
     val results = renderToolResults(prompt, algorithm)
     val arrays = results.flatMap { result ->
         result.asJsonObject.getAsJsonArray("resultFields").filter { field ->
@@ -672,8 +784,11 @@ internal fun collectionCardSchema(prompt: WidgetAuthoringPrompt, algorithm: Widg
     }
     val itemFields = arrays.flatMap { field ->
         field.asJsonObject.getAsJsonArray("itemFields")?.map { it.asString } ?: emptyList()
-    }.filter { it.endsWith(":string") }.map { it.substringBeforeLast(':') }.distinct()
-    val schema = JsonParser.parseString(WidgetAuthoringStageSchemas.collectionCard).asJsonObject
+    }
+    val textFields = itemFields.filter { it.endsWith(":string") }.map { it.substringBeforeLast(':') }.distinct()
+    val suffixFields = itemFields.filter { it.endsWith(":string") || it.endsWith(":integer") }
+        .map { it.substringBeforeLast(':') }.distinct()
+    val schema = JsonParser.parseString(baseSchema).asJsonObject
     val properties = schema.getAsJsonObject("parameters").getAsJsonObject("properties")
     fun restrict(name: String, values: List<String>) {
         if (values.isNotEmpty()) {
@@ -682,7 +797,8 @@ internal fun collectionCardSchema(prompt: WidgetAuthoringPrompt, algorithm: Widg
     }
     restrict("alias", results.map { it.asJsonObject.get("alias").asString })
     restrict("items", arrays.map { it.asJsonObject.get("path").asString }.distinct())
-    listOf("title", "body", "url").forEach { restrict(it, itemFields) }
+    listOf("title", "body", "url").forEach { restrict(it, textFields) }
+    if (properties.has("titleSuffixField")) restrict("titleSuffixField", suffixFields)
     return schema.toString()
 }
 

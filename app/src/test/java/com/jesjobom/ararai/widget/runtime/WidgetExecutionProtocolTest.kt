@@ -145,6 +145,26 @@ class WidgetExecutionProtocolTest {
     }
 
     @Test
+    fun `web search link must match one result URL exactly`() {
+        val url = "https://www.example.com/stocks/petrobras"
+        val payload = com.google.gson.JsonParser.parseString(
+            """{"results":[{"title":"Stock result","canonicalUrl":"$url"}]}""",
+        ).asJsonObject
+        val outcomes = listOf(WidgetToolOutcome("today", payload, null))
+
+        val result = WidgetPresentationParser.parse(
+            linkJson(url, "results.0.canonicalUrl"),
+            capabilities,
+            grant,
+            outcomes,
+            limits,
+        )
+
+        assertTrue(result is WidgetPresentationNode.HttpsLink)
+        assertInvalidPresentation(linkJson("https://www.example.com/other", "results.0.canonicalUrl"), outcomes)
+    }
+
+    @Test
     fun `accepts an exact five segment result path for a nested collection`() {
         val url = "https://en.wikipedia.org/wiki/Past_event"
         val payload = com.google.gson.JsonParser.parseString(

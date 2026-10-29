@@ -104,7 +104,7 @@ class WidgetAuthoringPipelineTest {
 
         val result = pipeline.generate(MODEL, INFERENCE, PROMPT, RUNTIME, progress::add)
 
-        assertTrue(result is WidgetAuthoringPipelineResult.DraftReady)
+        assertTrue("Unexpected result: $result", result is WidgetAuthoringPipelineResult.DraftReady)
         val draft = (result as WidgetAuthoringPipelineResult.DraftReady).draft
         assertEquals(listOf("events_call"), draft.plannedCalls.map { it.alias })
         assertEquals(listOf(CALL_SOURCE, PLAN_SOURCE, RENDER_SOURCE).joinToString("\n\n"), draft.program.source)
@@ -177,7 +177,7 @@ class WidgetAuthoringPipelineTest {
 
         val result = pipeline.generate(MODEL, INFERENCE, PROMPT, RUNTIME)
 
-        assertTrue(result is WidgetAuthoringPipelineResult.DraftReady)
+        assertTrue("Unexpected result: $result", result is WidgetAuthoringPipelineResult.DraftReady)
         val renderRequest = modelEngine.requests.last()
         assertEquals(setOf(SUBMIT_WIDGET_COLLECTION_CARD_TOOL), renderRequest.advertisedToolNames)
         assertTrue(renderRequest.plainChatPrompt.contains("\"toolResults\""))
@@ -280,13 +280,59 @@ class WidgetAuthoringPipelineTest {
         assertEquals("wikipedia_on_this_day", tools.single().asJsonObject.get("id").asString)
         val renderCapabilities = context.getAsJsonArray("renderCapabilities")
         assertEquals(
-            listOf("collection_card", "custom_source"),
+            listOf("collection_card", "collection_list", "custom_source"),
             renderCapabilities.map { it.asJsonObject.get("id").asString },
         )
         assertTrue(renderCapabilities[0].asJsonObject.get("summary").asString.contains("No post-result filtering"))
-        assertTrue(renderCapabilities[1].asJsonObject.get("summary").asString.contains("conditional selection"))
-        assertTrue(WIDGET_ALGORITHM_OBJECTIVE.contains("runtime-conditioned query before the call"))
+        assertTrue(renderCapabilities[2].asJsonObject.get("summary").asString.contains("conditional selection"))
+        assertTrue(WIDGET_ALGORITHM_OBJECTIVE.contains("Runtime-conditioned queries"))
         assertFalse(context.toString().contains("runtime.collectionCard"))
+    }
+
+    @Test
+    fun `explicit top ten web request requires a list rather than a single card`() {
+        val feasibility = feasibilityArtifact().copy(
+            tools = listOf(WidgetSelectedTool(WidgetToolCapability("web_search_top_results", 1), "Web search")),
+        )
+        val prompt = PROMPT.copy(userInstruction = "Mostre uma lista de até 10 resultados da busca web sobre Petrobras")
+        val properties = JsonParser.parseString(algorithmCaptureSchema(feasibility, prompt)).asJsonObject
+            .getAsJsonObject("parameters").getAsJsonObject("properties")
+
+        assertEquals(10, requestedWebResultsCount(prompt, feasibility))
+        assertEquals(
+            listOf("collection_list"),
+            properties.getAsJsonObject("renderCapability").getAsJsonArray("enum").map { it.asString },
+        )
+        assertEquals(null, requestedWebResultsCount(prompt.copy(userInstruction = "Mostre o melhor resultado"), feasibility))
+    }
+
+    @Test
+    fun `collection list uses a dedicated model contract and app-owned render function`() {
+        val api = JsonParser.parseString(PROMPT.apiContextJson).asJsonObject
+        val tool = api.getAsJsonArray("tools").single().asJsonObject
+        tool.addProperty("id", "web_search_top_results")
+        tool.add(
+            "outputSchema",
+            JsonParser.parseString(
+                """{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"title":{"type":"string"},"canonicalUrl":{"type":"string"}}}}}}""",
+            ),
+        )
+        val prompt = PROMPT.copy(userInstruction = "Mostre até 10 resultados da busca web", apiContextJson = api.toString())
+        val feasibility = feasibilityArtifact().copy(
+            tools = listOf(WidgetSelectedTool(WidgetToolCapability("web_search_top_results", 1), "Web search")),
+        )
+        val algorithm = algorithmArtifact().copy(
+            steps = algorithmArtifact().steps.map { it.copy(tool = WidgetToolCapability("web_search_top_results", 1)) },
+            renderCapability = WidgetRenderCapability.CollectionList,
+        )
+
+        val request = renderRoundRequest(prompt, feasibility, algorithm, emptyList())
+
+        assertEquals(SUBMIT_WIDGET_COLLECTION_LIST_TOOL, request.toolName)
+        val properties = JsonParser.parseString(request.toolDescriptionJson).asJsonObject
+            .getAsJsonObject("parameters").getAsJsonObject("properties")
+        assertEquals("results", properties.getAsJsonObject("items").getAsJsonArray("enum").single().asString)
+        assertTrue(request.toUserText().contains("every returned result"))
     }
 
     @Test
@@ -398,7 +444,7 @@ class WidgetAuthoringPipelineTest {
 
         val result = pipeline.generate(MODEL, INFERENCE, PROMPT, RUNTIME, progress::add)
 
-        assertTrue(result is WidgetAuthoringPipelineResult.DraftReady)
+        assertTrue("Unexpected result: $result", result is WidgetAuthoringPipelineResult.DraftReady)
         assertEquals(5, modelEngine.requests.size)
         assertEquals(5, modelEngine.loadedModels)
         assertEquals(4, modelEngine.unloadedModels)

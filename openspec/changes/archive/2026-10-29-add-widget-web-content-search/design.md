@@ -1,0 +1,7 @@
+# Design: widget web search with excerpts
+
+The Chat provider adapters already cap focused evidence to three sources, two short excerpts per source, and a shared total context budget. Retain the accepted excerpts alongside their source metadata in the domain result; do not change Chat's serialized tool response. A widget-only binding reuses the same provider implementations and fallback order, translating that structured evidence into `results[]` with title, canonical URL, provider, retrieval time, first `excerpt` for simple cards, and `excerpts` for custom layouts. Do not parse Chat's human-readable context string or request content a second time.
+
+`web_search_top_results@1` and `web_search_content@1` are separate widget tools backed by the same provider infrastructure. Both appear in new-widget authoring, while the usual latest-only rule still applies to replacement versions of each tool ID. Saved revisions keep their exact tool version and consent. Both modes share the existing widget web-search switch and encrypted provider credentials; neither depends on Chat's enable switches. The content mode's output remains untrusted data and uses the same result-proven link check and safe destination policy as search-only widgets.
+
+Provider excerpts are not full website contents or verified answers. Tavily may call its extract endpoint; Exa requests highlights from search. No direct arbitrary-site HTTP fetch is added. Scheduled refreshes remain inexact and may consume provider quota.

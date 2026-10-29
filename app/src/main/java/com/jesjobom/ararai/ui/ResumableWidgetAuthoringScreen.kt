@@ -42,6 +42,7 @@ import com.jesjobom.ararai.model.WIDGET_AUTHORING_PIPELINE_V1
 import com.jesjobom.ararai.widget.managed.AcceptWidgetAuthoringStageResult
 import com.jesjobom.ararai.widget.managed.BeginWidgetAuthoringWorkflowResult
 import com.jesjobom.ararai.widget.managed.RunWidgetAuthoringStageResult
+import com.jesjobom.ararai.widget.managed.SubmitWidgetAuthoringAttemptResult
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringAssemblyResult
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringAttemptDetails
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringAttemptKind
@@ -69,12 +70,13 @@ internal fun ResumableManagedWidgetAuthoringRoute(
     inference: InferenceConfig?,
     modelArtifactSha256: String?,
     widgetId: String?,
+    initialInstruction: String? = null,
     onBack: () -> Unit,
     onConfirmed: (String) -> Unit,
     onOpenToolSettings: () -> Unit,
 ) {
     val snapshot by coordinator.activeSession.collectAsState()
-    var instruction by remember(widgetId) { mutableStateOf("") }
+    var instruction by remember(widgetId) { mutableStateOf(initialInstruction.orEmpty()) }
     var working by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Int?>(null) }
     var preview by remember { mutableStateOf<ManagedWidgetDraftUiState?>(null) }
@@ -226,7 +228,19 @@ internal fun ResumableManagedWidgetAuthoringRoute(
     }
 
     fun continueWorkflow() = runAction {
-        when (val result = coordinator.acceptCurrent(UUID.randomUUID().toString())) {
+        val (accepted, nextAttempt) = if (configurationAvailable) {
+            val result = coordinator.advanceAndStartNext(
+                model = requireNotNull(model),
+                inference = requireNotNull(inference),
+                modelArtifactDigest = requireNotNull(modelArtifactSha256),
+                acceptActionId = UUID.randomUUID().toString(),
+                startActionId = UUID.randomUUID().toString(),
+            )
+            result.accepted to result.nextAttempt
+        } else {
+            coordinator.acceptCurrent(UUID.randomUUID().toString()) to null
+        }
+        when (val result = accepted) {
             is AcceptWidgetAuthoringStageResult.Advanced -> Unit
             is AcceptWidgetAuthoringStageResult.PreviewReady -> {
                 preview = presentationController.presentDraft(widgetId, result.draft)
@@ -236,6 +250,19 @@ internal fun ResumableManagedWidgetAuthoringRoute(
             }
             is AcceptWidgetAuthoringStageResult.FeasibilityStopped -> {
                 error = R.string.widget_authoring_workflow_feasibility_stopped
+            }
+        }
+        when (nextAttempt) {
+            null -> Unit
+            RunWidgetAuthoringStageResult.ConfigurationChanged -> {
+                error = R.string.widget_authoring_workflow_configuration_changed
+            }
+            RunWidgetAuthoringStageResult.MissingTarget -> error = R.string.widget_authoring_workflow_missing_target
+            is RunWidgetAuthoringStageResult.Submitted -> if (
+                nextAttempt.result is SubmitWidgetAuthoringAttemptResult.Busy ||
+                nextAttempt.result is SubmitWidgetAuthoringAttemptResult.Stale
+            ) {
+                error = R.string.widget_authoring_workflow_unexpected
             }
         }
     }

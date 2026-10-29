@@ -35,6 +35,16 @@ class ManagedWidgetPresentationTest {
     }
 
     @Test
+    fun `web result links use the general public https policy while Wikipedia stays narrow`() {
+        assertEquals(
+            "https://www.example.com/stocks?q=petrobras",
+            allowedManagedWidgetLinkUrl("https://www.example.com/stocks?q=petrobras"),
+        )
+        assertNull(allowedManagedWidgetLinkUrl("https://en.wikipedia.org/w/api.php"))
+        assertNull(allowedManagedWidgetLinkUrl("https://user@example.com/article"))
+    }
+
+    @Test
     fun `returns controlled empty state for invalid cached tree`() {
         assertNull(decodeManagedWidgetPresentationOrNull("not-json"))
         assertNull(

@@ -47,6 +47,13 @@ inference remains device-, driver-, model-, and workload-dependent.
   historical events for a calendar date; both are typed contracts available to
   verified models and widgets. The legacy `wikipedia_search@1` binding remains
   registered for compatibility.
+- Chat web search uses a focused-evidence `web_search@1` contract with Exa/Tavily
+  fallback. Managed widgets may use `web_search_top_results@1` for up to ten
+  ranked title/HTTPS URL results or `web_search_content@1` for up to three
+  results with bounded excerpts. Widget web-search
+  enablement defaults off, shares verified provider credentials but not Chat's
+  enable switches. The top-results tool does not extract page content; the
+  content tool reuses Chat's bounded Exa highlights or Tavily extraction.
 - Managed widgets provide bounded multi-round model authorship, strict
   staged validation, explicit source/permission/schedule consent, immutable local
   revisions, unique inexact WorkManager schedules, manual refresh, stale cache,
@@ -65,8 +72,8 @@ inference remains device-, driver-, model-, and workload-dependent.
   JavaScript, then executes bounded `plan` and `render` phases in fresh data-only
   QuickJS isolates. Plans reach only confirmed widget-eligible tools through the
   gateway. Presentations are validated renderer-neutral trees; canonical
-  Wikipedia links must be result-proven and pass a second application-owned
-  allowlist before a user gesture opens them.
+  Wikipedia and web-result links must be result-proven and pass a second
+  application-owned destination policy before a user gesture opens them.
 - The optional calculator uses EvalEx 3.7.0 behind an application-owned bounded
   grammar and generic local-compute tool boundary. It is disabled by default,
   capability-gated per model, runs without network access, and never persists

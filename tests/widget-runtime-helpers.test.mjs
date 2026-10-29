@@ -59,6 +59,39 @@ test('constructs a link with the exact alias and result provenance path', () => 
   assert.throws(() => runtime.linkFor(outcomes, 'events', 'events.0.text', 'Read more'));
 });
 
+test('collection list renders one card with every ranked result and its proven link', () => {
+  const ranked = {search: {status: 'success', payload: {kind: 'success', results:
+    Array.from({length: 10}, (_, index) => ({
+      title: `Result ${index + 1}`,
+      canonicalUrl: `https://example.org/${index + 1}`,
+    }))}}};
+  const config = {items: 'results', title: 'title', url: 'canonicalUrl', fallback: 'No results'};
+  const list = JSON.parse(JSON.stringify(runtime.collectionList(ranked, 'search', config)));
+  assert.equal(list.type, 'card');
+  assert.equal(list.child.type, 'column');
+  assert.equal(list.child.children.length, 10);
+  list.child.children.forEach((row, index) => {
+    assert.equal(row.type, 'column');
+    assert.equal(row.children.length, 1);
+    const link = row.children[0];
+    assert.equal(link.label, `${index + 1}. Result ${index + 1}`);
+    assert.equal(link.url, `https://example.org/${index + 1}`);
+    assert.equal(link.sourceField, `results.${index}.canonicalUrl`);
+  });
+  assert.equal(runtime.collectionList({search: {status: 'failure'}}, 'search', config).type, 'card');
+  assert.equal(runtime.collectionList({search: {status: 'success', payload: {kind: 'success', results: []}}},
+    'search', config).type, 'card');
+});
+
+test('ranked list fixture matches the production validator success shape', () => {
+  const expected = JSON.parse(readFileSync(
+    new URL('../app/src/test/resources/widget-ranked-list-three.json', import.meta.url), 'utf8'));
+  const ranked = {step_1: {status: 'success', payload: {kind: 'success', results:
+    Array.from({length: 3}, () => ({title: 'Test', canonicalUrl: 'https://en.wikipedia.org/wiki/Test'}))}}};
+  const config = {items: 'results', title: 'title', url: 'canonicalUrl', fallback: 'No results found'};
+  assert.deepEqual(JSON.parse(JSON.stringify(runtime.collectionList(ranked, 'step_1', config))), expected);
+});
+
 test('selects a seeded array item without exposing the outcome envelope', () => {
   const data = {
     events: {
@@ -175,6 +208,22 @@ test('one collection-card call handles success, empty, failure, and link provena
   assert.throws(() => seededRuntime.collectionCard(outcomes, 'events', {...config, url: 'text'}));
 });
 
+test('collection card appends a bounded event year to the title and link label', () => {
+  const events = {lookup: {status: 'success', payload: {kind: 'success', events: [
+    {title: 'Don Giovanni', year: 1787, text: 'Opera premiere',
+      canonicalUrl: 'https://en.wikipedia.org/wiki/Don_Giovanni'},
+  ]}}};
+  const config = {items: 'events', title: 'title', titleSuffixField: 'year',
+    body: 'text', url: 'canonicalUrl', fallback: 'No events', selection: 'first'};
+  const card = JSON.parse(JSON.stringify(runtime.collectionCard(events, 'lookup', config)));
+  assert.equal(card.child.children[0].text, 'Don Giovanni (1787)');
+  assert.equal(card.child.children[1].text, 'Opera premiere');
+  assert.equal(card.child.children[2].label, 'Don Giovanni (1787)');
+  assert.equal(card.child.children[2].sourceField, 'events.0.canonicalUrl');
+  assert.throws(() => runtime.collectionCard(events, 'lookup', {...config, titleSuffixField: 'missing'}));
+  assert.throws(() => runtime.collectionCard(events, 'lookup', {...config, titleSuffixField: 'canonicalUrl'}));
+});
+
 test('collection card links a selected canonical page even when the model omits url', () => {
   const pages = {lookup: {status: 'success', payload: {kind: 'success', pages: [
     {title: 'Brazil', canonicalUrl: 'https://en.wikipedia.org/wiki/Brazil'},
@@ -189,6 +238,23 @@ test('collection card links a selected canonical page even when the model omits 
   });
 });
 
+test('ranked web content card shows only the first title, excerpt, and proven URL', () => {
+  const search = {lookup: {status: 'success', payload: {kind: 'success', results: [
+    {title: 'First', excerpt: 'First excerpt', canonicalUrl: 'https://example.com/first'},
+    {title: 'Second', excerpt: 'Second excerpt', canonicalUrl: 'https://example.com/second'},
+  ]}}};
+  const card = JSON.parse(JSON.stringify(runtime.collectionCard(search, 'lookup', {
+    items: 'results', title: 'title', body: 'excerpt', url: 'canonicalUrl',
+    fallback: 'No results found', selection: 'first',
+  })));
+  assert.deepEqual(card.child.children, [
+    {type: 'text', text: 'First', tone: 'neutral'},
+    {type: 'text', text: 'First excerpt', tone: 'neutral'},
+    {type: 'https_link', label: 'First', url: 'https://example.com/first',
+      sourceAlias: 'lookup', sourceField: 'results.0.canonicalUrl'},
+  ]);
+});
+
 test('page-summary result supplies its complete body to an existing title-only card', () => {
   const pages = {lookup: {status: 'success', payload: {
     kind: 'success', defaultBodyField: 'extract', pages: [
@@ -201,6 +267,25 @@ test('page-summary result supplies its complete body to an existing title-only c
   assert.equal(card.child.children[1].text, 'Complete introduction');
   const titleOnly = JSON.parse(JSON.stringify(runtime.collectionCard(pages, 'lookup', {...config, body: null})));
   assert.deepEqual(titleOnly.child.children.map(child => child.type), ['text', 'https_link']);
+});
+
+test('version-two Wikipedia page card displays the selected full lead and proven link', () => {
+  const pages = {lookup: {status: 'success', payload: {
+    kind: 'success', defaultBodyField: 'extract', pages: [
+      {title: 'Brasil', extract: 'Introdução completa da página.',
+        canonicalUrl: 'https://pt.wikipedia.org/wiki/Brasil'},
+    ],
+  }}};
+  const card = JSON.parse(JSON.stringify(seededRuntime.collectionCard(pages, 'lookup', {
+    items: 'pages', title: 'title', body: 'extract', url: 'canonicalUrl',
+    fallback: 'Nenhuma página encontrada.', selection: 'first',
+  })));
+  assert.deepEqual(card.child.children, [
+    {type: 'text', text: 'Brasil', tone: 'neutral'},
+    {type: 'text', text: 'Introdução completa da página.', tone: 'neutral'},
+    {type: 'https_link', label: 'Brasil', url: 'https://pt.wikipedia.org/wiki/Brasil',
+      sourceAlias: 'lookup', sourceField: 'pages.0.canonicalUrl'},
+  ]);
 });
 
 test('collection card works with a nested result path and distinct item fields', () => {

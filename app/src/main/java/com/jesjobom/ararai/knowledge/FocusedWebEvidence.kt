@@ -55,26 +55,31 @@ class FocusedWebEvidenceNormalizer(
 
         val context = StringBuilder(UNTRUSTED_PREFIX)
         val sources = mutableListOf<KnowledgeSource>()
+        val webEvidence = mutableListOf<WebEvidenceItem>()
         accepted.forEach { evidence ->
             val sourcePrefix = "\n\n${provider.displayName}: ${evidence.title}\n${evidence.url}"
             if (!context.appendWithinBudget(sourcePrefix)) return@forEach
-            var appendedExcerpt = false
+            val appendedExcerpts = mutableListOf<String>()
             evidence.excerpts.forEach { excerpt ->
-                appendedExcerpt = context.appendWithinBudget("\n$excerpt") || appendedExcerpt
+                val start = context.length
+                if (context.appendWithinBudget("\n$excerpt")) {
+                    appendedExcerpts += context.substring(start + 1)
+                }
             }
-            if (appendedExcerpt) {
-                sources +=
-                    KnowledgeSource(
-                        provider = provider.sourceProvider,
-                        title = evidence.title,
-                        canonicalUrl = evidence.url,
-                        language = normalizedLanguage,
-                        retrievedAtMillis = clock(),
-                    )
+            if (appendedExcerpts.isNotEmpty()) {
+                val source = KnowledgeSource(
+                    provider = provider.sourceProvider,
+                    title = evidence.title,
+                    canonicalUrl = evidence.url,
+                    language = normalizedLanguage,
+                    retrievedAtMillis = clock(),
+                )
+                sources += source
+                webEvidence += WebEvidenceItem(source, appendedExcerpts)
             }
         }
         if (sources.isEmpty()) return ToolResult.Failure(ToolFailureReason.NoResults)
-        return ToolResult.Success(context.toString(), sources)
+        return ToolResult.Success(context.toString(), sources, webEvidence)
     }
 
     @Suppress("ReturnCount")

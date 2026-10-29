@@ -93,7 +93,7 @@ class ManagedWidgetManagementComposeTest {
                     loadFailed = false,
                     busy = false,
                     onBack = { actions += "back" },
-                    onEdit = { actions += "edit" },
+                    onEdit = { actions += "edit:$it" },
                     onRefresh = { actions += "refresh" },
                     onEnabledChange = { actions += "enabled:$it" },
                     onDuplicate = { actions += "duplicate" },
@@ -122,7 +122,7 @@ class ManagedWidgetManagementComposeTest {
         composeRule.onNodeWithText("Cancel").performClick()
         composeRule.onNodeWithContentDescription("Disable History").performClick()
         composeRule.runOnIdle {
-            assertEquals(listOf("refresh", "edit", "duplicate", "enabled:false"), actions)
+            assertEquals(listOf("refresh", "edit:original prompt", "duplicate", "enabled:false"), actions)
         }
     }
 
@@ -202,7 +202,7 @@ class ManagedWidgetManagementComposeTest {
                 createdAtMillis = 1,
                 updatedAtMillis = 1,
             ),
-            revision = WidgetProgramRevision("widget-1", 1, manifest, source, "b".repeat(64), 1),
+            revision = WidgetProgramRevision("widget-1", 1, manifest, source, "b".repeat(64), 1, "original prompt"),
             revisions = emptyList(),
             runs = emptyList(),
             presentation = WidgetPresentationNode.Text("Ada Lovelace", "neutral"),

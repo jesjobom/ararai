@@ -32,7 +32,7 @@ class ManagedWidgetPresentationComposeTest {
                             ),
                         ),
                     ),
-                    onOpenWikipediaArticle = { openedUrl = it },
+                    onOpenLink = { openedUrl = it },
                 )
             }
         }
@@ -51,8 +51,8 @@ class ManagedWidgetPresentationComposeTest {
         composeRule.setContent {
             MaterialTheme {
                 ManagedWidgetPresentation(
-                    presentation = wikipediaLink("https://evil.test/wiki/Ada_Lovelace"),
-                    onOpenWikipediaArticle = { error("Unsafe link callback must stay inert") },
+                    presentation = wikipediaLink("https://en.wikipedia.org/w/api.php"),
+                    onOpenLink = { error("Unsafe link callback must stay inert") },
                 )
             }
         }

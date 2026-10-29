@@ -55,8 +55,11 @@ backend, or external database.
   manual refresh, fixed Compose rendering, stale-cache behavior, sanitized run
   history, duplication, enable/disable, and complete confirmed deletion. Refresh
   executes the stored bounded JavaScript program without loading a model. The
-  initial structured data sources are application-owned Wikipedia page lookup
-  and historical-events-by-date tools.
+  structured data sources are application-owned Wikipedia page lookup,
+  historical-events-by-date, and optional web searches: up to ten ranked
+  titles/HTTPS links without extraction, or up to three results with bounded
+  Exa/Tavily excerpts. Both use configured provider credentials; a first-ranked
+  link or excerpt is not a verified answer or full page.
   Feasibility, algorithm, call functions, and presentation are generated in
   isolated structured rounds, validated between stages, and may use at most
   two scoped repairs. Orchestration is derived locally. The algorithm selects a

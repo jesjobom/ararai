@@ -46,7 +46,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.BuildConfig
@@ -123,6 +122,7 @@ internal fun ManagedWidgetAuthoringRoute(
     inference: InferenceConfig?,
     modelArtifactSha256: String?,
     widgetId: String?,
+    initialInstruction: String? = null,
     jobController: WidgetAuthoringJobController<ManagedWidgetDraftUiState>?,
     workflowCoordinator: WidgetAuthoringWorkflowCoordinator? = null,
     onBack: () -> Unit,
@@ -139,13 +139,14 @@ internal fun ManagedWidgetAuthoringRoute(
             inference = inference,
             modelArtifactSha256 = modelArtifactSha256,
             widgetId = widgetId,
+            initialInstruction = initialInstruction,
             onBack = onBack,
             onConfirmed = onConfirmed,
             onOpenToolSettings = onOpenToolSettings,
         )
         return
     }
-    var instruction by remember(widgetId) { mutableStateOf("") }
+    var instruction by remember(widgetId) { mutableStateOf(initialInstruction.orEmpty()) }
     var draft by remember(widgetId) { mutableStateOf<ManagedWidgetDraftUiState?>(null) }
     var error by remember(widgetId) { mutableStateOf<WidgetAuthoringError?>(null) }
     var confirmationError by remember(widgetId) { mutableStateOf(false) }
@@ -723,8 +724,7 @@ internal fun WidgetDraftPreview(
             }
         }
     }
-    Text(stringResource(R.string.widget_source), style = MaterialTheme.typography.titleMedium)
-    Text(value.draft.program.source, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+    WidgetSourceSection(value.draft.program.source)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = onConfirmEnabled, enabled = !running && value.draft.blockedTools.isEmpty()) {
             Text(

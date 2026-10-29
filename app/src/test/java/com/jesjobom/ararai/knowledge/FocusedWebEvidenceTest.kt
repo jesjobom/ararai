@@ -32,6 +32,9 @@ class FocusedWebEvidenceTest {
         assertTrue(result.untrustedContext.length <= FocusedWebEvidenceNormalizer.MAX_CONTEXT_LENGTH)
         assertTrue(result.untrustedContext.startsWith("UNTRUSTED EXTERNAL REFERENCE DATA"))
         assertTrue(result.sources.size <= FocusedWebEvidenceNormalizer.MAX_SOURCES)
+        assertEquals(result.sources, result.webEvidence.map { it.source })
+        assertTrue(result.webEvidence.all { it.excerpts.isNotEmpty() && it.excerpts.size <= 2 })
+        assertTrue(result.webEvidence.flatMap { it.excerpts }.all(result.untrustedContext::contains))
         assertEquals(42L, result.sources.first().retrievedAtMillis)
         assertEquals("Tavily Web Search", result.sources.first().provider)
     }

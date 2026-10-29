@@ -1282,3 +1282,124 @@ committed non-active outcome.
 - **THEN** the service acknowledges any pending foreground-start contract
 - **AND** evaluates its lifetime using the latest authoring state rather than
   stopping solely because the action is stale.
+
+### Requirement: One-tap continuation after stage review
+
+When a successfully completed widget-authoring stage is awaiting review, one explicit Avançar action in the authoring UI SHALL accept that stage and start the next stage attempt if one exists and the selected authoring configuration is available. The application SHALL continue to stop for review after each generated attempt; it SHALL NOT accept an artifact merely because generation finished.
+
+#### Scenario: Continue to the next stage
+
+- **WHEN** the user taps Avançar on a successful stage with a next stage and valid model configuration
+- **THEN** the current artifact is durably accepted and the next attempt is submitted without a second tap
+- **AND** that next attempt remains cancellable and subject to normal single-flight and device-state checks.
+
+#### Scenario: No next stage or non-applied acceptance
+
+- **WHEN** feasibility cannot proceed, final render is ready for preview, or the acceptance was not applied
+- **THEN** no further model attempt is started.
+
+#### Scenario: Configuration unavailable
+
+- **WHEN** the user taps Avançar on a successful stage but the authoring model configuration is unavailable
+- **THEN** the checkpoint is accepted and the next stage remains available to start later, without losing accepted work.
+
+### Requirement: Preserve requested ranked web result count
+
+For an explicit request of two through ten ranked web search results, widget authoring SHALL request the specified result limit from `web_search_top_results` and SHALL render each returned result in provider order, up to that limit. A one-item collection card SHALL NOT satisfy such a request. The application SHALL construct links from result-proven HTTPS fields without fetching site content.
+
+#### Scenario: Ten results requested
+
+- **WHEN** the user requests a list of up to ten web search results
+- **THEN** the authored tool call uses `limit=10` and the render function displays every returned item, up to ten, with its own source-proven link.
+
+#### Scenario: Ranked results have one presentation container
+
+- **WHEN** a successful search returns multiple ranked results
+- **THEN** the detail and execution preview show one card containing an ordered list of those results, rather than a separate card for each result.
+- **AND** the compact Android launcher projection retains the result titles as text even when the presentation contains only links.
+- **AND** the authoring validator counts the grouped result rows inside that card, accepting the list when all returned fixture items are represented.
+
+#### Scenario: Retry after a valid one-card list was rejected
+
+- **GIVEN** the accepted search algorithm and call already request ten results
+- **WHEN** a previous render attempt failed because the validator expected the older multi-card structure
+- **THEN** retrying render accepts the application-owned one-card list without another model generation.
+
+#### Scenario: Model returns a one-result implementation
+
+- **WHEN** the model selects a one-item render mode or supplies `limit=1` for an explicit ten-result request
+- **THEN** authoring rejects that artifact for repair rather than accepting a widget that silently drops results.
+
+#### Scenario: Empty or failed search
+
+- **WHEN** the search has no results or fails
+- **THEN** the generated list shows its fallback instead of a broken or invented link.
+
+#### Scenario: Retry after the render model fails to submit an artifact
+
+- **WHEN** an accepted ranked-web-result algorithm and call function reach the render stage, including a retry after a missing model artifact
+- **THEN** the application derives the fixed result-to-link mapping and validates it without loading or invoking the authoring model again.
+
+### Requirement: Release a retained shared model before the authoring recovery gate
+
+Before sampling the device-state recovery gate for a model-authored stage or retry, the application SHALL unload any model session retained by the shared local engine. If unloading fails, the attempt SHALL end with a controlled retryable runtime failure without loading or generating. Deterministic stages and invalid local stage requests SHALL not cause an unnecessary model transition.
+
+#### Scenario: Retained model allocation before a retry
+
+- **WHEN** a user starts or retries a model-authored stage while the shared engine retains a prior model session
+- **THEN** the application unloads that session before evaluating process memory
+- **AND** it loads the authoring model only after the recovery gate reports a stable window.
+
+#### Scenario: Retained session cannot be released
+
+- **WHEN** the shared engine fails to unload before the recovery gate
+- **THEN** the stage ends with a controlled runtime failure
+- **AND** no model load or generation occurs.
+
+### Requirement: Derive a direct top-ranked web-content card
+
+For a request explicitly asking for the best or first web result and requiring only `web_search_content@1`, the application SHALL interpret best as the provider's highest-ranked result and require a single-result collection card without a post-result transform. It SHALL derive the fixed render program locally using the first result's title, bounded excerpt, and result-proven canonical HTTPS URL. Other search transformations SHALL continue through the custom-source capability. Previously accepted custom-source checkpoints SHALL not be silently rewritten.
+
+#### Scenario: Best result from a ranked search
+
+- **WHEN** a user requests the best result from one `web_search_content@1` search
+- **THEN** authoring selects `collection_card` with the existing ranked first item and no post-result transform
+- **AND** the render stage completes without another model generation, displaying title, excerpt, and proven link.
+
+#### Scenario: Other result-selection logic
+
+- **WHEN** a request needs filtering, comparison, or another operation on the returned results
+- **THEN** authoring retains the validated custom-source path instead of substituting the first-ranked card.
+
+#### Scenario: Accepted custom-source checkpoint
+
+- **WHEN** an existing session already accepted an algorithm using custom source
+- **THEN** the application preserves it until the user explicitly reprocesses that algorithm.
+
+### Requirement: Preserve a requested Wikipedia event year in the widget title
+
+When a user explicitly requests that the year of a `wikipedia_on_this_day@1` event appear in the title, the application SHALL select a direct collection card and append the selected event's `year` field in parentheses to its title. The card SHALL retain the event body and result-proven HTTPS link. It SHALL reject a missing or unbounded suffix value rather than silently omitting the requested year. Existing saved revisions SHALL remain unchanged until regenerated.
+
+#### Scenario: Regenerate an event card with its year
+
+- **WHEN** the prompt requests an event year in the title and the selected event has title `Don Giovanni` and year `1787`
+- **THEN** the generated card shows `Don Giovanni (1787)` as its title and link label, with the event description and proven URL intact.
+
+#### Scenario: Request without a year in the title
+
+- **WHEN** the prompt does not request a title year
+- **THEN** existing collection-card title rendering remains unchanged.
+
+### Requirement: Derive a direct selected-page card for Wikipedia page summaries
+
+When a single-step algorithm chooses `collection_card` with `wikipedia_pages@2`, authoring SHALL derive the render mapping locally from the selected page's `title`, full `extract`, and `canonicalUrl`. The card SHALL select `pages[0]`, because this tool version already returns one page selected by the frozen call arguments. The resumable and single-shot pipelines SHALL use the same mapping without loading the model for the render stage. Other tool versions and custom presentation algorithms SHALL retain their existing paths.
+
+#### Scenario: Random page about a topic
+
+- **WHEN** a call to `wikipedia_pages@2` requests seeded-random selection and returns one selected page about the topic
+- **THEN** the card displays that page's title, complete introduction, and result-proven HTTPS link without another model generation.
+
+#### Scenario: Recovered render retry
+
+- **WHEN** an existing authoring session has accepted a one-call collection-card algorithm and is waiting to retry the render stage
+- **THEN** the retry derives the version-two page card from the accepted checkpoint without changing the tool selection or repeating earlier stages.

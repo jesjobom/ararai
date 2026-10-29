@@ -23,6 +23,7 @@ import com.jesjobom.ararai.widget.runtime.StrictJson
 import com.jesjobom.ararai.widget.runtime.WidgetExecutionGrant
 import com.jesjobom.ararai.widget.runtime.WidgetJavaScriptEngine
 import com.jesjobom.ararai.widget.runtime.WidgetPlanParser
+import com.jesjobom.ararai.widget.runtime.WidgetPresentationNode
 import com.jesjobom.ararai.widget.runtime.WidgetPresentationParser
 import com.jesjobom.ararai.widget.runtime.WidgetProgramCapabilities
 import com.jesjobom.ararai.widget.runtime.WidgetRequestedLimits
@@ -51,6 +52,7 @@ internal class WidgetAuthoringPipelineValidator(
         step: WidgetAlgorithmStep,
         feasibility: WidgetFeasibilityArtifact,
         runtimeContext: WidgetRuntimeContext,
+        requiredWebResultsLimit: Int? = null,
     ): WidgetAuthoringStageFailureCode? {
         val expectedTool = step.tool ?: return WidgetAuthoringStageFailureCode.InvalidAlgorithm
         for (fixture in runtimeFixtures(runtimeContext)) {
@@ -79,6 +81,12 @@ internal class WidgetAuthoringPipelineValidator(
                 ) is WidgetDraftToolValidation.Invalid
             ) {
                 return WidgetAuthoringStageFailureCode.InvalidToolArguments
+            }
+            if (expectedTool.id == "web_search_top_results" && requiredWebResultsLimit != null) {
+                val limit = runCatching {
+                    StrictJson.parse(argumentsJson).requiredObject().get("limit").asInt
+                }.getOrNull()
+                if (limit != requiredWebResultsLimit) return WidgetAuthoringStageFailureCode.InvalidToolArguments
             }
         }
         if (step.selectionMode != null) {
@@ -189,21 +197,8 @@ internal class WidgetAuthoringPipelineValidator(
     ): WidgetAuthoringStageFailureCode? {
         val source = joinSource(priorFragments + renderFunction)
         val contracts = contracts(feasibility)
-        val fixtureSets = listOf(
-            RenderFixture(
-                syntheticOutcomes(algorithm, contracts, emptyCollections = false),
-                WidgetAuthoringStageFailureCode.InvalidRenderExecution,
-            ),
-            RenderFixture(
-                syntheticOutcomes(algorithm, contracts, emptyCollections = true),
-                WidgetAuthoringStageFailureCode.InvalidPresentationEmptyHandling,
-            ),
-            RenderFixture(
-                failureOutcomes(algorithm),
-                WidgetAuthoringStageFailureCode.InvalidPresentationFailureHandling,
-            ),
-        )
-        var successfulPresentation: com.jesjobom.ararai.widget.runtime.WidgetPresentationNode? = null
+        val fixtureSets = renderFixtures(algorithm, contracts)
+        var successfulPresentation: WidgetPresentationNode? = null
         for (fixture in fixtureSets) {
             val output = when (
                 val result = call(
@@ -234,12 +229,47 @@ internal class WidgetAuthoringPipelineValidator(
                 WidgetAuthoringStageFailureCode.InvalidPresentation
             }
             if (successfulPresentation == null) {
+                if (!hasExpectedCollectionSize(algorithm, parsed)) {
+                    return WidgetAuthoringStageFailureCode.InvalidPresentationSuccessHandling
+                }
                 successfulPresentation = parsed
             } else if (algorithm.toolCallSteps.isNotEmpty() && successfulPresentation == parsed) {
                 return WidgetAuthoringStageFailureCode.InvalidPresentationSuccessHandling
             }
         }
         return null
+    }
+
+    private fun renderFixtures(
+        algorithm: WidgetAlgorithmArtifact,
+        contracts: Map<WidgetToolCapability, ApplicationToolContract>,
+    ): List<RenderFixture> = listOf(
+        RenderFixture(
+            syntheticOutcomes(
+                algorithm,
+                contracts,
+                emptyCollections = false,
+                collectionSize = if (algorithm.renderCapability == WidgetRenderCapability.CollectionList) 3 else 1,
+            ),
+            WidgetAuthoringStageFailureCode.InvalidRenderExecution,
+        ),
+        RenderFixture(
+            syntheticOutcomes(algorithm, contracts, emptyCollections = true),
+            WidgetAuthoringStageFailureCode.InvalidPresentationEmptyHandling,
+        ),
+        RenderFixture(
+            failureOutcomes(algorithm),
+            WidgetAuthoringStageFailureCode.InvalidPresentationFailureHandling,
+        ),
+    )
+
+    private fun hasExpectedCollectionSize(
+        algorithm: WidgetAlgorithmArtifact,
+        presentation: WidgetPresentationNode,
+    ): Boolean {
+        if (algorithm.renderCapability != WidgetRenderCapability.CollectionList) return true
+        val rows = ((presentation as? WidgetPresentationNode.Card)?.child as? WidgetPresentationNode.Column)?.children
+        return rows?.size == 3 && rows.all { it is WidgetPresentationNode.Column && it.children.isNotEmpty() }
     }
 
     suspend fun validateExactAssembly(
@@ -466,9 +496,10 @@ private fun syntheticOutcomes(
     algorithm: WidgetAlgorithmArtifact,
     contracts: Map<WidgetToolCapability, ApplicationToolContract>,
     emptyCollections: Boolean,
+    collectionSize: Int = 1,
 ): List<WidgetToolOutcome> = algorithm.toolCallSteps.map { step ->
     val tool = requireNotNull(step.tool)
-    val payload = synthesizeObject(contracts.getValue(tool).outputSchemaJson, emptyCollections)
+    val payload = synthesizeObject(contracts.getValue(tool).outputSchemaJson, emptyCollections, collectionSize)
     WidgetToolOutcome(
         alias = step.id,
         payload = payload,
@@ -503,23 +534,25 @@ private fun List<WidgetToolOutcome>.toOutcomeJson(): String {
     return StrictJson.canonical(root)
 }
 
-private fun synthesizeObject(schemaJson: String, emptyCollections: Boolean): JsonObject {
+private fun synthesizeObject(schemaJson: String, emptyCollections: Boolean, collectionSize: Int): JsonObject {
     val schema = JsonParser.parseString(schemaJson).requiredObject()
-    return synthesizeValue(schema, emptyCollections, propertyName = null).requiredObject()
+    return synthesizeValue(schema, emptyCollections, propertyName = null, collectionSize).requiredObject()
 }
 
-private fun synthesizeValue(schema: JsonObject, emptyCollections: Boolean, propertyName: String?): JsonElement {
+private fun synthesizeValue(schema: JsonObject, emptyCollections: Boolean, propertyName: String?, collectionSize: Int): JsonElement {
     schema.get("const")?.let { return it.deepCopy() }
     schema.getAsJsonArray("enum")?.firstOrNull()?.let { return it.deepCopy() }
     return when (schemaType(schema)) {
         "object" -> JsonObject().also { result ->
             schema.getAsJsonObject("properties")?.entrySet()?.forEach { (name, child) ->
-                result.add(name, synthesizeValue(child.requiredObject(), emptyCollections, name))
+                result.add(name, synthesizeValue(child.requiredObject(), emptyCollections, name, collectionSize))
             }
         }
         "array" -> JsonArray().also { result ->
             if (!emptyCollections) {
-                schema.getAsJsonObject("items")?.let { result.add(synthesizeValue(it, false, propertyName)) }
+                schema.getAsJsonObject("items")?.let { item ->
+                    repeat(collectionSize) { result.add(synthesizeValue(item, false, propertyName, collectionSize)) }
+                }
             }
         }
         "integer", "number" -> JsonPrimitive(if (propertyName == "year") 2000 else 1)

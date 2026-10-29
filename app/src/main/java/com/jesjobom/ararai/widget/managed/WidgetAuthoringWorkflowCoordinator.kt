@@ -37,6 +37,11 @@ internal sealed interface AcceptWidgetAuthoringStageResult {
     data class FeasibilityStopped(val outcome: WidgetFeasibilityOutcome) : AcceptWidgetAuthoringStageResult
 }
 
+internal data class AdvanceAndStartWidgetAuthoringResult(
+    val accepted: AcceptWidgetAuthoringStageResult,
+    val nextAttempt: RunWidgetAuthoringStageResult?,
+)
+
 internal class WidgetAuthoringWorkflowCoordinator(
     private val controller: ResumableWidgetAuthoringController,
     private val widgetRepository: ManagedWidgetRepository,
@@ -133,6 +138,33 @@ internal class WidgetAuthoringWorkflowCoordinator(
         return AcceptWidgetAuthoringStageResult.Advanced(
             controller.acceptCandidate(snapshot.acceptCommand(attempt, actionId, nextStage)),
         )
+    }
+
+    suspend fun advanceAndStartNext(
+        model: LocalModel,
+        inference: InferenceConfig,
+        modelArtifactDigest: String,
+        acceptActionId: String,
+        startActionId: String,
+    ): AdvanceAndStartWidgetAuthoringResult {
+        val accepted = acceptCurrent(acceptActionId)
+        val nextAttempt = if (accepted is AcceptWidgetAuthoringStageResult.Advanced &&
+            accepted.result is WidgetAuthoringMutationResult.Applied
+        ) {
+            val advancedSnapshot = accepted.result.snapshot
+            submit(
+                model,
+                inference,
+                modelArtifactDigest,
+                startActionId,
+                advancedSnapshot.session.currentStage,
+                WidgetAuthoringAttemptKind.Initial,
+                advancedSnapshot,
+            )
+        } else {
+            null
+        }
+        return AdvanceAndStartWidgetAuthoringResult(accepted, nextAttempt)
     }
 
     suspend fun preview(): WidgetAuthoringAssemblyResult {

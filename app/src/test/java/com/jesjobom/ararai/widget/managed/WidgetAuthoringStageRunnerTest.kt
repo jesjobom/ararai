@@ -69,7 +69,7 @@ class WidgetAuthoringStageRunnerTest {
 
         assertEquals(1, engine.loadCount)
         assertEquals(1, engine.generationCount)
-        assertEquals(1, engine.unloadCount)
+        assertEquals(2, engine.unloadCount)
         assertFalse(engine.loaded)
         assertEquals(WidgetAuthoringSessionStatus.AwaitingReview, result.session.status)
         assertEquals(WidgetAuthoringAttemptStatus.Succeeded, result.attempts.single().status)
@@ -86,7 +86,7 @@ class WidgetAuthoringStageRunnerTest {
         val result = fixture.runner.run(MODEL, INFERENCE, PROMPT, RUNTIME)
 
         assertEquals(1, engine.generationCount)
-        assertEquals(1, engine.unloadCount)
+        assertEquals(2, engine.unloadCount)
         assertEquals(WidgetAuthoringSessionStatus.AwaitingRetry, result.session.status)
         assertEquals(WidgetAuthoringAttemptStatus.Failed, result.attempts.single().status)
         assertEquals(WidgetAuthoringStageFailureCode.InvalidFeasibilityFields, result.attempts.single().failureCode)
@@ -106,6 +106,37 @@ class WidgetAuthoringStageRunnerTest {
         assertFalse(engine.loaded)
         assertEquals(WidgetAuthoringSessionStatus.AwaitingRetry, result.session.status)
         assertEquals(WidgetAuthoringStageFailureCode.DeviceRecoveryTimedOut, result.attempts.single().failureCode)
+    }
+
+    @Test
+    fun `recovery gate observes released engine even if a previous session was loaded`() = runTest {
+        val engine = CapturingEngine(FEASIBILITY).apply { loaded = true }
+        var loadedAtGate: Boolean? = null
+        val fixture = fixture(engine, recoveryReady = false, recoveryCheck = { loadedAtGate = engine.loaded })
+        fixture.startInitialAttempt()
+
+        val result = fixture.runner.run(MODEL, INFERENCE, PROMPT, RUNTIME)
+
+        assertEquals(false, loadedAtGate)
+        assertEquals(1, engine.unloadCount)
+        assertEquals(0, engine.loadCount)
+        assertEquals(WidgetAuthoringStageFailureCode.DeviceRecoveryTimedOut, result.attempts.single().failureCode)
+    }
+
+    @Test
+    fun `failed preflight unload ends attempt without sampling recovery or loading`() = runTest {
+        val engine = CapturingEngine(FEASIBILITY, unloadFailure = true).apply { loaded = true }
+        var sampled = false
+        val fixture = fixture(engine, recoveryCheck = { sampled = true })
+        fixture.startInitialAttempt()
+
+        val result = fixture.runner.run(MODEL, INFERENCE, PROMPT, RUNTIME)
+
+        assertFalse(sampled)
+        assertEquals(1, engine.unloadCount)
+        assertEquals(0, engine.loadCount)
+        assertEquals(0, engine.generationCount)
+        assertEquals(WidgetAuthoringStageFailureCode.RuntimeUnavailable, result.attempts.single().failureCode)
     }
 
     @Test
@@ -183,7 +214,7 @@ class WidgetAuthoringStageRunnerTest {
 
         assertEquals(1, engine.loadCount)
         assertEquals(0, engine.generationCount)
-        assertEquals(1, engine.unloadCount)
+        assertEquals(2, engine.unloadCount)
         assertFalse(engine.loaded)
         val persisted = result.attempts.single()
         assertEquals(WidgetAuthoringStageFailureCode.RuntimeUnavailable, persisted.failureCode)
@@ -210,7 +241,7 @@ class WidgetAuthoringStageRunnerTest {
         val restored = requireNotNull(fixture.repository.activeSession.value)
         assertEquals(WidgetAuthoringAttemptStatus.Cancelled, restored.attempts.single().status)
         assertEquals(WidgetAuthoringSessionStatus.AwaitingRetry, restored.session.status)
-        assertEquals(1, engine.unloadCount)
+        assertEquals(2, engine.unloadCount)
         assertFalse(engine.loaded)
     }
 
@@ -428,6 +459,7 @@ class WidgetAuthoringStageRunnerTest {
     private suspend fun fixture(
         engine: CapturingEngine,
         recoveryReady: Boolean = true,
+        recoveryCheck: (() -> Unit)? = null,
         initialize: Boolean = true,
         registry: ApplicationToolRegistry = ApplicationToolRegistry(emptyList()),
         javascript: WidgetJavaScriptEngine = WidgetJavaScriptEngine { _, _, _, _ ->
@@ -446,7 +478,10 @@ class WidgetAuthoringStageRunnerTest {
             WidgetAuthoringStageRunner(
                 repository,
                 WidgetAuthoringPipelineModelController(engine),
-                recoveryGate = { recoveryReady },
+                recoveryGate = {
+                    recoveryCheck?.invoke()
+                    recoveryReady
+                },
                 validator,
                 registry,
             ),
@@ -530,6 +565,7 @@ class WidgetAuthoringStageRunnerTest {
         private val artifact: String,
         private val loadFailure: Boolean = false,
         private val blockGeneration: Boolean = false,
+        private val unloadFailure: Boolean = false,
     ) : LocalLlmEngine {
         var loadCount = 0
         var generationCount = 0
@@ -554,6 +590,7 @@ class WidgetAuthoringStageRunnerTest {
 
         override suspend fun unload() {
             unloadCount++
+            if (unloadFailure) error("sanitized unload failure fixture")
             loaded = false
         }
     }
