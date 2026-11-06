@@ -106,6 +106,11 @@ helper handles item selection, neutral text, proven links, and fallback.
 If the chosen result item has an HTTPS `canonicalUrl`, the helper adds its
 source-proven link even when the model omits the optional URL field.
 Custom layouts retain the JavaScript source path and its lower-level helpers.
+Algorithm step-kind and presentation enums now come from the accepted domain
+types, and one typed presentation catalog supplies the compact routing policy,
+capability summaries, and controlled repair. Full initial and repair requests
+are tested against that contract and a measured input-size baseline; these
+checks catch structural drift but do not prove model comprehension.
 The card can show one unmodified item from one result array; it cannot filter
 fetched results, compare them, or choose between multiple result sets. The
 algorithm uses one tool-call step and `collection_card` for a random unfiltered

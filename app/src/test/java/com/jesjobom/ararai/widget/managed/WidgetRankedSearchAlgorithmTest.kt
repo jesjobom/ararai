@@ -23,16 +23,15 @@ class WidgetRankedSearchAlgorithmTest {
             """{"tools":[]}""",
         )
         val context = JsonParser.parseString(algorithmContext(prompt, feasibility)).asJsonObject
-        val selectionPolicy = context.get("selectionPolicy").asString
-        assertTrue(selectionPolicy.contains("collection_card"))
-        assertTrue(selectionPolicy.contains("seeded_random"))
-        assertTrue(selectionPolicy.contains("not steps[].kind"))
+        val selectionPolicy = context.getAsJsonObject("selectionPolicy")
+        assertEquals("collection_card", selectionPolicy.get("renderCapability").asString)
+        assertEquals("seeded_random", selectionPolicy.get("selectionInCardStage").asString)
+        assertEquals(false, selectionPolicy.get("postResultStepForPresentationOnly").asBoolean)
         val schema = JsonParser.parseString(algorithmCaptureSchema(feasibility, prompt)).asJsonObject
         val properties = schema.getAsJsonObject("parameters").getAsJsonObject("properties")
         val stepKind = properties.getAsJsonObject("steps").getAsJsonObject("items")
             .getAsJsonObject("properties").getAsJsonObject("kind")
-        assertTrue(stepKind.get("description").asString.contains("never step kinds"))
-        assertTrue(WIDGET_ALGORITHM_OBJECTIVE.contains("Random one-item array selection"))
+        assertTrue(stepKind.get("description").asString.contains("not a renderCapability"))
 
         val invalid = """{
             "steps":[
@@ -56,8 +55,8 @@ class WidgetRankedSearchAlgorithmTest {
             attemptNumber = 4,
         ).toUserText()
         assertTrue(repair.contains("Attempt 4 for this stage"))
-        assertTrue(repair.contains("custom_source and collection_card are renderCapability values"))
-        assertTrue(repair.contains("later seeded_random selection, not a post-call step"))
+        assertTrue(repair.contains("renderCapability accepts only collection_card, collection_list, custom_source"))
+        assertTrue(repair.contains("seeded_random is chosen in the later card stage"))
     }
 
     @Test

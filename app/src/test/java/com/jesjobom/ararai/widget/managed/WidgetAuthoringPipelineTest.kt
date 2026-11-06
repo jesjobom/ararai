@@ -283,7 +283,7 @@ class WidgetAuthoringPipelineTest {
             listOf("collection_card", "collection_list", "custom_source"),
             renderCapabilities.map { it.asJsonObject.get("id").asString },
         )
-        assertTrue(renderCapabilities[0].asJsonObject.get("summary").asString.contains("No post-result filtering"))
+        assertTrue(renderCapabilities[0].asJsonObject.get("summary").asString.contains("No post-result selection step"))
         assertTrue(renderCapabilities[2].asJsonObject.get("summary").asString.contains("conditional selection"))
         assertTrue(WIDGET_ALGORITHM_OBJECTIVE.contains("Runtime-conditioned queries"))
         assertFalse(context.toString().contains("runtime.collectionCard"))
@@ -303,12 +303,12 @@ class WidgetAuthoringPipelineTest {
             listOf("collection_list"),
             properties.getAsJsonObject("renderCapability").getAsJsonArray("enum").map { it.asString },
         )
-        assertTrue(properties.getAsJsonObject("steps").get("description").asString.contains("do not add a transform"))
         val context = JsonParser.parseString(algorithmContext(prompt, feasibility)).asJsonObject
-        assertTrue(context.get("rankedListPolicy").asString.contains("collection_list"))
-        assertTrue(context.get("rankedListPolicy").asString.contains("up to 10"))
-        assertTrue(context.get("rankedListPolicy").asString.contains("No transform step after the call"))
-        assertTrue(WIDGET_ALGORITHM_OBJECTIVE.contains("rendering their titles and links is not a transform step"))
+        val policy = context.getAsJsonObject("rankedListPolicy")
+        assertEquals("collection_list", policy.get("renderCapability").asString)
+        assertEquals(10, policy.get("maxResults").asInt)
+        assertEquals(false, policy.get("postResultStepForPresentationOnly").asBoolean)
+        assertTrue(WIDGET_ALGORITHM_OBJECTIVE.contains("Presentation-only selection, formatting, and links"))
         val repair = WidgetAuthoringRoundRequest(
             WidgetAuthoringStage.Algorithm,
             SUBMIT_WIDGET_ALGORITHM_TOOL,
@@ -318,8 +318,8 @@ class WidgetAuthoringPipelineTest {
             WidgetAuthoringStageFailureCode.InvalidAlgorithm,
             "{}",
         ).toUserText()
-        assertTrue(repair.contains("do not add a post-call transform"))
-        assertTrue(repair.contains("Do not change the requested list into a first-item collection_card"))
+        assertTrue(repair.contains("For an unmodified list use collection_list"))
+        assertTrue(repair.contains("\"maxResults\""))
         assertEquals(null, requestedWebResultsCount(prompt.copy(userInstruction = "Mostre o melhor resultado"), feasibility))
     }
 
@@ -368,7 +368,7 @@ class WidgetAuthoringPipelineTest {
             assertTrue(feasibility.getAsJsonObject("widgetApi").get("renderModes").asString.contains("custom_source"))
             assertTrue(
                 algorithm.getAsJsonArray("renderCapabilities")[0].asJsonObject.get("summary")
-                    .asString.contains("No post-result filtering"),
+                    .asString.contains("No post-result selection step"),
             )
         }
     }

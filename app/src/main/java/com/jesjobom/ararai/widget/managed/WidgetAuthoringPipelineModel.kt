@@ -419,21 +419,7 @@ private val REPAIR_INSTRUCTIONS = mapOf(
         "use message as the reason; for needs_clarification, use message as the question. " +
         FEASIBILITY_OUTCOME_CONTRACT,
     WidgetAuthoringStageFailureCode.InvalidAlgorithm to
-        "steps[].kind is only runtime_input, transform, or tool_call; custom_source and collection_card " +
-        "are renderCapability values, never step kinds. A random single item from one returned array uses " +
-        "collection_card and its later seeded_random selection, not a post-call step. " +
-        "Preserve each required data operation in the step graph. Give dependent steps a dependsOn list; " +
-        "selectionMode belongs only to wikipedia_pages version 2 tool calls, never to other tools. " +
-        "For an explicit list of two to ten web_search_top_results, keep collection_list and one tool_call; " +
-        "do not add a post-call transform for formatting, numbering, or selecting those unmodified results. " +
-        "Do not change the requested list into a first-item collection_card. " +
-        "For a best/first ranked web_search_content result, the provider already ranks the array: " +
-        "use one tool call and collection_card without a post-result transform. " +
-        "For a Wikipedia date event with year in title, use one wikipedia_on_this_day call and " +
-        "collection_card; the application appends the year. " +
-        "Use collection_card only for one direct item from one tool result; use custom_source when an actual " +
-        "post-result filter or comparison is required. A runtime-dependent query before the tool call may still " +
-        "use a collection mode.",
+        WidgetAlgorithmPromptContract.repairInstruction(),
     WidgetAuthoringStageFailureCode.InvalidSource to
         "Submit only source for the current stage. It must contain one named function declaration whose " +
         "name and parameters exactly match the authoritative stage signature, and it must parse with every brace closed; " +
