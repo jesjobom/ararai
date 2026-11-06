@@ -71,6 +71,7 @@ internal class WidgetAuthoringWorkflowCoordinator(
                     modelId = model.id,
                     modelArtifactDigest = modelArtifactDigest,
                     inferenceConfigJson = WidgetAuthoringInferenceCodec.encode(inference),
+                    schemaVersion = WidgetAuthoringWorkflowPolicy.FEASIBILITY_WITHOUT_SCHEDULE_SCHEMA_VERSION,
                     toolContractDigest = authoringToolContractDigest(registry),
                 ),
             ),
@@ -146,8 +147,9 @@ internal class WidgetAuthoringWorkflowCoordinator(
         modelArtifactDigest: String,
         acceptActionId: String,
         startActionId: String,
+        expectedSession: WidgetAuthoringSessionSnapshot? = null,
     ): AdvanceAndStartWidgetAuthoringResult {
-        val accepted = acceptCurrent(acceptActionId)
+        val accepted = acceptCurrent(acceptActionId, expectedSession)
         val nextAttempt = if (accepted is AcceptWidgetAuthoringStageResult.Advanced &&
             accepted.result is WidgetAuthoringMutationResult.Applied
         ) {
@@ -268,7 +270,7 @@ internal class WidgetAuthoringWorkflowCoordinator(
         actionId: String,
     ): AcceptWidgetAuthoringStageResult {
         if (attempt.stage == WidgetAuthoringStageKey.Feasibility) {
-            val feasibility = parseFeasibility(requireNotNull(attempt.artifact))
+            val feasibility = parseFeasibility(requireNotNull(attempt.artifact), snapshot.session.schemaVersion)
             return AcceptWidgetAuthoringStageResult.FeasibilityStopped(feasibility.outcome)
         }
         require(attempt.stage == WidgetAuthoringStageKey.Render)
@@ -287,9 +289,18 @@ internal class WidgetAuthoringWorkflowCoordinator(
         attempt: WidgetAuthoringAttempt,
     ): WidgetAuthoringStageKey? = when (val stage = attempt.stage) {
         WidgetAuthoringStageKey.Feasibility -> {
-            val feasibility = parseFeasibility(requireNotNull(attempt.artifact))
-            if (feasibility.outcome == WidgetFeasibilityOutcome.Achievable) WidgetAuthoringStageKey.Algorithm else null
+            val feasibility = parseFeasibility(requireNotNull(attempt.artifact), snapshot.session.schemaVersion)
+            if (feasibility.outcome == WidgetFeasibilityOutcome.Achievable) {
+                if (snapshot.session.schemaVersion >= 2) {
+                    WidgetAuthoringStageKey.Schedule
+                } else {
+                    WidgetAuthoringStageKey.Algorithm
+                }
+            } else {
+                null
+            }
         }
+        WidgetAuthoringStageKey.Schedule -> WidgetAuthoringStageKey.Algorithm
         WidgetAuthoringStageKey.Algorithm -> callStages(snapshot, requireNotNull(attempt.artifact)).firstOrNull()
             ?: WidgetAuthoringStageKey.Plan
         is WidgetAuthoringStageKey.CallFunction -> {
@@ -307,7 +318,10 @@ internal class WidgetAuthoringWorkflowCoordinator(
         snapshot: WidgetAuthoringSessionSnapshot,
         algorithmArtifact: String,
     ): List<WidgetAuthoringStageKey.CallFunction> {
-        val feasibility = parseFeasibility(acceptedArtifact(snapshot, WidgetAuthoringStageKey.Feasibility))
+        val feasibility = parseFeasibility(
+            acceptedArtifact(snapshot, WidgetAuthoringStageKey.Feasibility),
+            snapshot.session.schemaVersion,
+        )
         val algorithm = when (val parsed = WidgetAlgorithmParser.parse(algorithmArtifact, feasibility)) {
             is WidgetAlgorithmParseResult.Valid -> parsed.artifact
             is WidgetAlgorithmParseResult.Invalid -> error("Persisted algorithm candidate is invalid")
@@ -315,11 +329,19 @@ internal class WidgetAuthoringWorkflowCoordinator(
         return algorithm.toolCallSteps.map { WidgetAuthoringStageKey.CallFunction(it.id) }
     }
 
-    private fun parseFeasibility(raw: String): WidgetFeasibilityArtifact {
+    private fun parseFeasibility(raw: String, schemaVersion: Int): WidgetFeasibilityArtifact {
         val tools = registry.descriptors()
             .filter { ApplicationToolConsumer.Widget in it.consumers }
             .mapTo(mutableSetOf()) { com.jesjobom.ararai.widget.runtime.WidgetToolCapability(it.id, it.version) }
-        return when (val parsed = WidgetFeasibilityParser.parse(raw, tools)) {
+        val includeScheduleField =
+            schemaVersion < WidgetAuthoringWorkflowPolicy.FEASIBILITY_WITHOUT_SCHEDULE_SCHEMA_VERSION
+        return when (
+            val parsed = WidgetFeasibilityParser.parse(
+                raw,
+                tools,
+                includeScheduleField = includeScheduleField,
+            )
+        ) {
             is WidgetFeasibilityParseResult.Valid -> parsed.artifact
             is WidgetFeasibilityParseResult.Invalid -> error("Persisted feasibility candidate is invalid")
         }

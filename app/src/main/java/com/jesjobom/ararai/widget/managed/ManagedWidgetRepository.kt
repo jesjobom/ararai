@@ -122,6 +122,14 @@ internal interface ManagedWidgetStore {
         enabled: Boolean,
     ): ManagedWidgetDefinition
 
+    fun setPeriodicIntervalHours(
+        widgetId: String,
+        expectedRevision: Int,
+        expectedConsentDigest: String,
+        intervalHours: Long?,
+        consentDigest: String,
+    ): ManagedWidgetDefinition
+
     fun delete(widgetId: String)
 }
 
@@ -210,6 +218,14 @@ internal interface ManagedWidgetRepository {
         enabled: Boolean,
     ): ManagedWidgetDefinition
 
+    suspend fun setPeriodicIntervalHours(
+        widgetId: String,
+        expectedRevision: Int,
+        expectedConsentDigest: String,
+        intervalHours: Long?,
+        consentDigest: String,
+    ): ManagedWidgetDefinition
+
     suspend fun delete(widgetId: String)
 }
 
@@ -284,6 +300,16 @@ internal class DispatcherManagedWidgetRepository(
         enabled: Boolean,
     ): ManagedWidgetDefinition = databaseCall {
         store.setEnabled(widgetId, enabled)
+    }
+
+    override suspend fun setPeriodicIntervalHours(
+        widgetId: String,
+        expectedRevision: Int,
+        expectedConsentDigest: String,
+        intervalHours: Long?,
+        consentDigest: String,
+    ): ManagedWidgetDefinition = databaseCall {
+        store.setPeriodicIntervalHours(widgetId, expectedRevision, expectedConsentDigest, intervalHours, consentDigest)
     }
 
     override suspend fun delete(widgetId: String): Unit = databaseCall {
@@ -990,6 +1016,35 @@ internal class SqliteManagedWidgetRepository(
     }
 
     @Synchronized
+    override fun setPeriodicIntervalHours(
+        widgetId: String,
+        expectedRevision: Int,
+        expectedConsentDigest: String,
+        intervalHours: Long?,
+        consentDigest: String,
+    ): ManagedWidgetDefinition {
+        requireValidWidgetId(widgetId)
+        require(intervalHours == null || intervalHours in ManagedWidgetPolicy.CONFIGURABLE_PERIODIC_INTERVAL_HOURS)
+        require(SHA_256_PATTERN.matches(expectedConsentDigest) && SHA_256_PATTERN.matches(consentDigest))
+        val updated = writableDatabase.update(
+            "managed_widgets",
+            ContentValues().apply {
+                if (intervalHours == null) {
+                    putNull("periodic_interval_hours")
+                } else {
+                    put("periodic_interval_hours", intervalHours)
+                }
+                put("consent_digest", consentDigest)
+                put("updated_at_millis", nowMillis())
+            },
+            "id = ? AND active_revision = ? AND consent_digest = ?",
+            arrayOf(widgetId, expectedRevision.toString(), expectedConsentDigest),
+        )
+        if (updated != 1) throw ConcurrentModificationException("Managed widget changed while updating schedule")
+        return definition(widgetId)
+    }
+
+    @Synchronized
     override fun delete(widgetId: String) {
         requireValidWidgetId(widgetId)
         writableDatabase.inTransaction {
@@ -1531,6 +1586,14 @@ internal class SqliteManagedWidgetRepository(
             .distinctBy(WidgetAuthoringStageKey.CallFunction::stepId)
         return when (stage) {
             WidgetAuthoringStageKey.Feasibility -> buildSet {
+                add(WidgetAuthoringStageKey.Schedule)
+                add(WidgetAuthoringStageKey.Algorithm)
+                addAll(callStages)
+                add(WidgetAuthoringStageKey.Plan)
+                add(WidgetAuthoringStageKey.Render)
+                add(WidgetAuthoringStageKey.Assembly)
+            }
+            WidgetAuthoringStageKey.Schedule -> buildSet {
                 add(WidgetAuthoringStageKey.Algorithm)
                 addAll(callStages)
                 add(WidgetAuthoringStageKey.Plan)

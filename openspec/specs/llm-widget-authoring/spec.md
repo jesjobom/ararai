@@ -14,8 +14,7 @@ The application SHALL run each user-authorized widget-authoring stage attempt
 as an application-scoped job that continues while the user navigates within the
 app and survives leaving the authoring screen while the process lives. The job
 SHALL use the shared application-scoped local LLM engine, SHALL NOT create a
-second concurrent engine instance, and SHALL end after persisting the attempt
-outcome and unloading the model.
+second concurrent engine instance, and SHALL persist the attempt and unload the model before continuing to another validated stage. The user-started workflow SHALL stop at a failure, cancellation, terminal feasibility outcome, invalid assembly, unavailable configuration, or draft preview.
 
 Previously accepted checkpoints SHALL remain durable when an active attempt is
 cancelled, interrupted, or killed with the process. The application SHALL NOT
@@ -24,9 +23,8 @@ its completed state.
 
 #### Scenario: Generation continues after leaving the screen
 
-- **WHEN** the user starts one stage attempt and navigates away from the
-  authoring screen without cancelling
-- **THEN** that attempt keeps running at application scope
+- **WHEN** the user starts widget authoring and navigates away without cancelling
+- **THEN** validated stages keep running at application scope until a stop condition
 - **AND** returning to the authoring screen shows the same durable session and
   attempt state.
 
@@ -106,10 +104,7 @@ while the model stays unloaded and SHALL wait at most 10 minutes for a stable
 window. Failure to stabilize SHALL persist a controlled retryable outcome and
 SHALL NOT advance the workflow.
 
-After every generation outcome, the application SHALL persist the attempt,
-unload the model, and end foreground execution. It SHALL NOT automatically
-reload the model or start another generation until a subsequent explicit user
-action.
+After every generation outcome, the application SHALL persist the attempt and unload the model. A successful validated outcome SHALL allow the next stage to start under the original user request; failure, timeout, cancellation, or recovery timeout SHALL end foreground execution without advancing.
 
 #### Scenario: Wait with the model unloaded
 
@@ -146,11 +141,9 @@ action.
 
 #### Scenario: Completed stage does not trigger another generation
 
-- **WHEN** one model generation succeeds, fails validation, times out, or is
-  cancelled
-- **THEN** the application persists that outcome and unloads the model
-- **AND** no recovery reload or later stage begins until the user explicitly
-  requests it.
+- **WHEN** a model generation fails validation, times out, is cancelled, or has no next stage
+- **THEN** the application persists its outcome and unloads the model
+- **AND** no later generation begins without another user action.
 
 ### Requirement: Visible authoring job state
 
@@ -462,7 +455,7 @@ SHALL continue through the legacy JavaScript source path.
 
 The application SHALL let a user ask an explicitly verified installed local
 model to create or edit an in-app widget in a dedicated authoring flow. The
-application SHALL expose a bounded, user-reviewed sequence of isolated model stages for
+application SHALL expose a bounded sequence of isolated, validated model stages for
 feasibility/capability selection, typed algorithm design, JavaScript function
 generation, orchestration, presentation, validation, and deterministic
 assembly. Each stage SHALL receive only the bounded non-secret context and
@@ -477,7 +470,7 @@ current UI operation or the word "widget" in that instruction.
 
 - **WHEN** the user asks an eligible installed model to create a supported
   widget
-- **THEN** the authoring flow advances through the versioned pipeline only after explicit user continuation at each stage and
+- **THEN** the authoring flow automatically advances through the versioned pipeline after each validated stage and
   captures one typed artifact from each required stage
 - **AND** user-specific call functions and custom presentation JavaScript remain
   model-generated, while application-owned orchestration and simple collection
@@ -504,9 +497,11 @@ current UI operation or the word "widget" in that instruction.
 
 ### Requirement: Validate feasibility and a typed algorithm before code
 
-The first stage SHALL return exactly one `outcome`, one bounded
-outcome-dependent `message`, one bounded periodic interval or null, and the
-minimum registered tool IDs. The application SHALL derive protocol metadata,
+For new schema-version-3 sessions, the first stage SHALL return exactly one
+`outcome`, one bounded outcome-dependent `message`, and the minimum registered
+tool IDs; its model-facing schema and artifact SHALL NOT include a periodic
+interval. Earlier session versions SHALL retain their original four-field
+feasibility contract and schedule semantics. The application SHALL derive protocol metadata,
 enablement, eligible registered tool versions, deterministic runtime grants,
 allowlisted presentation grants, and terminal normalization from checked-in
 policy. For an achievable request, a later stage SHALL return a bounded typed
@@ -539,8 +534,8 @@ not invalidate the algorithm.
 - **AND** a legacy wire version, whether absent, matching, or inconsistent,
   cannot alter that application-owned selection.
 
-The feasibility instruction SHALL state the four-field conditional contract
-for all three outcomes: `message` is the display name for `achievable`, the
+The feasibility instruction SHALL state the version-appropriate conditional
+contract for all three outcomes: `message` is the display name for `achievable`, the
 reason for `unachievable`, and one question for `needs_clarification`. It SHALL
 ask the model to select only the minimum required available tool IDs without
 treating not-yet-validated selections as frozen. A bounded repair SHALL
@@ -588,7 +583,7 @@ values from `outcome` and `message`.
 Each user-authorized stage or retry SHALL begin with the model unloaded, await a
 bounded stable temperature-and-memory gate, and load the model with the fixed
 authoring inference configuration. After persisting that attempt outcome, the
-application SHALL unload the model and wait for another explicit user action.
+application SHALL unload the model before any next validated stage begins.
 Unload, wait, and replacement publication SHALL be serialized with model
 lifecycle transitions. Native ownership transfer SHALL remain non-cancellable,
 the wait SHALL remain
@@ -598,7 +593,7 @@ terminal `unachievable` or `needs_clarification` outcomes.
 
 #### Scenario: Start each later generation from a recovered model session
 
-- **WHEN** the user explicitly starts the next stage or retries a rejected stage
+- **WHEN** a validated stage advances automatically or the user retries a rejected stage
 - **THEN** the application waits while the model remains unloaded
 - **AND** it publishes a freshly loaded text-only session using the same fixed
   authoring configuration only after the recovery gate is stable
@@ -631,10 +626,10 @@ terminal `unachievable` or `needs_clarification` outcomes.
 #### Scenario: Repair an inconsistent feasibility outcome
 
 - **WHEN** the feasibility artifact contains an invalid outcome-dependent
-  message, schedule, or tool ID selection
+  message or tool ID selection, or a legacy artifact contains an invalid schedule
 - **THEN** the application identifies the controlled feasibility category
-- **AND** the repair repeats the four-field contract and keeps a supported
-  request on `achievable` before requesting one replacement artifact.
+- **AND** the repair repeats the session-version-appropriate field contract
+  before requesting one replacement artifact.
 
 #### Scenario: Reject unsupported adaptive execution
 
@@ -990,8 +985,8 @@ inference configuration, authoring protocol/schema versions, and relevant tool
 contract digest. Each checkpoint SHALL record an artifact digest and the exact
 accepted upstream digest on which it depends.
 
-Only a completed and validated candidate explicitly accepted by the user SHALL
-become an authoritative checkpoint. Local assembly validation MAY run
+Only a completed and validated candidate accepted by the application-owned workflow SHALL
+become an authoritative checkpoint. Automatic acceptance SHALL match the completed attempt and session revision. Local assembly validation MAY run
 automatically after render is accepted but SHALL use only current, non-stale
 checkpoints.
 
@@ -1004,27 +999,26 @@ add the frozen alias, tool id, and contract version. Previously accepted legacy
 envelopes and complete-call functions MAY be normalized for compatibility but
 SHALL NOT expand authority.
 
-Starting a pending stage and accepting a reviewed candidate SHALL be presented
-as one context-dependent action named Advance. Acceptance SHALL remain the
-only transition that makes a candidate an authoritative checkpoint.
+Starting a previously pending stage or accepting a reviewable candidate MAY be presented
+as a manual Advance action. Acceptance SHALL remain the only transition that makes
+a candidate an authoritative checkpoint, and final widget confirmation SHALL stay explicit.
 
 #### Scenario: Successful attempt awaits acceptance
 
 - **WHEN** one stage generation returns an artifact that passes deterministic
   parsing and validation
 - **THEN** the application persists it as a reviewable candidate
-- **AND** it does not use that candidate as an upstream checkpoint until the
-  user chooses Advance.
+- **AND** automatic progression accepts it before using it as an upstream checkpoint.
 
 #### Scenario: Accepted checkpoint unlocks the next stage
 
-- **WHEN** the user accepts a successful candidate
+- **WHEN** the workflow accepts a successful candidate automatically or the user resumes it manually
 - **THEN** it becomes the authoritative checkpoint for that stage
 - **AND** only the next dependency-satisfied stage becomes eligible to run.
 
 #### Scenario: Deterministic plan does not invoke the model
 
-- **WHEN** the user starts the dependency-satisfied plan stage
+- **WHEN** the dependency-satisfied plan stage starts
 - **THEN** the application derives and validates its source from the accepted
   call functions and algorithm
 - **AND** no device recovery wait, model load, or generation occurs.
@@ -1066,7 +1060,7 @@ SHALL appear immediately below their stage, outside the expanded detail.
 
 - **WHEN** a call-function, plan, or render candidate is captured and validated
 - **THEN** the user can inspect the exact bounded source and successful
-  validation summary as inert text before accepting it.
+  validation summary as inert text during or after automatic progression.
 
 #### Scenario: Inspect a rejected artifact
 
@@ -1092,14 +1086,19 @@ SHALL appear immediately below their stage, outside the expanded detail.
 
 ### Requirement: User-controlled retry and reprocessing
 
-Each explicit user action SHALL authorize at most one model generation. A
+Starting authoring SHALL authorize successive validated stages, but each explicit Retry SHALL authorize at most one repair generation for the failed stage. A
 failed stage SHALL expose Retry without a cumulative manual attempt limit. A
 retry SHALL receive only immutable accepted dependencies, the relevant checked-
-in contract, a controlled failure code, and the immediately preceding bounded
-rejected artifact only when the first repair has a precise localized validation
-category. Source-envelope and render-execution repairs SHALL omit rejected
-source. All later repairs SHALL omit the previous artifact for every category.
-Retry SHALL NOT start an automatic loop.
+in contract, a controlled failure code, and the immediately preceding rejected
+artifact when a localized validation failure is actionable and the complete
+artifact fits a 2 KiB prompt-evidence bound and the stage input budget. This
+applies to every retry, not only the first. Source-envelope and render-execution
+repairs, generic schema failures, runtime failures, missing artifacts, timeouts,
+and oversized evidence SHALL omit the previous artifact.
+Every repair prompt SHALL include its monotonically increasing attempt number
+for the current stage as non-authoritative variation guidance. The attempt
+number SHALL NOT alter validated context, tool schema, or accepted dependencies.
+Retry SHALL NOT repeat a failed repair automatically.
 
 An accepted stage or a successful unaccepted candidate SHALL expose Reprocess.
 Reprocessing SHALL create a new stage revision without overwriting any accepted
@@ -1120,6 +1119,19 @@ context construction, preview, and final assembly until regenerated.
 - **WHEN** the app restarts after one or more retries of the current stage
 - **THEN** prior attempts remain persisted
 - **AND** the user can still retry the failed stage.
+
+#### Scenario: Consecutive repairs carry distinct attempt numbers
+
+- **WHEN** the second and third attempts of one stage are generated
+- **THEN** their prompts identify attempt 2 and attempt 3 respectively
+- **AND** both may include only the immediately preceding complete bounded artifact when its validation failure is actionable
+- **AND** both retain the same validated stage contract.
+
+#### Scenario: Oversized repair evidence is omitted
+
+- **WHEN** a localized rejected artifact exceeds the evidence bound or would exceed the stage input budget
+- **THEN** the retry retains its attempt number and controlled failure code
+- **AND** it omits the artifact without truncating it into invalid JSON or source.
 
 #### Scenario: Render execution repair regenerates without source anchoring
 
@@ -1285,12 +1297,12 @@ committed non-active outcome.
 
 ### Requirement: One-tap continuation after stage review
 
-When a successfully completed widget-authoring stage is awaiting review, one explicit Avançar action in the authoring UI SHALL accept that stage and start the next stage attempt if one exists and the selected authoring configuration is available. The application SHALL continue to stop for review after each generated attempt; it SHALL NOT accept an artifact merely because generation finished.
+Starting or retrying a stage SHALL continue automatically across subsequent validated stages while the process lives. The existing Avançar action MAY resume a previously reviewable candidate. Automatic progression SHALL stop at the first failure, cancellation, terminal feasibility outcome, unavailable configuration, invalid assembly, or final draft preview. Confirmation of the widget and its authority remains explicit.
 
 #### Scenario: Continue to the next stage
 
-- **WHEN** the user taps Avançar on a successful stage with a next stage and valid model configuration
-- **THEN** the current artifact is durably accepted and the next attempt is submitted without a second tap
+- **WHEN** a successful stage has a next stage and valid model configuration
+- **THEN** the current artifact is durably accepted and the next attempt is submitted automatically
 - **AND** that next attempt remains cancellable and subject to normal single-flight and device-state checks.
 
 #### Scenario: No next stage or non-applied acceptance
@@ -1300,8 +1312,8 @@ When a successfully completed widget-authoring stage is awaiting review, one exp
 
 #### Scenario: Configuration unavailable
 
-- **WHEN** the user taps Avançar on a successful stage but the authoring model configuration is unavailable
-- **THEN** the checkpoint is accepted and the next stage remains available to start later, without losing accepted work.
+- **WHEN** a successful stage finishes but the authoring model configuration is unavailable
+- **THEN** the candidate remains reviewable and no next stage starts, without losing accepted work.
 
 ### Requirement: Preserve requested ranked web result count
 
@@ -1403,3 +1415,66 @@ When a single-step algorithm chooses `collection_card` with `wikipedia_pages@2`,
 
 - **WHEN** an existing authoring session has accepted a one-call collection-card algorithm and is waiting to retry the render stage
 - **THEN** the retry derives the version-two page card from the accepted checkpoint without changing the tool selection or repeating earlier stages.
+
+### Requirement: Select refresh cadence in a dedicated authoring stage
+
+For new schema-version-3 authoring sessions, achievable feasibility SHALL advance to a distinct schedule stage before algorithm generation. Only that stage SHALL receive the six new-choice intervals of 1, 2, 4, 6, 12, and 24 hours; an editing session MAY also retain its current interval. It SHALL also offer no-periodic-refresh and return exactly one permitted choice. It SHALL select the closest offered cadence when a requested cadence is not exactly supported, without introducing a frequency-specific clarification outcome. The accepted schedule artifact SHALL be authoritative for the draft; feasibility SHALL neither request nor return a periodic interval. Existing schema-version-1 sessions SHALL retain their original stage path and schedule meaning; schema-version-2 sessions SHALL retain the separate schedule stage and their four-field feasibility artifact with a null interval.
+
+#### Scenario: Four updates per day
+
+- **WHEN** a user requests four updates per day
+- **THEN** feasibility omits the schedule field and the dedicated stage selects the offered 6-hour interval
+- **AND** the draft uses the accepted schedule-stage interval.
+
+#### Scenario: Closest supported cadence
+
+- **WHEN** a requested periodic cadence is not exactly supported
+- **THEN** the stage chooses the closest supported option instead of asking for clarification about the frequency
+- **AND** the application rejects values outside the offered set.
+
+#### Scenario: Legacy in-progress session
+
+- **WHEN** a schema-version-1 session resumes after upgrading the app
+- **THEN** it retains its prior feasibility-to-algorithm transition and persisted feasibility schedule.
+
+#### Scenario: In-progress session with the earlier dedicated schedule contract
+
+- **WHEN** a schema-version-2 session resumes after upgrading the app
+- **THEN** its feasibility contract still requires a null periodic interval field
+- **AND** it retains the separate schedule stage without discarding accepted checkpoints.
+
+### Requirement: Change a saved widget's cadence from its details
+
+The widget detail screen SHALL offer a numeric whole-hour field accepting every interval from 1 through 24, and a manual-only option. Selecting one SHALL persist the new interval and updated consent identity without regenerating the widget program, then reconcile periodic work. An in-flight run bound to the previous consent identity SHALL not commit as the active result. Previously saved intervals above 24 hours SHALL remain readable and executable until the user changes them.
+
+#### Scenario: Change the refresh frequency
+
+- **WHEN** a user selects a different supported interval on a saved widget's detail screen
+- **THEN** the stored definition and detail screen reflect the selected interval
+- **AND** the program revision remains unchanged while periodic work is reconciled.
+
+### Requirement: Separate random item presentation from algorithm data operations
+
+The algorithm objective, validated context, and capture schema SHALL distinguish
+the `steps[].kind` data-operation values from `renderCapability` presentation
+values. Selecting one unfiltered item from a single returned result array,
+whether first or seeded-random, SHALL be described as a `collection_card`
+presentation choice without an additional post-call algorithm step. The later
+declarative card artifact SHALL select `first` or `seeded_random` as requested.
+The model SHALL NOT be instructed to use `custom_source` as a step kind, and an
+invalid-algorithm repair SHALL restate this distinction. Actual post-result
+filtering, comparison, or conditional presentation MAY use the `custom_source`
+render capability and the necessary typed data-operation steps. Tool-call
+`selectionMode` SHALL remain limited to tools whose contract supports it.
+
+#### Scenario: One random web result
+
+- **WHEN** a user requests one random item from a web-search result array
+- **THEN** the algorithm guidance offers one search `tool_call` with `renderCapability=collection_card`
+- **AND** the card stage offers `selection=seeded_random` without a post-call transform step.
+
+#### Scenario: Model confuses step kind with render capability
+
+- **WHEN** an algorithm artifact submits `steps[].kind=custom_source`
+- **THEN** validation rejects the artifact
+- **AND** the controlled repair explains that `custom_source` is a render capability, not a step kind, without inventing new step-kind values.

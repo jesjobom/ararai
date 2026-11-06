@@ -39,11 +39,11 @@ internal const val WIDGET_FEASIBILITY_OBJECTIVE =
         "return unachievable or needs_clarification rather than substitute a different request."
 
 internal const val WIDGET_ALGORITHM_OBJECTIVE =
-    "Preserve user constraints in ordered steps. " +
-        "Best/first web result: one web_search_content call and collection_card; provider order selects first. " +
-        "Date-event year in title: one wikipedia_on_this_day call and collection_card; app appends year. " +
-        "Use collection_list for several unmodified items, custom_source for other layouts or filtering. " +
-        "Other post-result operations need dependent transform steps. " +
+    "Preserve data operations. Best/first web: one web_search_content call, collection_card. " +
+        "Event year: wikipedia_on_this_day + collection_card; app adds year. " +
+        "Use collection_list for unmodified lists; rendering their titles and links is not a transform step. " +
+        "Random one-item array selection: collection_card seeded_random, no step. " +
+        "custom_source is a renderCapability, never a step kind; use it for filtering/comparison. " +
         "Runtime-conditioned queries may use collection modes; tool calls cannot read live results."
 
 /** A single best/first web hit means the provider's highest-ranked item, not a model comparison. */
@@ -89,12 +89,29 @@ internal fun requestedWebResultsCount(prompt: WidgetAuthoringPrompt, feasibility
 
 internal fun algorithmCaptureSchema(feasibility: WidgetFeasibilityArtifact, prompt: WidgetAuthoringPrompt? = null): String = JsonParser.parseString(WidgetAuthoringStageSchemas.algorithm).asJsonObject.apply {
     val properties = getAsJsonObject("parameters").getAsJsonObject("properties")
+    properties.getAsJsonObject("steps").getAsJsonObject("items").getAsJsonObject("properties")
+        .getAsJsonObject("kind").addProperty(
+            "description",
+            "Data operation only: runtime_input, transform, or tool_call. " +
+                "custom_source and collection_card are renderCapability values, never step kinds. " +
+                "Selecting one returned item for display is not a step.",
+        )
+    properties.getAsJsonObject("renderCapability").addProperty(
+        "description",
+        "collection_card selects first or seeded_random from one result array; " +
+            "custom_source is for filtering, comparison, or conditional presentation.",
+    )
     if (feasibility.tools.none { it.capability.id == "wikipedia_pages" && it.capability.version == 2 }) {
         properties.getAsJsonObject("steps").getAsJsonObject("items")
             .getAsJsonObject("properties").remove("selectionMode")
     }
     if (prompt != null && requestedWebResultsCount(prompt, feasibility) != null) {
         properties.getAsJsonObject("renderCapability").add("enum", JsonArray().apply { add("collection_list") })
+        properties.getAsJsonObject("steps").addProperty(
+            "description",
+            "Use one web_search_top_results tool_call; do not add a transform after it for list formatting, numbering, or selection. " +
+                "Only add pre-call steps if the user explicitly requested a runtime-dependent query.",
+        )
     } else if (prompt != null && requestedRankedWebContentCard(prompt, feasibility)) {
         properties.getAsJsonObject("renderCapability").add("enum", JsonArray().apply { add("collection_card") })
     } else if (prompt != null && requestedEventYearTitle(prompt, feasibility)) {
@@ -366,8 +383,9 @@ internal class ManagedWidgetAuthoringPipeline(
                 contextJson = baseContext,
                 repairCode = repairCode,
                 rejectedArtifact = repairCode?.let {
-                    repairArtifactForPrompt(it, rejectedArtifact, attempt)
+                    repairArtifactForPrompt(it, rejectedArtifact)
                 },
+                attemptNumber = attempt,
             )
             when (val round = modelController.capture(model, request)) {
                 is WidgetAuthoringRoundResult.Captured -> when (val validated = validate(round.rawArgumentsJson)) {
@@ -472,6 +490,12 @@ private class WidgetAuthoringGenerationRecovery(
 
 internal fun baseContext(prompt: WidgetAuthoringPrompt): String = diagnosticFeasibilityContext(prompt, compact = true)
 
+internal fun feasibilityContextWithSeparateSchedule(prompt: WidgetAuthoringPrompt): String {
+    val context = JsonParser.parseString(baseContext(prompt)).asJsonObject
+    context.getAsJsonObject("widgetApi").remove("supportedIntervalsHours")
+    return StrictJson.canonical(context)
+}
+
 internal fun diagnosticFeasibilityContext(
     prompt: WidgetAuthoringPrompt,
     compact: Boolean,
@@ -559,6 +583,15 @@ internal fun algorithmContext(
     JsonObject().apply {
         addProperty("userInstruction", prompt.userInstruction)
         add("feasibility", feasibility.toJson())
+        requestedWebResultsCount(prompt, feasibility)?.let { count ->
+            addProperty(
+                "rankedListPolicy",
+                "Return renderCapability=collection_list and one web_search_top_results tool_call for up to $count " +
+                    "provider-ranked items. No transform step after the call: list formatting and row selection belong " +
+                    "to collection_list rendering. Do not replace the requested list with a first-item collection_card. " +
+                    "Use pre-call runtime steps only if the request explicitly needs a dynamic query.",
+            )
+        }
         if (requestedRankedWebContentCard(prompt, feasibility)) {
             addProperty(
                 "rankedSearchPolicy",
@@ -577,7 +610,9 @@ internal fun algorithmContext(
             addProperty(
                 "selectionPolicy",
                 "Do not set selectionMode on a tool call. For a random item from a returned array, " +
-                    "select it after the tool result in custom_source; this does not change the tool arguments.",
+                    "choose collection_card and later use its seeded_random selection. " +
+                    "Do not add a transform step for selection alone. " +
+                    "custom_source is a renderCapability, not steps[].kind; reserve it for filtering or comparison.",
             )
         }
         val widgetApi = JsonParser.parseString(prompt.apiContextJson).asJsonObject.deepCopy()

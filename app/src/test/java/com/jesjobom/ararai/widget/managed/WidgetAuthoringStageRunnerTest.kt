@@ -246,13 +246,14 @@ class WidgetAuthoringStageRunnerTest {
     }
 
     @Test
-    fun `retry sends only controlled preceding failure and performs one new generation`() = runTest {
+    fun `successive retries identify the attempt and include recent bounded evidence`() = runTest {
         val firstEngine = CapturingEngine("{}")
         var fixture = fixture(firstEngine)
         fixture.startInitialAttempt()
         var snapshot = fixture.runner.run(MODEL, INFERENCE, PROMPT, RUNTIME)
+        assertFalse(firstEngine.requests.single().plainChatPrompt.contains("Attempt 1 for this stage"))
         advanceTimeBy(24 * 60 * 60 * 1_000L)
-        val retryEngine = CapturingEngine(FEASIBILITY)
+        val retryEngine = CapturingEngine("{}")
         fixture = fixture(retryEngine, initialize = false)
         val retry = fixture.repository.startAttempt(
             StartWidgetAuthoringAttempt(
@@ -270,8 +271,30 @@ class WidgetAuthoringStageRunnerTest {
         assertEquals(1, retryEngine.generationCount)
         assertTrue(retryEngine.requests.single().plainChatPrompt.contains("invalid_feasibility_fields"))
         assertTrue(retryEngine.requests.single().plainChatPrompt.contains("{}"))
+        assertTrue(retryEngine.requests.single().plainChatPrompt.contains("Attempt 2 for this stage"))
         assertEquals(2, snapshot.attempts.size)
         assertEquals(retry.attempt.id, snapshot.attempts.last().id)
+        assertEquals(WidgetAuthoringAttemptStatus.Failed, snapshot.attempts.last().status)
+
+        val nextEngine = CapturingEngine(FEASIBILITY)
+        fixture = fixture(nextEngine, initialize = false)
+        val nextRetry = fixture.repository.startAttempt(
+            StartWidgetAuthoringAttempt(
+                snapshot.session.id,
+                snapshot.session.revision,
+                "retry-again",
+                WidgetAuthoringStageKey.Feasibility,
+                WidgetAuthoringAttemptKind.Repair,
+                authoringUpstreamDigest(snapshot, WidgetAuthoringStageKey.Feasibility),
+            ),
+        ) as StartWidgetAuthoringAttemptResult.Started
+        snapshot = fixture.runner.run(MODEL, INFERENCE, PROMPT, RUNTIME)
+
+        val nextPrompt = nextEngine.requests.single().plainChatPrompt
+        assertTrue(nextPrompt.contains("Attempt 3 for this stage"))
+        assertTrue(nextPrompt.contains("Rejected artifact (bounded evidence"))
+        assertEquals(3, snapshot.attempts.size)
+        assertEquals(nextRetry.attempt.id, snapshot.attempts.last().id)
         assertEquals(WidgetAuthoringAttemptStatus.Succeeded, snapshot.attempts.last().status)
     }
 

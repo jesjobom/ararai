@@ -28,6 +28,7 @@ import com.jesjobom.ararai.model.LegacyModelArtifactMigration
 import com.jesjobom.ararai.model.ModelCatalogController
 import com.jesjobom.ararai.model.ModelConfigLoader
 import com.jesjobom.ararai.model.ModelFileDownloader
+import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.model.SharedPreferencesModelSelectionStore
 import com.jesjobom.ararai.reporting.DiagnosticErrorReportCoordinator
 import com.jesjobom.ararai.reporting.FirebaseAppCheckInstaller
@@ -78,14 +79,17 @@ import com.jesjobom.ararai.widget.runtime.WidgetProgramParser
 import com.jesjobom.ararai.widget.runtime.WidgetProgramValidationResult
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeContext
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeCoordinator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.UUID
 
 class ArarAiApplication :
     Application(),
@@ -107,9 +111,13 @@ class ArarAiApplication :
             runCatching { resumableWidgetAuthoringController.initialize() }
         }
         applicationScope.launch {
-            widgetAuthoringWorkflowCoordinator.activeSession.collect {
-                resumableWidgetAuthoringNotificationPresenter.onStateChanged(it)
-            }
+            combine(
+                widgetAuthoringWorkflowCoordinator.activeSession,
+                resumableWidgetAuthoringController.autoProgressionActive,
+            ) { snapshot, autoProgressionActive -> snapshot to autoProgressionActive }
+                .collect { (snapshot, autoProgressionActive) ->
+                    resumableWidgetAuthoringNotificationPresenter.onStateChanged(snapshot, autoProgressionActive)
+                }
         }
     }
 
@@ -334,6 +342,27 @@ class ArarAiApplication :
             scope = applicationScope,
             repository = widgetAuthoringWorkflowRepository,
             executor = stageRunner,
+            onSuccessfulAttempt = { completed, execution ->
+                try {
+                    val selected = modelController.state.value.models
+                        .firstOrNull { it.config.id == completed.session.modelId }
+                    val available = selected?.state as? ModelStartupState.Available
+                    if (available != null && selected.config.sha256 == completed.session.modelArtifactDigest) {
+                        widgetAuthoringWorkflowCoordinator.advanceAndStartNext(
+                            model = available.model,
+                            inference = execution.inference,
+                            modelArtifactDigest = selected.config.sha256,
+                            acceptActionId = UUID.randomUUID().toString(),
+                            startActionId = UUID.randomUUID().toString(),
+                            expectedSession = completed,
+                        )
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: RuntimeException) {
+                    // Keep the validated candidate reviewable if automatic continuation cannot proceed.
+                }
+            },
         )
     }
 

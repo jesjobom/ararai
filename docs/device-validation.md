@@ -1750,3 +1750,51 @@ measurements remain release-validation checks rather than claims of this change.
   `evidence/2026-10-15-sms901e-periodic-reconciliation.md` for sanitized logs.
   A subsequent controlled process restart recovered all eight SystemJobs
   without changing the schedule generations.
+
+### 2026-11-03 ranked-list authoring retry on SM-S901E
+
+- On Android 16, Gemma 4 E4B with debug APK `202611022233` (SHA-256
+  `0cdbeeaf8bfe923a9393ad63672a4338de6cafdb02835746c97e709160fab505`)
+  accepted a corrected `collection_list` algorithm after previous attempts
+  returned a post-call formatting transform or a one-item card. The accepted
+  artifact had one `web_search_top_results` call and no transform; authoring
+  advanced automatically to `call:step_1`.
+- The next generation hit its 90-second watchdog with no captured artifact.
+  The app retained the feasibility and algorithm checkpoints and stopped at
+  `AwaitingRetry` for the call function. Android had killed an earlier attempt
+  under swap pressure, but did not kill this observed retry. Thermal status was
+  2 during timeout cleanup; causality is not established. No full draft or
+  confirmed widget resulted. Sanitized traces are under
+  `openspec/changes/auto-advance-widget-authoring/evidence/`.
+
+### 2026-11-03 dedicated refresh-frequency stage installation
+
+- The full `scripts/quality-gate.sh` passed, including 882 debug unit tests,
+  lint, debug and releaseCandidate builds, artifact verification, and strict
+  OpenSpec validation (12 items passed, none failed).
+- Installed debug APK SHA-256
+  `e5e5af7025e59cef4075fd3553de115261d1a55f2604fa4488b6d64c0cb2221f`
+  on the connected SM-S901E with `adb install -r` (`Success`). The installed
+  version code is `29895160`; original first-install time remained
+  `2026-10-04 22:04:26`.
+- Before and after installation, the app database contained 18 managed widgets,
+  zero active authoring sessions, and 27 program revisions. The dedicated
+  schedule-stage choice was covered by local integration tests, but a live
+  on-device model selection for “4 vezes ao dia” was not performed in this
+  installation check.
+
+### 2026-11-04 reduced model choices and manual-refresh baseline
+
+- Full `scripts/quality-gate.sh` passed, including 884 debug unit tests with
+  zero failures, lint, debug and releaseCandidate builds, artifact checks, and
+  strict OpenSpec validation (12 items passed, none failed).
+- Debug APK SHA-256
+  `c878e1b5a3bce5eccf2f32d3607c3033b3dfbc9b233f52928b3456fdb41e5111`
+  installed with `adb install -r` (`Success`) on the connected SM-S901E. The
+  installed version code is `29896094`; first-install time remained
+  `2026-10-04 22:04:26`.
+- Before and after the upgrade, the database had 18 managed widgets, zero
+  active authoring sessions, and 27 program revisions. Unit tests cover the
+  six model choices, numeric interval policy, and WorkManager baseline reset.
+  A real model choice and a 24-hour background dispatch after a manual refresh
+  remain unverified on the physical device.

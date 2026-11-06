@@ -147,7 +147,7 @@ internal object WidgetAuthoringContextBuilder {
             add(
                 "supportedIntervalsHours",
                 JsonArray().also { values ->
-                    ManagedWidgetPolicy.SUPPORTED_PERIODIC_INTERVAL_HOURS.sorted().forEach(values::add)
+                    ManagedWidgetPolicy.MODEL_PERIODIC_INTERVAL_HOURS.sorted().forEach(values::add)
                 },
             )
             add(
@@ -385,7 +385,7 @@ internal class WidgetProposalCaptureTool : EphemeralLocalLlmTool {
     fun capturedOrNull(): String? = captured.get()
 
     companion object {
-        const val TOOL_DESCRIPTION = """{"name":"propose_widget","description":"Submit exactly one complete untrusted widget draft for application validation. This captures a proposal only; it does not execute or save it.","parameters":{"type":"object","additionalProperties":false,"properties":{"proposalVersion":{"type":"integer","const":1},"displayName":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"periodicIntervalHours":{"type":["integer","null"],"enum":[null,1,6,12,24]},"tools":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,63}$"},"version":{"type":"integer","minimum":1}},"required":["id","version"]}},"runtime":{"type":"array","uniqueItems":true,"items":{"type":"string","enum":["locale","timezone","local_time","seed"]}},"presentation":{"type":"array","uniqueItems":true,"items":{"type":"string","enum":["card","column","row","text","value","icon","https_link"]}},"source":{"type":"string","minLength":1,"maxLength":32768}},"required":["proposalVersion","displayName","enabled","periodicIntervalHours","tools","runtime","presentation","source"]}}"""
+        val TOOL_DESCRIPTION = """{"name":"propose_widget","description":"Submit exactly one complete untrusted widget draft for application validation. This captures a proposal only; it does not execute or save it.","parameters":{"type":"object","additionalProperties":false,"properties":{"proposalVersion":{"type":"integer","const":1},"displayName":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"periodicIntervalHours":{"type":["integer","null"],"enum":[null,${ManagedWidgetPolicy.SUPPORTED_PERIODIC_INTERVAL_HOURS.sorted().joinToString()}]},"tools":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,63}$"},"version":{"type":"integer","minimum":1}},"required":["id","version"]}},"runtime":{"type":"array","uniqueItems":true,"items":{"type":"string","enum":["locale","timezone","local_time","seed"]}},"presentation":{"type":"array","uniqueItems":true,"items":{"type":"string","enum":["card","column","row","text","value","icon","https_link"]}},"source":{"type":"string","minLength":1,"maxLength":32768}},"required":["proposalVersion","displayName","enabled","periodicIntervalHours","tools","runtime","presentation","source"]}}"""
     }
 }
 

@@ -1,0 +1,20 @@
+Device: SM-S901E; Android 16; America/Toronto (EST).
+APK: versionCode 29894613, versionName 202611022233, SHA-256 0cdbeeaf8bfe923a9393ad63672a4338de6cafdb02835746c97e709160fab505.
+Session and algorithm metadata only; no instruction, query, or artifact body:
+stage=algorithm attempt=8 status=Succeeded failure=none artifactBytes=303 startedMs=1793677100112 completedMs=1793677133293
+stage=call:step_1 attempt=1 status=Failed failure=TimedOut artifactBytes=0 startedMs=1793677145193 completedMs=1793677283022
+accepted algorithm shape: renderCapability=collection_list; steps=[('tool_call', 'web_search_top_results')]
+checkpoints: [('feasibility', 'Accepted'), ('algorithm', 'Accepted')]
+session: [('AwaitingRetry', 'call:step_1')]
+Relevant sanitized runtime events:
+11-02 22:38:20.109 D/ArarAI.Recovery(27217): recovery event=recovery_finished ready=true
+11-02 22:38:38.306 D/ArarAI.LiteRtLm(27217): runtime event=generation_started request=1 resource=none active=1 elapsedMillis=0 outcome=none threads=48 rssKiB=348348 swapKiB=377956 pssKiB=4109751 nativePssKiB=28029 nativeHeapKiB=391827 javaHeapKiB=22232 availableMemoryKiB=931084 systemLowMemory=false thermalStatus=0
+11-02 22:38:52.779 D/ArarAI.LiteRtLm(27217): runtime event=generation_cleanup_started request=1 resource=55466648 active=1 elapsedMillis=14484 outcome=completed threads=48 rssKiB=527156 swapKiB=415804 pssKiB=4402110 nativePssKiB=80764 nativeHeapKiB=973251 javaHeapKiB=11500 availableMemoryKiB=1025244 systemLowMemory=false thermalStatus=0
+11-02 22:38:53.263 D/ArarAI.LiteRtLm(27217): runtime event=generation_finished request=1 resource=none active=0 elapsedMillis=14962 outcome=completed threads=48 rssKiB=566092 swapKiB=351136 pssKiB=4373801 nativePssKiB=138475 nativeHeapKiB=851869 javaHeapKiB=13000 availableMemoryKiB=950368 systemLowMemory=false thermalStatus=0
+11-02 22:38:54.727 D/ArarAI.LiteRtLm(27217): runtime event=engine_close_finished request=none resource=132569789 active=0 elapsedMillis=1400 outcome=success threads=44 rssKiB=238264 swapKiB=68472 pssKiB=300859 nativePssKiB=139268 nativeHeapKiB=14929 javaHeapKiB=13520 availableMemoryKiB=4237912 systemLowMemory=false thermalStatus=0
+11-02 22:39:05.189 D/ArarAI.Recovery(27217): recovery event=recovery_finished ready=true
+11-02 22:39:33.632 D/ArarAI.LiteRtLm(27217): runtime event=generation_started request=2 resource=none active=1 elapsedMillis=0 outcome=none threads=46 rssKiB=324188 swapKiB=398672 pssKiB=4108368 nativePssKiB=27599 nativeHeapKiB=391148 javaHeapKiB=25632 availableMemoryKiB=958512 systemLowMemory=false thermalStatus=0
+11-02 22:41:04.413 D/ArarAI.LiteRtLm(27217): runtime event=generation_cleanup_started request=2 resource=163687998 active=1 elapsedMillis=90238 outcome=cancelled threads=49 rssKiB=399036 swapKiB=489524 pssKiB=4325938 nativePssKiB=23784 nativeHeapKiB=744857 javaHeapKiB=9808 availableMemoryKiB=907544 systemLowMemory=false thermalStatus=2
+11-02 22:41:21.201 D/ArarAI.LiteRtLm(27217): runtime event=model_error request=2 resource=163687998 active=1 elapsedMillis=107754 outcome=failed threads=48 rssKiB=409540 swapKiB=487540 pssKiB=4345409 nativePssKiB=40028 nativeHeapKiB=858687 javaHeapKiB=15664 availableMemoryKiB=1003528 systemLowMemory=false thermalStatus=2
+11-02 22:41:22.732 D/ArarAI.LiteRtLm(27217): runtime event=generation_finished request=2 resource=none active=0 elapsedMillis=109314 outcome=cancelled threads=48 rssKiB=433480 swapKiB=418000 pssKiB=4294420 nativePssKiB=77789 nativeHeapKiB=737356 javaHeapKiB=19576 availableMemoryKiB=962532 systemLowMemory=false thermalStatus=2
+11-02 22:41:25.854 D/ArarAI.LiteRtLm(27217): runtime event=engine_close_finished request=none resource=137909332 active=0 elapsedMillis=2758 outcome=success threads=44 rssKiB=167556 swapKiB=96140 pssKiB=253206 nativePssKiB=97261 nativeHeapKiB=15131 javaHeapKiB=20764 availableMemoryKiB=4057812 systemLowMemory=false thermalStatus=2

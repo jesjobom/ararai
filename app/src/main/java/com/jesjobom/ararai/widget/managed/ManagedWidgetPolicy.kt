@@ -7,7 +7,11 @@ internal object ManagedWidgetPolicy {
     const val MAX_WIDGETS = 50
     const val MAX_REVISIONS_PER_WIDGET = 20
 
-    val SUPPORTED_PERIODIC_INTERVAL_HOURS = setOf(1L, 6L, 12L, 24L)
+    val CONFIGURABLE_PERIODIC_INTERVAL_HOURS = (1L..24L).toSet()
+    val MODEL_PERIODIC_INTERVAL_HOURS = setOf(1L, 2L, 4L, 6L, 12L, 24L)
+
+    // Retain previously saved schedules without offering them for new configuration.
+    val SUPPORTED_PERIODIC_INTERVAL_HOURS = CONFIGURABLE_PERIODIC_INTERVAL_HOURS + setOf(48L, 72L, 168L)
 
     const val MAX_CACHED_PRESENTATION_BYTES = WidgetRuntimePolicy.MAX_OUTPUT_BYTES
 

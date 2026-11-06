@@ -594,6 +594,7 @@ private fun WidgetAuthoringAttemptStatus.label(): String = stringResource(
 @Composable
 private fun WidgetAuthoringStageKey.label(): String = when (this) {
     WidgetAuthoringStageKey.Feasibility -> stringResource(R.string.widget_authoring_workflow_stage_feasibility)
+    WidgetAuthoringStageKey.Schedule -> stringResource(R.string.widget_authoring_workflow_stage_schedule)
     WidgetAuthoringStageKey.Algorithm -> stringResource(R.string.widget_authoring_workflow_stage_algorithm)
     is WidgetAuthoringStageKey.CallFunction -> stringResource(R.string.widget_authoring_workflow_stage_call, stepId)
     WidgetAuthoringStageKey.Plan -> stringResource(R.string.widget_authoring_workflow_stage_plan)

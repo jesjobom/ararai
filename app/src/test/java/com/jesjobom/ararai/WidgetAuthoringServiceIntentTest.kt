@@ -151,6 +151,20 @@ class WidgetAuthoringServiceIntentTest {
     }
 
     @Test
+    fun `foreground remains active while a validated stage is automatically advanced`() {
+        val review = snapshot(revision = 5, status = WidgetAuthoringSessionStatus.AwaitingReview)
+
+        assertEquals(
+            WidgetAuthoringForegroundDisposition.Keep,
+            widgetAuthoringForegroundDisposition(review, null, autoProgressionActive = true),
+        )
+        assertEquals(
+            WidgetAuthoringForegroundDisposition.DetachAndStop,
+            widgetAuthoringForegroundDisposition(review, null, autoProgressionActive = false),
+        )
+    }
+
+    @Test
     fun `resumable presenter refreshes instead of stopping a pending foreground start`() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val presenter = ResumableWidgetAuthoringNotificationPresenter(context)

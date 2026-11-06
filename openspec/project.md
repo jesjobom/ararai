@@ -55,15 +55,17 @@ inference remains device-, driver-, model-, and workload-dependent.
   enable switches. The top-results tool does not extract page content; the
   content tool reuses Chat's bounded Exa highlights or Tavily extraction.
 - Managed widgets provide bounded multi-round model authorship, strict
-  staged validation, explicit source/permission/schedule consent, immutable local
+  staged validation, automatic advancement through successful stages, explicit
+  retries and source/permission/schedule consent, immutable local
   revisions, unique inexact WorkManager schedules, manual refresh, stale cache,
   bounded observations and sanitized runs, and fixed Compose rendering. Android
-  launcher instances may display a fixed, text-only projection of validated
-  cached results; launcher rendering never executes model-authored code. A model
-  runs only during an explicit foreground authoring attempt; refreshes execute
+  launcher instances may display a fixed projection of validated cached results,
+  including a scrollable list of individual validated links; launcher rendering
+  never executes model-authored code. A model
+  runs only during a user-started foreground authoring workflow; refreshes execute
   the confirmed program without model inference. Eligibility is declared through
-  `widget_authoring_pipeline_v1` only after the per-stage and complete physical
-  diagnostic pass; no checked-in model currently carries that marker.
+  `widget_authoring_pipeline_v1` for Gemma 4 E4B in the checked-in catalog;
+  physical-device inference and full workflow behavior still require validation.
   Authoring discloses full tool and render contracts only after capability
   selection. Simple array cards use model-authored typed configuration and
   application-generated JavaScript; custom render source and existing accepted

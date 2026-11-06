@@ -97,43 +97,79 @@ internal object LauncherWidgetRenderer {
         }
         val language = SharedPreferencesApplicationLanguagePreferenceStore(context).language
         val localized = SharedPreferencesApplicationLanguagePreferenceStore.localizedContext(context, language)
-        val views = RemoteViews(context.packageName, R.layout.launcher_widget).apply {
-            setTextViewText(
-                R.id.launcher_widget_title,
-                snapshot.widgetName.ifBlank { localized.getString(R.string.app_name) },
-            )
-            setTextViewText(R.id.launcher_widget_headline, snapshot.headline)
-            setViewVisibility(
-                R.id.launcher_widget_headline,
-                if (snapshot.headline.isBlank()) View.GONE else View.VISIBLE,
-            )
-            setTextViewText(
-                R.id.launcher_widget_body,
-                snapshot.body.ifBlank {
-                    if (snapshot.headline.isBlank() && snapshot.link == null) {
-                        fallbackBody(localized, snapshot.state)
-                    } else {
-                        ""
-                    }
-                },
-            )
-            setTextViewText(R.id.launcher_widget_link, snapshot.link?.label.orEmpty())
-            setViewVisibility(R.id.launcher_widget_link, if (snapshot.link == null) View.GONE else View.VISIBLE)
+        val showRows = snapshot.rows.count { it is LauncherWidgetRow.Link } > 1
+        val canRefresh = widgetId?.let { definitions[it]?.enabled } == true
+        val views = renderViews(
+            context,
+            localized,
+            appWidgetId,
+            widgetId?.takeIf { definitions.containsKey(it) },
+            snapshot,
+            showRows,
+            canRefresh,
+        )
+        AppWidgetManager.getInstance(context).apply {
+            updateAppWidget(appWidgetId, views)
+            if (showRows) notifyAppWidgetViewDataChanged(appWidgetId, R.id.launcher_widget_rows)
+        }
+    }
+
+    private fun renderViews(
+        context: Context,
+        localized: Context,
+        appWidgetId: Int,
+        widgetId: String?,
+        snapshot: LauncherWidgetSnapshot,
+        showRows: Boolean,
+        canRefresh: Boolean,
+    ): RemoteViews = RemoteViews(context.packageName, R.layout.launcher_widget).apply {
+        setTextViewText(
+            R.id.launcher_widget_title,
+            snapshot.widgetName.ifBlank { localized.getString(R.string.app_name) },
+        )
+        setContent(context, appWidgetId, snapshot, showRows, localized)
+        setTextViewText(R.id.launcher_widget_status, statusText(localized, snapshot))
+        setViewVisibility(R.id.launcher_widget_refresh, if (canRefresh) View.VISIBLE else View.GONE)
+        if (canRefresh) setOnClickPendingIntent(R.id.launcher_widget_refresh, refreshIntent(context, appWidgetId))
+        setOnClickPendingIntent(R.id.launcher_widget_root, openDetailIntent(context, appWidgetId, widgetId))
+    }
+
+    private fun RemoteViews.setContent(
+        context: Context,
+        appWidgetId: Int,
+        snapshot: LauncherWidgetSnapshot,
+        showRows: Boolean,
+        localized: Context,
+    ) {
+        setTextViewText(R.id.launcher_widget_headline, snapshot.headline)
+        setViewVisibility(
+            R.id.launcher_widget_headline,
+            if (showRows || snapshot.headline.isBlank()) View.GONE else View.VISIBLE,
+        )
+        setTextViewText(
+            R.id.launcher_widget_body,
+            snapshot.body.ifBlank {
+                if (snapshot.headline.isBlank() && snapshot.link == null) {
+                    fallbackBody(localized, snapshot.state)
+                } else {
+                    ""
+                }
+            },
+        )
+        setViewVisibility(R.id.launcher_widget_body, if (showRows) View.GONE else View.VISIBLE)
+        setTextViewText(R.id.launcher_widget_link, snapshot.link?.label.orEmpty())
+        val showSingleLink = !showRows && snapshot.link != null
+        setViewVisibility(R.id.launcher_widget_link, if (showSingleLink) View.VISIBLE else View.GONE)
+        if (showRows) {
+            setViewVisibility(R.id.launcher_widget_rows, View.VISIBLE)
+            setRemoteAdapter(R.id.launcher_widget_rows, rowsIntent(context, appWidgetId))
+            setPendingIntentTemplate(R.id.launcher_widget_rows, openRowLinkIntent(context, appWidgetId))
+        } else {
+            setViewVisibility(R.id.launcher_widget_rows, View.GONE)
             snapshot.link?.let { link ->
                 setOnClickPendingIntent(R.id.launcher_widget_link, openLinkIntent(context, appWidgetId, link.url))
             }
-            setTextViewText(R.id.launcher_widget_status, statusText(localized, snapshot))
-            val canRefresh = widgetId?.let { definitions[it]?.enabled } == true
-            setViewVisibility(R.id.launcher_widget_refresh, if (canRefresh) View.VISIBLE else View.GONE)
-            if (canRefresh) {
-                setOnClickPendingIntent(R.id.launcher_widget_refresh, refreshIntent(context, appWidgetId))
-            }
-            setOnClickPendingIntent(
-                R.id.launcher_widget_root,
-                openDetailIntent(context, appWidgetId, widgetId?.takeIf { definitions.containsKey(it) }),
-            )
         }
-        AppWidgetManager.getInstance(context).updateAppWidget(appWidgetId, views)
     }
 
     private fun fallbackBody(context: Context, state: LauncherWidgetState): String = context.getString(
@@ -187,6 +223,14 @@ internal object LauncherWidgetRenderer {
         )
     }
 
+    private fun openRowLinkIntent(context: Context, appWidgetId: Int): PendingIntent = PendingIntent.getActivity(
+        context,
+        appWidgetId,
+        Intent(context, LauncherWidgetLinkActivity::class.java)
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+    )
+
     private fun refreshIntent(context: Context, appWidgetId: Int): PendingIntent {
         val intent = Intent(context, LauncherWidgetRefreshReceiver::class.java)
             .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
@@ -197,4 +241,11 @@ internal object LauncherWidgetRenderer {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
+}
+
+private fun rowsIntent(context: Context, appWidgetId: Int): Intent {
+    val intent = Intent(context, LauncherWidgetRowsService::class.java)
+    intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+    intent.data = Uri.parse("ararai-launcher://rows/$appWidgetId")
+    return intent
 }

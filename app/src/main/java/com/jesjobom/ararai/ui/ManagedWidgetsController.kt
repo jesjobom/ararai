@@ -145,7 +145,11 @@ internal class ManagedWidgetsController(
         )
     }
 
-    suspend fun refresh(widgetId: String): ManagedWidgetExecutionStatus = services.manualRefresh.refresh(widgetId)
+    suspend fun refresh(widgetId: String): ManagedWidgetExecutionStatus = services.manualRefresh.refresh(widgetId).also { status ->
+        if (status == ManagedWidgetExecutionStatus.Completed || status == ManagedWidgetExecutionStatus.RetryableFailure) {
+            services.schedules.resetPeriodicBaseline(widgetId)
+        }
+    }
 
     suspend fun presentDraft(
         widgetId: String?,
@@ -160,6 +164,8 @@ internal class ManagedWidgetsController(
     }
 
     suspend fun setEnabled(widgetId: String, enabled: Boolean): ManagedWidgetDefinition = services.schedules.setEnabled(widgetId, enabled)
+
+    suspend fun setPeriodicIntervalHours(widgetId: String, intervalHours: Long?): ManagedWidgetDefinition = services.schedules.setPeriodicIntervalHours(widgetId, intervalHours)
 
     suspend fun delete(widgetId: String) = services.schedules.delete(widgetId)
 

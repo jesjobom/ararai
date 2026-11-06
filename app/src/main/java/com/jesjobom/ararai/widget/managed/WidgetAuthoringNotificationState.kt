@@ -12,8 +12,10 @@ internal data class WidgetAuthoringNotificationState(
 internal object WidgetAuthoringNotificationProjector {
     fun project(
         snapshot: WidgetAuthoringSessionSnapshot,
+        autoProgressionActive: Boolean = false,
     ): WidgetAuthoringNotificationState = WidgetAuthoringNotificationState(
-        ongoing = snapshot.session.status in ACTIVE_SESSION_STATUSES,
+        ongoing = snapshot.session.status in ACTIVE_SESSION_STATUSES ||
+            (autoProgressionActive && snapshot.session.status == WidgetAuthoringSessionStatus.AwaitingReview),
         status = snapshot.session.status,
         stage = snapshot.session.currentStage,
         actions = when (snapshot.session.status) {
@@ -21,10 +23,11 @@ internal object WidgetAuthoringNotificationProjector {
             WidgetAuthoringSessionStatus.AttemptDeferred,
             WidgetAuthoringSessionStatus.AttemptRunning,
             -> setOf(WidgetAuthoringNotificationAction.Cancel)
-            WidgetAuthoringSessionStatus.AwaitingReview -> setOf(
-                WidgetAuthoringNotificationAction.Review,
-                WidgetAuthoringNotificationAction.Continue,
-            )
+            WidgetAuthoringSessionStatus.AwaitingReview -> if (autoProgressionActive) {
+                setOf(WidgetAuthoringNotificationAction.Review)
+            } else {
+                setOf(WidgetAuthoringNotificationAction.Review, WidgetAuthoringNotificationAction.Continue)
+            }
             WidgetAuthoringSessionStatus.AwaitingRetry -> setOf(
                 WidgetAuthoringNotificationAction.Review,
                 WidgetAuthoringNotificationAction.Retry,

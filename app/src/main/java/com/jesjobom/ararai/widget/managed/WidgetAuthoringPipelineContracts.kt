@@ -19,6 +19,7 @@ import com.jesjobom.ararai.widget.runtime.utf8Size
 
 internal const val WIDGET_AUTHORING_PROTOCOL_VERSION = 1
 internal const val SUBMIT_WIDGET_FEASIBILITY_TOOL = "submit_widget_feasibility"
+internal const val SUBMIT_WIDGET_SCHEDULE_TOOL = "submit_widget_schedule"
 internal const val SUBMIT_WIDGET_ALGORITHM_TOOL = "submit_widget_algorithm"
 internal const val SUBMIT_WIDGET_CALL_FUNCTION_TOOL = "submit_widget_call_function"
 internal const val SUBMIT_WIDGET_PLAN_FUNCTION_TOOL = "submit_widget_plan_function"
@@ -33,6 +34,7 @@ internal object WidgetAuthoringPipelinePolicy {
     const val MAX_QUESTION_CHARS = 240
     const val MAX_FRAGMENT_BYTES = 6 * 1024
     const val MAX_ARTIFACT_BYTES = 8 * 1024
+    const val MAX_REPAIR_PROMPT_ARTIFACT_BYTES = 2 * 1024
     const val OUTPUT_RESERVE_TOKENS = 1_536
     const val ESTIMATED_INPUT_CHARS_PER_TOKEN = 4
     const val MAX_REPAIRS = 2
@@ -73,12 +75,13 @@ internal object WidgetFeasibilityParser {
     fun parse(
         raw: String,
         availableTools: Set<WidgetToolCapability>,
+        includeScheduleField: Boolean = true,
     ): WidgetFeasibilityParseResult {
         if (raw.utf8Size() > WidgetAuthoringPipelinePolicy.MAX_ARTIFACT_BYTES) {
             return WidgetFeasibilityParseResult.Invalid(WidgetAuthoringStageFailureCode.ResourceLimit)
         }
         return try {
-            WidgetFeasibilityParseResult.Valid(parseArtifact(raw, availableTools))
+            WidgetFeasibilityParseResult.Valid(parseArtifact(raw, availableTools, includeScheduleField))
         } catch (failure: WidgetFeasibilityValidationFailure) {
             WidgetFeasibilityParseResult.Invalid(failure.code)
         } catch (_: Exception) {
@@ -89,12 +92,13 @@ internal object WidgetFeasibilityParser {
     private fun parseArtifact(
         raw: String,
         availableTools: Set<WidgetToolCapability>,
+        includeScheduleField: Boolean,
     ): WidgetFeasibilityArtifact {
         val root = parseRoot(raw)
-        validateRootFields(root)
+        validateRootFields(root, includeScheduleField)
         val outcome = parseOutcome(root)
         val message = parseMessage(root, outcome)
-        val interval = if (outcome == WidgetFeasibilityOutcome.Achievable) parseSchedule(root) else null
+        val interval = if (includeScheduleField && outcome == WidgetFeasibilityOutcome.Achievable) parseSchedule(root) else null
         val tools = if (outcome == WidgetFeasibilityOutcome.Achievable) parseTools(root, availableTools) else emptyList()
         val runtime = WidgetRuntimeValue.entries.toSet().takeIf { outcome == WidgetFeasibilityOutcome.Achievable }.orEmpty()
         val presentation = WidgetPresentationCapability.entries.toSet()
@@ -122,10 +126,14 @@ internal object WidgetFeasibilityParser {
         ).requiredObject()
     }
 
-    private fun validateRootFields(root: JsonObject) = validateFeasibility(
+    private fun validateRootFields(root: JsonObject, includeScheduleField: Boolean) = validateFeasibility(
         WidgetAuthoringStageFailureCode.InvalidFeasibilityFields,
     ) {
-        root.requireFields("outcome", "message", "periodicIntervalHours", "toolIds")
+        if (includeScheduleField) {
+            root.requireFields("outcome", "message", "periodicIntervalHours", "toolIds")
+        } else {
+            root.requireFields("outcome", "message", "toolIds")
+        }
     }
 
     private fun parseOutcome(root: JsonObject): WidgetFeasibilityOutcome = validateFeasibility(
@@ -440,6 +448,7 @@ internal data class WidgetAssembly(
 
 internal enum class WidgetAuthoringStage {
     Feasibility,
+    Schedule,
     Algorithm,
     CallFunction,
     PlanFunction,
@@ -456,6 +465,7 @@ internal enum class WidgetAuthoringStageFailureCode(val diagnosticWireName: Stri
     InvalidFeasibilityDisplayName("invalid_feasibility_display_name"),
     InvalidFeasibilityEnabled("invalid_feasibility_enabled"),
     InvalidFeasibilitySchedule("invalid_feasibility_schedule"),
+    InvalidSchedule("invalid_schedule"),
     InvalidFeasibilityTools("invalid_feasibility_tools"),
     InvalidFeasibilityRuntime("invalid_feasibility_runtime"),
     InvalidFeasibilityPresentation("invalid_feasibility_presentation"),
@@ -535,7 +545,16 @@ internal data class WidgetAuthoringAttemptBudget(
 }
 
 internal object WidgetAuthoringStageSchemas {
-    val feasibility: String = """{"name":"$SUBMIT_WIDGET_FEASIBILITY_TOOL","description":"Submit one small feasibility decision. For achievable, message is a concise display title of at most 80 characters, not a copy of the instruction. The application derives protocol metadata, tool versions, runtime grants, presentation grants, enablement, and terminal normalization.","parameters":{"type":"object","additionalProperties":false,"properties":{"outcome":{"type":"string","enum":["achievable","unachievable","needs_clarification"]},"message":{"type":"string","minLength":1,"maxLength":512},"periodicIntervalHours":{"type":["integer","null"],"enum":[null,1,6,12,24]},"toolIds":{"type":"array","maxItems":4,"uniqueItems":true,"items":{"type":"string"}}},"required":["outcome","message","periodicIntervalHours","toolIds"]}}"""
+    fun schedule(currentIntervalHours: Long?): String {
+        val options = ManagedWidgetPolicy.MODEL_PERIODIC_INTERVAL_HOURS + listOfNotNull(currentIntervalHours)
+        return """{"name":"$SUBMIT_WIDGET_SCHEDULE_TOOL","description":"Choose one offered periodic refresh interval, preserve the current interval when no change was requested, or return null for manual refresh.","parameters":{"type":"object","additionalProperties":false,"properties":{"periodicIntervalHours":{"type":["integer","null"],"enum":[null,${options.sorted().joinToString()}]}},"required":["periodicIntervalHours"]}}"""
+    }
+
+    val feasibilityWithSeparateSchedule: String = """{"name":"$SUBMIT_WIDGET_FEASIBILITY_TOOL","description":"Submit feasibility, a concise display title, and minimum tool IDs. A later stage selects refresh frequency; set periodicIntervalHours to null.","parameters":{"type":"object","additionalProperties":false,"properties":{"outcome":{"type":"string","enum":["achievable","unachievable","needs_clarification"]},"message":{"type":"string","minLength":1,"maxLength":512},"periodicIntervalHours":{"type":["integer","null"],"enum":[null]},"toolIds":{"type":"array","maxItems":4,"uniqueItems":true,"items":{"type":"string"}}},"required":["outcome","message","periodicIntervalHours","toolIds"]}}"""
+
+    val feasibilityWithoutSchedule: String = """{"name":"$SUBMIT_WIDGET_FEASIBILITY_TOOL","description":"Submit feasibility, a concise display title, and minimum tool IDs.","parameters":{"type":"object","additionalProperties":false,"properties":{"outcome":{"type":"string","enum":["achievable","unachievable","needs_clarification"]},"message":{"type":"string","minLength":1,"maxLength":512},"toolIds":{"type":"array","maxItems":4,"uniqueItems":true,"items":{"type":"string"}}},"required":["outcome","message","toolIds"]}}"""
+
+    val feasibility: String = """{"name":"$SUBMIT_WIDGET_FEASIBILITY_TOOL","description":"Submit one small feasibility decision. For achievable, message is a concise display title of at most 80 characters, not a copy of the instruction. The application derives protocol metadata, tool versions, runtime grants, presentation grants, enablement, and terminal normalization.","parameters":{"type":"object","additionalProperties":false,"properties":{"outcome":{"type":"string","enum":["achievable","unachievable","needs_clarification"]},"message":{"type":"string","minLength":1,"maxLength":512},"periodicIntervalHours":{"type":["integer","null"],"enum":[null,${ManagedWidgetPolicy.SUPPORTED_PERIODIC_INTERVAL_HOURS.sorted().joinToString()}]},"toolIds":{"type":"array","maxItems":4,"uniqueItems":true,"items":{"type":"string"}}},"required":["outcome","message","periodicIntervalHours","toolIds"]}}"""
 
     val algorithm: String = """{"name":"$SUBMIT_WIDGET_ALGORITHM_TOOL","description":"Submit one bounded typed algorithm. Protocol metadata, runtime authority, and tool versions are application-derived. This captures data only.","parameters":{"type":"object","additionalProperties":false,"properties":{"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"kind":{"type":"string","enum":["runtime_input","transform","tool_call"]},"objective":{"type":"string","minLength":1,"maxLength":512},"dependsOn":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"selectionMode":{"type":"string","enum":["first","seeded_random"],"description":"Required for wikipedia_pages version 2 tool calls; omit for other steps."},"toolId":{"type":["string","null"],"description":"Required only when kind is tool_call; otherwise omit."}},"required":["id","kind","objective","dependsOn"]}},"presentationObjective":{"type":"string","minLength":1,"maxLength":512},"renderCapability":{"type":"string","enum":["collection_card","collection_list","custom_source"]}},"required":["steps","presentationObjective","renderCapability"]}}"""
 

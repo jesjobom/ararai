@@ -8,6 +8,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequest
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -24,6 +25,11 @@ internal interface ManagedWidgetScheduler {
         revision: WidgetProgramRevision,
     )
 
+    fun resetBaseline(
+        definition: ManagedWidgetDefinition,
+        revision: WidgetProgramRevision,
+    )
+
     fun cancel(widgetId: String)
 
     fun cancelUnknown(knownWidgetIds: Set<String>)
@@ -33,10 +39,21 @@ internal class WorkManagerManagedWidgetScheduler(
     private val workManager: WorkManager,
     private val networkToolIds: Set<String>,
 ) : ManagedWidgetScheduler {
-    @Suppress("ReturnCount")
     override fun reconcile(
         definition: ManagedWidgetDefinition,
         revision: WidgetProgramRevision,
+    ) = enqueue(definition, revision, resetBaseline = false)
+
+    override fun resetBaseline(
+        definition: ManagedWidgetDefinition,
+        revision: WidgetProgramRevision,
+    ) = enqueue(definition, revision, resetBaseline = true)
+
+    @Suppress("ReturnCount")
+    private fun enqueue(
+        definition: ManagedWidgetDefinition,
+        revision: WidgetProgramRevision,
+        resetBaseline: Boolean,
     ) {
         require(definition.id == revision.widgetId)
         if (definition.activeRevision != revision.revision) {
@@ -64,25 +81,11 @@ internal class WorkManagerManagedWidgetScheduler(
             work.state in setOf(WorkInfo.State.ENQUEUED, WorkInfo.State.RUNNING, WorkInfo.State.BLOCKED)
         }
         // UPDATE advances the generation and can stop a worker that cold-started this process.
-        if (activeWork.size == 1 && scheduleTag in activeWork.single().tags) return
-        val request = PeriodicWorkRequestBuilder<ManagedWidgetWorker>(interval, TimeUnit.HOURS)
-            .setInputData(
-                Data.Builder()
-                    .putString(ManagedWidgetWorker.KEY_WIDGET_ID, definition.id)
-                    .putBoolean(ManagedWidgetWorker.KEY_REQUIRES_NETWORK, requiresNetwork)
-                    .build(),
-            )
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
-            // Samsung may block a cached UID's network while CONNECTED prevents its job from starting.
-            // Let the worker start, then wait for this UID's network access before calling any tool.
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.NOT_REQUIRED).build())
-            .addTag(MANAGED_WIDGET_PERIODIC_WORK_TAG)
-            .addTag(managedWidgetWorkTag(definition.id))
-            .addTag(scheduleTag)
-            .build()
+        if (!resetBaseline && activeWork.size == 1 && scheduleTag in activeWork.single().tags) return
+        val request = managedWidgetPeriodicRequest(definition.id, interval, requiresNetwork, scheduleTag, resetBaseline)
         workManager.enqueueUniquePeriodicWork(
             workName,
-            ExistingPeriodicWorkPolicy.UPDATE,
+            if (resetBaseline) ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE else ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
     }
@@ -111,6 +114,29 @@ internal class WorkManagerManagedWidgetScheduler(
         }
     }
 }
+
+internal fun managedWidgetPeriodicRequest(
+    widgetId: String,
+    interval: Long,
+    requiresNetwork: Boolean,
+    scheduleTag: String,
+    resetBaseline: Boolean,
+): PeriodicWorkRequest = PeriodicWorkRequestBuilder<ManagedWidgetWorker>(interval, TimeUnit.HOURS)
+    .setInputData(
+        Data.Builder()
+            .putString(ManagedWidgetWorker.KEY_WIDGET_ID, widgetId)
+            .putBoolean(ManagedWidgetWorker.KEY_REQUIRES_NETWORK, requiresNetwork)
+            .build(),
+    )
+    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
+    // Samsung may block a cached UID's network while CONNECTED prevents its job from starting.
+    // Let the worker start, then wait for this UID's network access before calling any tool.
+    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.NOT_REQUIRED).build())
+    .addTag(MANAGED_WIDGET_PERIODIC_WORK_TAG)
+    .addTag(managedWidgetWorkTag(widgetId))
+    .addTag(scheduleTag)
+    .apply { if (resetBaseline) setInitialDelay(interval, TimeUnit.HOURS) }
+    .build()
 
 interface ManagedWidgetExecutionProvider {
     suspend fun executeManagedWidget(widgetId: String): ManagedWidgetWorkerOutcome
@@ -210,11 +236,52 @@ internal class ManagedWidgetScheduleController(
         }
     }
 
+    @Suppress("ReturnCount")
+    suspend fun resetPeriodicBaseline(widgetId: String) {
+        val definition = repository.listDefinitions().firstOrNull { it.id == widgetId } ?: return
+        if (!definition.enabled || definition.periodicIntervalHours == null) return
+        val revision = repository.activeRevision(widgetId) ?: return
+        scheduler.resetBaseline(definition, revision)
+    }
+
     suspend fun setEnabled(
         widgetId: String,
         enabled: Boolean,
     ): ManagedWidgetDefinition {
         val definition = repository.setEnabled(widgetId, enabled)
+        reconcile(widgetId)
+        notifyChanged(widgetId)
+        return definition
+    }
+
+    suspend fun setPeriodicIntervalHours(widgetId: String, intervalHours: Long?): ManagedWidgetDefinition {
+        require(intervalHours == null || intervalHours in ManagedWidgetPolicy.CONFIGURABLE_PERIODIC_INTERVAL_HOURS)
+        val current = repository.listDefinitions().firstOrNull { it.id == widgetId }
+            ?: throw NoSuchElementException("Managed widget does not exist: $widgetId")
+        if (current.periodicIntervalHours == intervalHours) return current
+        val revision = repository.activeRevision(widgetId)
+            ?: throw NoSuchElementException("Managed widget has no active revision: $widgetId")
+        val program = when (val parsed = WidgetProgramParser.parse(revision.manifestJson, revision.source)) {
+            is WidgetProgramValidationResult.Valid -> parsed.program
+            is WidgetProgramValidationResult.Invalid -> error("Active widget program is invalid")
+        }
+        val capabilities = program.manifest.capabilities
+        val summary = WidgetDraftSummary(
+            displayName = current.displayName,
+            enabledIntent = current.enabled,
+            periodicIntervalHours = intervalHours,
+            tools = capabilities.tools,
+            runtimeValues = capabilities.runtimeValues,
+            presentation = capabilities.presentation,
+            plannedToolIds = emptyList(),
+        )
+        val definition = repository.setPeriodicIntervalHours(
+            widgetId,
+            current.activeRevision,
+            current.consentDigest,
+            intervalHours,
+            consentDigest(revision.programDigest, summary),
+        )
         reconcile(widgetId)
         notifyChanged(widgetId)
         return definition

@@ -59,6 +59,7 @@ internal object WidgetAuthoringWorkflowProjector {
     fun project(snapshot: WidgetAuthoringSessionSnapshot): WidgetAuthoringWorkflowProjection {
         val knownStages = buildList {
             add(WidgetAuthoringStageKey.Feasibility)
+            if (snapshot.session.schemaVersion >= 2) add(WidgetAuthoringStageKey.Schedule)
             add(WidgetAuthoringStageKey.Algorithm)
             addAll(
                 (

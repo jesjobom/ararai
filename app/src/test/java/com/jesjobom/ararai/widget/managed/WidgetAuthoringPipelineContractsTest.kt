@@ -55,7 +55,7 @@ class WidgetAuthoringPipelineContractsTest {
     @Test
     fun `feasibility localizes controlled failures without retaining rejected values`() {
         val additional = achievable().apply { addProperty("endpoint", "https://example.com") }
-        val unsupportedSchedule = achievable().apply { addProperty("periodicIntervalHours", 5) }
+        val unsupportedSchedule = achievable().apply { addProperty("periodicIntervalHours", 25) }
         val invented = achievable().apply { add("toolIds", JsonArray().apply { add("http_get") }) }
 
         listOf(

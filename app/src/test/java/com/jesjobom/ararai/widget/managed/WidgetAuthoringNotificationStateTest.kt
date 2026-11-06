@@ -29,6 +29,17 @@ class WidgetAuthoringNotificationStateTest {
     }
 
     @Test
+    fun `automatic continuation keeps foreground between validated stages`() {
+        val state = WidgetAuthoringNotificationProjector.project(
+            snapshot(WidgetAuthoringSessionStatus.AwaitingReview),
+            autoProgressionActive = true,
+        )
+
+        assertTrue(state.ongoing)
+        assertEquals(setOf(WidgetAuthoringNotificationAction.Review), state.actions)
+    }
+
+    @Test
     fun `failed attempt stops foreground and exposes review plus retry`() {
         val state = WidgetAuthoringNotificationProjector.project(snapshot(WidgetAuthoringSessionStatus.AwaitingRetry))
 

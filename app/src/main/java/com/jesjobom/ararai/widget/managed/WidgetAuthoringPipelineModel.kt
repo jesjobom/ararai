@@ -16,6 +16,7 @@ import com.jesjobom.ararai.engine.awaitReady
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.WIDGET_AUTHORING_PIPELINE_V1
+import com.jesjobom.ararai.model.WIDGET_AUTHORING_PIPELINE_V1_TOOL_NAMES
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.onEach
@@ -32,13 +33,15 @@ internal data class WidgetAuthoringRoundRequest(
     val contextJson: String,
     val repairCode: WidgetAuthoringStageFailureCode? = null,
     val rejectedArtifact: String? = null,
+    val attemptNumber: Int = 1,
 ) {
     init {
-        require(toolName in STAGE_TOOL_NAMES)
+        require(toolName in WIDGET_AUTHORING_PIPELINE_V1_TOOL_NAMES)
         require(objective.isNotBlank() && objective.length <= WidgetAuthoringPipelinePolicy.MAX_TEXT_CHARS)
         require(contextJson.toByteArray(Charsets.UTF_8).size <= ManagedWidgetPolicy.MAX_PROPOSAL_CONTEXT_BYTES)
         require(rejectedArtifact == null || rejectedArtifact.toByteArray(Charsets.UTF_8).size <= WidgetAuthoringPipelinePolicy.MAX_ARTIFACT_BYTES)
         require(repairCode != null || rejectedArtifact == null)
+        require(attemptNumber >= 1)
     }
 }
 
@@ -151,7 +154,14 @@ internal class WidgetAuthoringPipelineModelController(
         request: WidgetAuthoringRoundRequest,
     ): WidgetAuthoringRoundResult {
         check(preparedModelId == model.id) { "Authoring model must be prepared before a stage" }
-        if (request.estimatedInputChars() > maximumStageInputChars()) {
+        val boundedRequest = if (
+            request.rejectedArtifact != null && request.estimatedInputChars() > maximumStageInputChars()
+        ) {
+            request.copy(rejectedArtifact = null)
+        } else {
+            request
+        }
+        if (boundedRequest.estimatedInputChars() > maximumStageInputChars()) {
             return WidgetAuthoringRoundResult.InputTooLarge.also {
                 onRoundLifecycle(
                     WidgetAuthoringRoundLifecycle(
@@ -174,7 +184,7 @@ internal class WidgetAuthoringPipelineModelController(
         val terminalAt = AtomicLong(UNSET_ROUND_MILLIS)
         val result = try {
             withTimeoutOrNull(generationTimeoutMillis) {
-                captureRound(request, started, firstEventAt, captureAt, terminalAt)
+                captureRound(boundedRequest, started, firstEventAt, captureAt, terminalAt)
             } ?: WidgetAuthoringRoundResult.TimedOut
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -312,6 +322,11 @@ internal fun WidgetAuthoringRoundRequest.toUserText(): String = buildString {
     append(objective)
     append("\nValidated context: ")
     append(contextJson)
+    if (attemptNumber > 1) {
+        append("\nAttempt ")
+        append(attemptNumber)
+        append(" for this stage. Try a fresh response while preserving the validated context and tool schema.")
+    }
     if (repairCode != null) {
         append("\nRepair only the rejected ")
         append(stage.name)
@@ -321,7 +336,7 @@ internal fun WidgetAuthoringRoundRequest.toUserText(): String = buildString {
             append("\nRejected artifact (bounded evidence; change only the diagnosed defect): ")
             append(rejectedArtifact)
         } else {
-            append("\nRejected artifact omitted to prevent anchoring; regenerate from the validated context and contract.")
+            append("\nRejected artifact not included for this retry; regenerate from the validated context and contract.")
         }
         append("\nCorrection: ")
         append(
@@ -382,7 +397,7 @@ private val REPAIR_INSTRUCTIONS = mapOf(
     WidgetAuthoringStageFailureCode.InvalidFeasibilityJsonRoot to
         "Return one valid JSON object through the tool call.",
     WidgetAuthoringStageFailureCode.InvalidFeasibilityFields to
-        "Return exactly outcome, message, periodicIntervalHours, and toolIds with no other fields.",
+        "Return exactly the fields required by the current feasibility tool schema, with no other fields.",
     WidgetAuthoringStageFailureCode.InvalidFeasibilityProtocol to
         "Do not return protocol metadata; the application derives it.",
     WidgetAuthoringStageFailureCode.InvalidFeasibilityDisplayName to
@@ -390,7 +405,9 @@ private val REPAIR_INSTRUCTIONS = mapOf(
     WidgetAuthoringStageFailureCode.InvalidFeasibilityEnabled to
         "Do not return enabled; the application derives it.",
     WidgetAuthoringStageFailureCode.InvalidFeasibilitySchedule to
-        "Set periodicIntervalHours to null, 1, 6, 12, or 24.",
+        "Set periodicIntervalHours to null or an offered supported interval.",
+    WidgetAuthoringStageFailureCode.InvalidSchedule to
+        "Choose periodicIntervalHours from the tool schema enum or null; return no other fields.",
     WidgetAuthoringStageFailureCode.InvalidFeasibilityTools to
         "Set toolIds to unique available tool ids only; the application derives versions and purposes.",
     WidgetAuthoringStageFailureCode.InvalidFeasibilityRuntime to
@@ -402,15 +419,21 @@ private val REPAIR_INSTRUCTIONS = mapOf(
         "use message as the reason; for needs_clarification, use message as the question. " +
         FEASIBILITY_OUTCOME_CONTRACT,
     WidgetAuthoringStageFailureCode.InvalidAlgorithm to
+        "steps[].kind is only runtime_input, transform, or tool_call; custom_source and collection_card " +
+        "are renderCapability values, never step kinds. A random single item from one returned array uses " +
+        "collection_card and its later seeded_random selection, not a post-call step. " +
         "Preserve each required data operation in the step graph. Give dependent steps a dependsOn list; " +
         "selectionMode belongs only to wikipedia_pages version 2 tool calls, never to other tools. " +
+        "For an explicit list of two to ten web_search_top_results, keep collection_list and one tool_call; " +
+        "do not add a post-call transform for formatting, numbering, or selecting those unmodified results. " +
+        "Do not change the requested list into a first-item collection_card. " +
         "For a best/first ranked web_search_content result, the provider already ranks the array: " +
         "use one tool call and collection_card without a post-result transform. " +
         "For a Wikipedia date event with year in title, use one wikipedia_on_this_day call and " +
         "collection_card; the application appends the year. " +
-        "Use collection_card only for one direct item " +
-        "from one tool result; use custom_source when a transform depends on tool results or multiple results " +
-        "must be considered. A runtime-dependent query before the tool call may still use collection_card.",
+        "Use collection_card only for one direct item from one tool result; use custom_source when an actual " +
+        "post-result filter or comparison is required. A runtime-dependent query before the tool call may still " +
+        "use a collection mode.",
     WidgetAuthoringStageFailureCode.InvalidSource to
         "Submit only source for the current stage. It must contain one named function declaration whose " +
         "name and parameters exactly match the authoritative stage signature, and it must parse with every brace closed; " +
@@ -462,18 +485,19 @@ private val REPAIR_INSTRUCTIONS = mapOf(
 )
 
 private const val FEASIBILITY_OUTCOME_CONTRACT =
-    "Return exactly four fields. achievable => message is a concise display title of at most 80 characters, not a " +
-        "copy of the full instruction; periodicIntervalHours is supported or " +
-        "null, and toolIds contains only the minimum available tool ids. unachievable => message is the reason. " +
+    "Return exactly the fields required by the tool schema. achievable => message is a concise display title of " +
+        "at most 80 characters, not a copy of the full instruction; toolIds contains only the minimum available " +
+        "tool ids. unachievable => message is the reason. " +
         "needs_clarification => message is one question. The application derives every other field. "
 
 internal fun repairArtifactForPrompt(
     code: WidgetAuthoringStageFailureCode,
     artifact: String?,
-    repairAttemptNumber: Int,
 ): String? {
-    require(repairAttemptNumber >= 2)
-    if (repairAttemptNumber > 2 || code in CLEAN_REGENERATION_FAILURES) return null
+    if (code in CLEAN_REGENERATION_FAILURES || artifact == null) return null
+    if (artifact.toByteArray(Charsets.UTF_8).size > WidgetAuthoringPipelinePolicy.MAX_REPAIR_PROMPT_ARTIFACT_BYTES) {
+        return null
+    }
     return artifact
 }
 
@@ -486,14 +510,4 @@ private val CLEAN_REGENERATION_FAILURES = setOf(
     WidgetAuthoringStageFailureCode.TimedOut,
     WidgetAuthoringStageFailureCode.DeviceRecoveryTimedOut,
     WidgetAuthoringStageFailureCode.RuntimeUnavailable,
-)
-
-private val STAGE_TOOL_NAMES = setOf(
-    SUBMIT_WIDGET_FEASIBILITY_TOOL,
-    SUBMIT_WIDGET_ALGORITHM_TOOL,
-    SUBMIT_WIDGET_CALL_FUNCTION_TOOL,
-    SUBMIT_WIDGET_PLAN_FUNCTION_TOOL,
-    SUBMIT_WIDGET_RENDER_FUNCTION_TOOL,
-    SUBMIT_WIDGET_COLLECTION_CARD_TOOL,
-    SUBMIT_WIDGET_COLLECTION_LIST_TOOL,
 )

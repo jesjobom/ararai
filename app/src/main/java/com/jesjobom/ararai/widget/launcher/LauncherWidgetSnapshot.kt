@@ -11,6 +11,11 @@ internal enum class LauncherWidgetState { Unconfigured, Unavailable, Empty, Read
 
 internal data class LauncherWidgetLink(val label: String, val url: String)
 
+internal sealed interface LauncherWidgetRow {
+    data class Text(val value: String) : LauncherWidgetRow
+    data class Link(val value: LauncherWidgetLink) : LauncherWidgetRow
+}
+
 internal data class LauncherWidgetSnapshot(
     val widgetName: String,
     val headline: String,
@@ -18,6 +23,7 @@ internal data class LauncherWidgetSnapshot(
     val link: LauncherWidgetLink?,
     val state: LauncherWidgetState,
     val updatedAtMillis: Long? = null,
+    val rows: List<LauncherWidgetRow> = emptyList(),
 )
 
 internal object LauncherWidgetSnapshotProjector {
@@ -26,7 +32,7 @@ internal object LauncherWidgetSnapshotProjector {
         val usableCache = cache?.takeIf { it.revision <= definition.activeRevision }
         val presentation = usableCache
             ?.let { runCatching { WidgetPresentationCodec.decodeCached(it.presentationJson) }.getOrNull() }
-        val content = presentation?.let(::projectContent) ?: ProjectedContent("", "", null)
+        val content = presentation?.let(::projectContent) ?: ProjectedContent("", "", null, emptyList())
         val hasContent = content.headline.isNotBlank() || content.body.isNotBlank() || content.link != null
         val state = when {
             !definition.enabled -> LauncherWidgetState.Disabled
@@ -45,31 +51,59 @@ internal object LauncherWidgetSnapshotProjector {
             content.link,
             state,
             usableCache?.completedAtMillis,
+            content.rows,
         )
     }
 
     private fun projectContent(presentation: WidgetPresentationNode): ProjectedContent {
-        val text = mutableListOf<String>()
-        val linkLabels = mutableListOf<String>()
-        var firstLink: LauncherWidgetLink? = null
-        fun visit(node: WidgetPresentationNode) {
+        val rows = mutableListOf<LauncherWidgetRow>()
+        var linkCount = 0
+        for (node in presentation.leaves()) {
             when (node) {
-                is WidgetPresentationNode.Card -> visit(node.child)
-                is WidgetPresentationNode.Column -> node.children.forEach(::visit)
-                is WidgetPresentationNode.Row -> node.children.forEach(::visit)
-                is WidgetPresentationNode.Text -> node.text.trim().takeIf(String::isNotEmpty)?.let(text::add)
-                is WidgetPresentationNode.Value -> node.text.trim().takeIf(String::isNotEmpty)?.let(text::add)
-                is WidgetPresentationNode.HttpsLink -> if (validWidgetExternalUrl(node.url)) {
-                    node.label.trim().takeIf(String::isNotEmpty)?.let(linkLabels::add)
-                    if (firstLink == null) firstLink = LauncherWidgetLink(node.label, node.url)
+                is WidgetPresentationNode.Text -> node.text.trim().takeIf(String::isNotEmpty)?.let {
+                    rows.add(LauncherWidgetRow.Text(it))
                 }
-                is WidgetPresentationNode.Icon -> Unit
+                is WidgetPresentationNode.Value -> node.text.trim().takeIf(String::isNotEmpty)?.let {
+                    rows.add(LauncherWidgetRow.Text(it))
+                }
+                is WidgetPresentationNode.HttpsLink -> {
+                    if (linkCount < MAX_LAUNCHER_LINKS && validWidgetExternalUrl(node.url)) {
+                        node.label.trim().takeIf(String::isNotEmpty)?.let { label ->
+                            rows.add(LauncherWidgetRow.Link(LauncherWidgetLink(label, node.url)))
+                            linkCount++
+                        }
+                    }
+                }
+                else -> Unit
             }
         }
-        visit(presentation)
+        val text = rows.filterIsInstance<LauncherWidgetRow.Text>().map(LauncherWidgetRow.Text::value)
+        val links = rows.filterIsInstance<LauncherWidgetRow.Link>().map(LauncherWidgetRow.Link::value)
+        val linkLabels = links.map(LauncherWidgetLink::label)
         val visibleText = text.ifEmpty { linkLabels }
-        return ProjectedContent(visibleText.firstOrNull().orEmpty(), visibleText.drop(1).joinToString("\n"), firstLink)
+        return ProjectedContent(
+            visibleText.firstOrNull().orEmpty(),
+            visibleText.drop(1).joinToString("\n"),
+            links.firstOrNull(),
+            rows,
+        )
     }
 
-    private data class ProjectedContent(val headline: String, val body: String, val link: LauncherWidgetLink?)
+    private fun WidgetPresentationNode.leaves(): Sequence<WidgetPresentationNode> = sequence {
+        when (this@leaves) {
+            is WidgetPresentationNode.Card -> yieldAll(child.leaves())
+            is WidgetPresentationNode.Column -> children.forEach { yieldAll(it.leaves()) }
+            is WidgetPresentationNode.Row -> children.forEach { yieldAll(it.leaves()) }
+            else -> yield(this@leaves)
+        }
+    }
+
+    private data class ProjectedContent(
+        val headline: String,
+        val body: String,
+        val link: LauncherWidgetLink?,
+        val rows: List<LauncherWidgetRow>,
+    )
+
+    private const val MAX_LAUNCHER_LINKS = 10
 }

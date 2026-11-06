@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 internal object WidgetAuthoringWorkflowPolicy {
+    const val FEASIBILITY_WITHOUT_SCHEDULE_SCHEMA_VERSION = 3
     const val MAX_INSTRUCTION_BYTES = 8 * 1024
     const val MAX_INFERENCE_CONFIG_BYTES = 4 * 1024
     const val MAX_STAGE_KEY_CHARS = 96
@@ -15,6 +16,10 @@ internal sealed interface WidgetAuthoringStageKey {
 
     data object Feasibility : WidgetAuthoringStageKey {
         override val wireValue = "feasibility"
+    }
+
+    data object Schedule : WidgetAuthoringStageKey {
+        override val wireValue = "schedule"
     }
 
     data object Algorithm : WidgetAuthoringStageKey {
@@ -46,6 +51,7 @@ internal sealed interface WidgetAuthoringStageKey {
             require(value.length <= WidgetAuthoringWorkflowPolicy.MAX_STAGE_KEY_CHARS)
             return when {
                 value == Feasibility.wireValue -> Feasibility
+                value == Schedule.wireValue -> Schedule
                 value == Algorithm.wireValue -> Algorithm
                 value == Plan.wireValue -> Plan
                 value == Render.wireValue -> Render
@@ -59,6 +65,7 @@ internal sealed interface WidgetAuthoringStageKey {
 
 internal data class WidgetAuthoringStageGraph(
     val callStepIds: List<String>,
+    val includeSchedule: Boolean = false,
 ) {
     init {
         require(callStepIds.distinct().size == callStepIds.size)
@@ -67,6 +74,7 @@ internal data class WidgetAuthoringStageGraph(
 
     val orderedStages: List<WidgetAuthoringStageKey> = buildList {
         add(WidgetAuthoringStageKey.Feasibility)
+        if (includeSchedule) add(WidgetAuthoringStageKey.Schedule)
         add(WidgetAuthoringStageKey.Algorithm)
         callStepIds.mapTo(this, WidgetAuthoringStageKey::CallFunction)
         add(WidgetAuthoringStageKey.Plan)
@@ -76,7 +84,10 @@ internal data class WidgetAuthoringStageGraph(
 
     fun directDependencies(stage: WidgetAuthoringStageKey): Set<WidgetAuthoringStageKey> = when (stage) {
         WidgetAuthoringStageKey.Feasibility -> emptySet()
-        WidgetAuthoringStageKey.Algorithm -> setOf(WidgetAuthoringStageKey.Feasibility)
+        WidgetAuthoringStageKey.Schedule -> setOf(WidgetAuthoringStageKey.Feasibility)
+        WidgetAuthoringStageKey.Algorithm -> setOf(
+            if (includeSchedule) WidgetAuthoringStageKey.Schedule else WidgetAuthoringStageKey.Feasibility,
+        )
         is WidgetAuthoringStageKey.CallFunction -> setOf(WidgetAuthoringStageKey.Algorithm)
         WidgetAuthoringStageKey.Plan ->
             callStepIds
@@ -328,7 +339,9 @@ internal fun requireValidAuthoringStageTransition(
     nextStage: WidgetAuthoringStageKey?,
 ) {
     val valid = when (completedStage) {
-        WidgetAuthoringStageKey.Feasibility -> nextStage == WidgetAuthoringStageKey.Algorithm
+        WidgetAuthoringStageKey.Feasibility ->
+            nextStage == WidgetAuthoringStageKey.Schedule || nextStage == WidgetAuthoringStageKey.Algorithm
+        WidgetAuthoringStageKey.Schedule -> nextStage == WidgetAuthoringStageKey.Algorithm
         WidgetAuthoringStageKey.Algorithm ->
             nextStage == WidgetAuthoringStageKey.Plan || nextStage is WidgetAuthoringStageKey.CallFunction
         is WidgetAuthoringStageKey.CallFunction ->

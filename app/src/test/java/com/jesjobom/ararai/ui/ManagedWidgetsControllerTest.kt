@@ -15,6 +15,7 @@ import com.jesjobom.ararai.widget.managed.MANAGED_WIDGET_DATABASE_NAME
 import com.jesjobom.ararai.widget.managed.ManagedWidgetApplicationServices
 import com.jesjobom.ararai.widget.managed.ManagedWidgetDefinition
 import com.jesjobom.ararai.widget.managed.ManagedWidgetExecutionCoordinator
+import com.jesjobom.ararai.widget.managed.ManagedWidgetExecutionStatus
 import com.jesjobom.ararai.widget.managed.ManagedWidgetManualRefresh
 import com.jesjobom.ararai.widget.managed.ManagedWidgetProgramExecutor
 import com.jesjobom.ararai.widget.managed.ManagedWidgetProgramResult
@@ -136,6 +137,36 @@ class ManagedWidgetsControllerTest {
     }
 
     @Test
+    fun `detail schedule change persists and reconciles without model or program revision`() = runTest {
+        val original = repository.createConfirmed(candidate("History", enabled = true))
+
+        val updated = controller.setPeriodicIntervalHours(original.id, 6)
+
+        assertEquals(6L, updated.periodicIntervalHours)
+        assertEquals(6L, controller.loadDetail(original.id)?.definition?.periodicIntervalHours)
+        assertEquals(1, updated.activeRevision)
+        assertNotEquals(original.consentDigest, updated.consentDigest)
+        assertEquals(6L, scheduler.scheduled.last().periodicIntervalHours)
+        assertEquals(WidgetProgramParserTest.SOURCE, repository.activeRevision(original.id)?.source)
+
+        val manual = controller.setPeriodicIntervalHours(original.id, null)
+        assertNull(manual.periodicIntervalHours)
+        assertNull(scheduler.scheduled.last().periodicIntervalHours)
+    }
+
+    @Test
+    fun `manual refresh restarts only an enabled periodic schedule`() = runTest {
+        val periodic = repository.createConfirmed(candidate("Periodic", enabled = true))
+        val manual = repository.createConfirmed(candidate("Manual", enabled = true).copy(periodicIntervalHours = null))
+
+        assertEquals(ManagedWidgetExecutionStatus.Completed, controller.refresh(periodic.id))
+        assertEquals(listOf(periodic.id), scheduler.reset.map { it.id })
+
+        assertEquals(ManagedWidgetExecutionStatus.Completed, controller.refresh(manual.id))
+        assertEquals(listOf(periodic.id), scheduler.reset.map { it.id })
+    }
+
+    @Test
     fun `physical diagnostic request uses natural widget behavior language`() {
         assertEquals(
             "Mostre um evento aleatório da Wikipédia para o dia e o mês de hoje. " +
@@ -168,11 +199,18 @@ class ManagedWidgetsControllerTest {
 
     private class RecordingScheduler : ManagedWidgetScheduler {
         val cancelled = mutableListOf<String>()
+        val scheduled = mutableListOf<ManagedWidgetDefinition>()
+        val reset = mutableListOf<ManagedWidgetDefinition>()
+
+        override fun resetBaseline(definition: ManagedWidgetDefinition, revision: WidgetProgramRevision) {
+            reset += definition
+        }
 
         override fun reconcile(
             definition: ManagedWidgetDefinition,
             revision: WidgetProgramRevision,
         ) {
+            scheduled += definition
             if (!definition.enabled) cancelled += definition.id
         }
 

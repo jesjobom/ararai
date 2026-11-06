@@ -6,10 +6,15 @@ permalink: /managed-widgets/
 # Managed in-app widgets
 
 ArarAI managed widgets are local views authored by an eligible downloaded model
-and rendered inside the application. They are not Android launcher widgets. A
-model participates only in the user-requested creation or edit flow; confirmed
+and rendered inside the application. Their saved results can also be projected
+into an Android Home widget. A model participates only in the user-requested creation or edit flow; confirmed
 refreshes execute the stored JavaScript program in the bounded
 QuickJS runtime and do not load or prompt a model.
+
+An Android Home widget can display a saved managed widget result. For a list of
+search results, each validated link appears as its own clickable row in a
+scrollable launcher card. The launcher reads the cached result; it does not run
+the model or fetch search results while rendering.
 
 ## Create and review
 
@@ -24,15 +29,22 @@ QuickJS runtime and do not load or prompt a model.
    artifact identity, function signature, call alias, tool id, and tool version
    are application-owned rather than requested from the model. An edit
    additionally receives the current normalized widget/source.
-3. For a model stage, ArarAI executes exactly one generation, validates it, saves the bounded
-   result as a local attempt, unloads the model, and waits. Review the captured
-   content and controlled validation result as inert selectable text. **Accept
-   and continue** promotes a successful candidate to the checkpoint used by the
-   next stage; **Retry** authorizes one repair attempt for the same stage.
+3. ArarAI validates and saves each bounded stage result locally, then unloads
+   the model. A valid candidate is accepted as a checkpoint and the next stage
+   starts automatically after the device recovery gate. This continues until
+   the draft is ready or a stage fails, is cancelled, or needs clarification.
+   The timeline keeps captured content and validation results as inert selectable
+   text. **Retry** authorizes a repair attempt for the stopped stage; it never
+   runs automatically. Its prompt identifies the stage-attempt number and
+   includes the immediately preceding complete rejected artifact on any repair
+   when its validation error is actionable and the evidence fits the prompt
+   budget. Generic/runtime failures and oversized evidence omit it. **Advance** can resume a
+   previously reviewable candidate.
 4. An accepted stage can be reprocessed without immediately replacing it. The
    prior valid graph remains authoritative until the replacement is accepted;
-   accepting it marks dependent checkpoints stale. Attempts are limited to two
-   repairs per stage revision, including across application restarts.
+   accepting it marks dependent checkpoints stale. The resumable workflow does
+   not impose a cumulative manual retry limit; its attempt count survives
+   application restarts.
 5. Review the final unconfirmed source, schedule, tool/runtime/presentation
    permissions, retained-data limits, user actions, and any semantic/source diff.
 6. Choose **Create and enable** (or save the replacement revision and enable it)
@@ -49,7 +61,8 @@ The authoring screen is a repository-backed timeline. It distinguishes queued,
 running, review, retry, accepted, stale, interrupted, cancelled, and completed
 states and shows bounded attempt metadata. Captured JSON and JavaScript are
 displayed only as plain text; rejected content is never executed. The user may
-leave between stages without cancelling or losing accepted work. Unachievable
+leave while stages run without cancelling or losing accepted work. An interrupted
+process does not silently restart model generation. Unachievable
 requests and requests needing clarification stop before code generation.
 
 Only the installed Gemma 4 E4B advertises the staged widget-authoring protocol
@@ -95,8 +108,11 @@ source-proven link even when the model omits the optional URL field.
 Custom layouts retain the JavaScript source path and its lower-level helpers.
 The card can show one unmodified item from one result array; it cannot filter
 fetched results, compare them, or choose between multiple result sets. The
-algorithm must declare post-result operations as steps and use `custom_source`
-for them. A query chosen from the local time before one tool call may still use
+algorithm uses one tool-call step and `collection_card` for a random unfiltered
+item; the later card stage chooses `seeded_random`. `custom_source` is a render
+capability, never a step kind. Actual post-result operations must be declared
+as typed steps and use `custom_source` for presentation. A query chosen from
+the local time before one tool call may still use
 a collection card. If no tool can provide the requested data, the existing
 feasibility stage must return an unavailable/clarification outcome rather than
 silently changing the task. The structural route check does not inspect a
@@ -117,11 +133,22 @@ confirmed before this change have no recoverable initial request.
 
 ## Refresh and scheduling
 
-Supported periodic intervals are 1, 6, 12, and 24 hours. Android WorkManager
+The model's dedicated schedule stage offers 1, 2, 4, 6, 12, or 24 hours, plus
+no periodic refresh. The feasibility stage does not decide the schedule. The
+new feasibility response omits the interval field entirely; in-progress older
+sessions retain their original response schema until completion. The
+final preview shows the selected cadence. The detail screen accepts any whole
+number of hours from 1 through 24, plus manual-only refresh. Previously saved
+48-, 72-, and 168-hour schedules remain executable until changed. Android WorkManager
 chooses an inexact execution window. Each enabled widget owns one unique
 replaceable periodic work definition and a durable execution lease, so manual
 and background attempts cannot overlap. Disabling cancels future work and also
 blocks manual refresh until the widget is enabled again.
+Changing the interval in details does not regenerate the widget program; it
+updates its consent identity and periodic work. A completed manual refresh
+restarts the periodic cycle, with the next eligible run approximately one
+configured interval after that refresh, not immediately or at an exact clock
+time.
 Transient tool unavailability, timeout, or rate limiting keeps the last good
 card and asks WorkManager to retry with exponential backoff. A disabled or
 misconfigured tool is not retried automatically. The one-hour interval is a

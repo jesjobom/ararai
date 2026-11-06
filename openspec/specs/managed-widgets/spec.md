@@ -303,7 +303,7 @@ The widget detail screen SHALL initially show at most the four newest retained e
 
 ### Requirement: Android launcher snapshot
 
-The system widget picker SHALL offer an ArarAI widget. The user SHALL choose an existing managed widget for each launcher instance. The instance SHALL show a bounded text projection of that widget's validated saved presentation in an app-owned fixed layout, including an appropriate empty, disabled, stale, or unavailable state. Tapping the instance SHALL open that widget's details in ArarAI. Rendering the launcher card SHALL NOT evaluate model-authored code, call tools, or start model inference; only an explicit refresh action may schedule execution of the confirmed program in ArarAI.
+The system widget picker SHALL offer an ArarAI widget. The user SHALL choose an existing managed widget for each launcher instance. The instance SHALL show a bounded projection of that widget's validated saved presentation in an app-owned fixed layout, including an appropriate empty, disabled, stale, or unavailable state. A presentation with multiple validated links SHALL show the links in presentation order as individually clickable rows in a scrollable launcher collection. Tapping the instance outside a link SHALL open that widget's details in ArarAI. Rendering the launcher card SHALL NOT evaluate model-authored code, call tools, or start model inference; only an explicit refresh action may schedule execution of the confirmed program in ArarAI.
 
 #### Scenario: Add a launcher instance
 
@@ -339,6 +339,13 @@ The system widget picker SHALL offer an ArarAI widget. The user SHALL choose an 
 - **AND** a larger card reveals more body text without an arbitrary character or line limit
 - **AND** its link appears after the body and opens only an allowlisted destination
 - **AND** tapping the card opens the full presentation in ArarAI if the launcher has insufficient space.
+
+#### Scenario: Open a saved result from a list
+
+- **WHEN** a saved presentation contains two to ten validated search-result links
+- **THEN** each link appears as its own clickable row in presentation order
+- **AND** the rows can be scrolled if the launcher card is too small to show them all
+- **AND** selecting a row opens only a destination still present in that widget's current validated saved result.
 
 #### Scenario: Refresh from the launcher
 
@@ -433,3 +440,18 @@ Before confirming a generated widget, the application SHALL show its JavaScript 
 
 - **WHEN** the active revision has no stored prompt
 - **THEN** the editable instruction field starts blank.
+
+### Requirement: Manual refresh restarts the periodic baseline
+
+When the user manually refreshes an enabled periodic widget and the run completes, the application SHALL replace its periodic work with a new one whose first eligible run is one configured interval after that manual refresh. It SHALL not create an immediate duplicate run or claim exact wall-clock timing. Manual-only or disabled widgets SHALL not acquire periodic work from a manual refresh. Unchanged startup reconciliation SHALL continue to preserve the pending work generation.
+
+#### Scenario: Restart a daily cycle from manual refresh
+
+- **WHEN** a user manually refreshes an enabled widget configured for every 24 hours
+- **THEN** the existing periodic work is replaced with one whose first eligible run is approximately 24 hours after the manual refresh completes
+- **AND** the refresh itself does not cause an immediate second automatic run.
+
+#### Scenario: Manual-only widget
+
+- **WHEN** a user refreshes an enabled widget without a periodic interval
+- **THEN** no periodic work is enqueued.

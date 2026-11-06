@@ -303,6 +303,23 @@ class WidgetAuthoringPipelineTest {
             listOf("collection_list"),
             properties.getAsJsonObject("renderCapability").getAsJsonArray("enum").map { it.asString },
         )
+        assertTrue(properties.getAsJsonObject("steps").get("description").asString.contains("do not add a transform"))
+        val context = JsonParser.parseString(algorithmContext(prompt, feasibility)).asJsonObject
+        assertTrue(context.get("rankedListPolicy").asString.contains("collection_list"))
+        assertTrue(context.get("rankedListPolicy").asString.contains("up to 10"))
+        assertTrue(context.get("rankedListPolicy").asString.contains("No transform step after the call"))
+        assertTrue(WIDGET_ALGORITHM_OBJECTIVE.contains("rendering their titles and links is not a transform step"))
+        val repair = WidgetAuthoringRoundRequest(
+            WidgetAuthoringStage.Algorithm,
+            SUBMIT_WIDGET_ALGORITHM_TOOL,
+            algorithmCaptureSchema(feasibility, prompt),
+            WIDGET_ALGORITHM_OBJECTIVE,
+            algorithmContext(prompt, feasibility),
+            WidgetAuthoringStageFailureCode.InvalidAlgorithm,
+            "{}",
+        ).toUserText()
+        assertTrue(repair.contains("do not add a post-call transform"))
+        assertTrue(repair.contains("Do not change the requested list into a first-item collection_card"))
         assertEquals(null, requestedWebResultsCount(prompt.copy(userInstruction = "Mostre o melhor resultado"), feasibility))
     }
 
@@ -457,7 +474,7 @@ class WidgetAuthoringPipelineTest {
             ),
         )
         assertTrue(modelEngine.requests[1].plainChatPrompt.contains("invalid_feasibility_fields"))
-        assertTrue(modelEngine.requests[1].plainChatPrompt.contains("exactly outcome, message"))
+        assertTrue(modelEngine.requests[1].plainChatPrompt.contains("fields required by the tool schema"))
         assertFalse(modelEngine.requests[1].plainChatPrompt.contains("password="))
         assertEquals(
             listOf(
@@ -496,8 +513,7 @@ class WidgetAuthoringPipelineTest {
         assertEquals(3, modelEngine.requests.size)
         assertTrue(modelEngine.requests.all { it.advertisedToolNames == setOf(SUBMIT_WIDGET_FEASIBILITY_TOOL) })
         assertTrue(modelEngine.requests[1].plainChatPrompt.contains("Rejected artifact (bounded evidence"))
-        assertTrue(modelEngine.requests[2].plainChatPrompt.contains("Rejected artifact omitted to prevent anchoring"))
-        assertFalse(modelEngine.requests[2].plainChatPrompt.contains("Rejected artifact (bounded evidence"))
+        assertTrue(modelEngine.requests[2].plainChatPrompt.contains("Rejected artifact (bounded evidence"))
         assertTrue(javascript.calls.isEmpty())
     }
 

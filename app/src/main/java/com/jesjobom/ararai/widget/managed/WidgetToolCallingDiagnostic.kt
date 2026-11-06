@@ -1167,6 +1167,7 @@ private fun String.diagnosticStage(): WidgetAuthoringStage = when (this) {
 
 private fun WidgetAuthoringStage.diagnosticWireName(): String = when (this) {
     WidgetAuthoringStage.Feasibility -> "feasibility"
+    WidgetAuthoringStage.Schedule -> "schedule"
     WidgetAuthoringStage.Algorithm -> "algorithm"
     WidgetAuthoringStage.CallFunction -> "call_function"
     WidgetAuthoringStage.PlanFunction -> "plan_function"

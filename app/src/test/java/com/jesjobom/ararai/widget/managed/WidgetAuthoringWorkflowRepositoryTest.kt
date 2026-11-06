@@ -545,6 +545,7 @@ class WidgetAuthoringWorkflowRepositoryTest {
 
     private fun nextStageAfter(stage: WidgetAuthoringStageKey): WidgetAuthoringStageKey? = when (stage) {
         WidgetAuthoringStageKey.Feasibility -> WidgetAuthoringStageKey.Algorithm
+        WidgetAuthoringStageKey.Schedule -> WidgetAuthoringStageKey.Algorithm
         WidgetAuthoringStageKey.Algorithm -> WidgetAuthoringStageKey.CallFunction("weather")
         is WidgetAuthoringStageKey.CallFunction -> WidgetAuthoringStageKey.Plan
         WidgetAuthoringStageKey.Plan -> WidgetAuthoringStageKey.Render

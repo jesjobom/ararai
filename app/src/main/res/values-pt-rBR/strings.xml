@@ -452,6 +452,10 @@
     <string name="widget_no_presentation">Ainda não há apresentação salva.</string>
     <string name="widget_invalid_presentation">A apresentação salva é inválida e não foi exibida.</string>
     <string name="widget_schedule_manual">Somente atualização manual</string>
+    <string name="widget_schedule_change">Alterar frequência de atualização</string>
+    <string name="widget_schedule_automatic">Atualização automática</string>
+    <string name="widget_schedule_hours">Horas entre atualizações</string>
+    <string name="widget_schedule_hours_range">Digite um número inteiro de 1 a 24.</string>
     <string name="widget_schedule_periodic">Aproximadamente a cada %1$d horas</string>
     <string name="widget_schedule_inexact">O Android escolhe uma janela inexata de execução em segundo plano.</string>
     <string name="widget_schedule">Frequência</string>
@@ -558,6 +562,7 @@
     <string name="widget_authoring_workflow_captured_content">Conteúdo capturado (texto inerte)</string>
     <string name="widget_authoring_workflow_stage_accessibility">%1$s, %2$s</string>
     <string name="widget_authoring_workflow_stage_feasibility">Viabilidade</string>
+    <string name="widget_authoring_workflow_stage_schedule">Frequência de atualização</string>
     <string name="widget_authoring_workflow_stage_algorithm">Algoritmo</string>
     <string name="widget_authoring_workflow_stage_call">Chamada de ferramenta: %1$s</string>
     <string name="widget_authoring_workflow_stage_plan">Plano de orquestração</string>

@@ -4451,9 +4451,10 @@ at most one call, and SHALL NOT advertise or execute normal Chat,
 knowledge/calculator, provider, or widget-execution tools. The loaded model
 workload may be reused across rounds, but conversation state MUST NOT be reused
 implicitly. Protocol v1 SHALL use the closed capture tools
-`submit_widget_feasibility`, `submit_widget_algorithm`,
-`submit_widget_call_function`, `submit_widget_plan_function`, and
-`submit_widget_render_function`; a repair SHALL reuse only the failed stage's
+`submit_widget_feasibility`, `submit_widget_schedule`,
+`submit_widget_algorithm`, `submit_widget_call_function`,
+`submit_widget_plan_function`, `submit_widget_render_function`,
+`submit_widget_collection_card`, and `submit_widget_collection_list`; a repair SHALL reuse only the failed stage's
 tool and schema.
 
 #### Scenario: Start authorship with an eligible model

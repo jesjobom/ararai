@@ -477,6 +477,8 @@ class ManagedWidgetExecutionCoordinatorTest {
         val cancelled = mutableListOf<String>()
         val knownWidgetIds = mutableListOf<Set<String>>()
 
+        override fun resetBaseline(definition: ManagedWidgetDefinition, revision: WidgetProgramRevision) = Unit
+
         override fun reconcile(
             definition: ManagedWidgetDefinition,
             revision: WidgetProgramRevision,

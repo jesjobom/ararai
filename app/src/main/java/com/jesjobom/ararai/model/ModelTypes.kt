@@ -51,11 +51,13 @@ const val PROPOSE_WIDGET_TOOL_NAME = "propose_widget"
 const val WIDGET_AUTHORING_PIPELINE_V1 = "widget_authoring_pipeline_v1"
 internal val WIDGET_AUTHORING_PIPELINE_V1_TOOL_NAMES = setOf(
     "submit_widget_feasibility",
+    "submit_widget_schedule",
     "submit_widget_algorithm",
     "submit_widget_call_function",
     "submit_widget_plan_function",
     "submit_widget_render_function",
     "submit_widget_collection_card",
+    "submit_widget_collection_list",
 )
 
 enum class ModelRuntime(

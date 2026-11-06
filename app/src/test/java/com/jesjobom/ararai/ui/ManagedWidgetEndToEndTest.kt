@@ -44,6 +44,7 @@ import com.jesjobom.ararai.widget.managed.SUBMIT_WIDGET_CALL_FUNCTION_TOOL
 import com.jesjobom.ararai.widget.managed.SUBMIT_WIDGET_FEASIBILITY_TOOL
 import com.jesjobom.ararai.widget.managed.SUBMIT_WIDGET_PLAN_FUNCTION_TOOL
 import com.jesjobom.ararai.widget.managed.SUBMIT_WIDGET_RENDER_FUNCTION_TOOL
+import com.jesjobom.ararai.widget.managed.SUBMIT_WIDGET_SCHEDULE_TOOL
 import com.jesjobom.ararai.widget.managed.SqliteManagedWidgetRepository
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringAssemblyBuilder
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringAssemblyResult
@@ -333,14 +334,14 @@ class ManagedWidgetEndToEndTest {
                     if (locale == "pt-BR") "Um evento histórico mais claro." else "A clearer historical event.",
                 ),
             )
-            assertEquals(loadsBeforeExecution + 4, model.loadCount)
+            assertEquals(loadsBeforeExecution + 5, model.loadCount)
             assertEquals(setOf(created.id), scheduler.scheduled)
             schedules.delete(created.id)
             assertTrue(repository.listDefinitions().none { it.id == created.id })
             assertTrue(created.id in scheduler.cancelled)
         }
         assertEquals(model.loadCount * 2, model.unloadCount)
-        assertEquals(18, model.loadCount)
+        assertEquals(22, model.loadCount)
         assertEquals(2, repairsObserved)
     }
 
@@ -362,6 +363,8 @@ class ManagedWidgetEndToEndTest {
     private class UniqueRecordingScheduler : ManagedWidgetScheduler {
         val scheduled = mutableSetOf<String>()
         val cancelled = mutableSetOf<String>()
+
+        override fun resetBaseline(definition: ManagedWidgetDefinition, revision: WidgetProgramRevision) = Unit
 
         override fun reconcile(definition: ManagedWidgetDefinition, revision: WidgetProgramRevision) {
             if (definition.enabled) scheduled += definition.id else cancel(definition.id)
@@ -397,8 +400,9 @@ class ManagedWidgetEndToEndTest {
                     failNextFeasibility = false
                     "{}"
                 } else {
-                    feasibility(completedPipelines)
+                    feasibility(completedPipelines, tool.descriptionJson.contains("periodicIntervalHours"))
                 }
+                SUBMIT_WIDGET_SCHEDULE_TOOL -> """{"periodicIntervalHours":24}"""
                 SUBMIT_WIDGET_ALGORITHM_TOOL -> if (failNextAlgorithm) {
                     failNextAlgorithm = false
                     invalidAdaptiveAlgorithm()
@@ -423,10 +427,10 @@ class ManagedWidgetEndToEndTest {
             unloadCount++
         }
 
-        private fun feasibility(edit: Int): String = JsonObject().apply {
+        private fun feasibility(edit: Int, includeScheduleField: Boolean): String = JsonObject().apply {
             addProperty("outcome", "achievable")
             addProperty("message", displayNameOverride ?: if (edit == 0) "Today in history" else "A historical event today")
-            addProperty("periodicIntervalHours", 24)
+            if (includeScheduleField) addProperty("periodicIntervalHours", 24)
             add("toolIds", JsonArray().apply { add("wikipedia_on_this_day") })
         }.toString()
 

@@ -80,11 +80,6 @@ class LiteRtLmAuthoringToolTest {
                 authoringProtocolNames = setOf(WIDGET_AUTHORING_PIPELINE_V1),
             ),
         )
-        val stageTool = object : EphemeralLocalLlmTool {
-            override val name = "submit_widget_algorithm"
-            override val descriptionJson = """{"name":"submit_widget_algorithm","parameters":{"type":"object"}}"""
-            override fun execute(argumentsJson: String) = "{}"
-        }
         val legacyTool = object : EphemeralLocalLlmTool {
             override val name = PROPOSE_WIDGET_TOOL_NAME
             override val descriptionJson = """{"name":"propose_widget","parameters":{"type":"object"}}"""
@@ -95,23 +90,32 @@ class LiteRtLmAuthoringToolTest {
         assertEquals(
             setOf(
                 "submit_widget_feasibility",
+                "submit_widget_schedule",
                 "submit_widget_algorithm",
                 "submit_widget_call_function",
                 "submit_widget_plan_function",
                 "submit_widget_render_function",
                 "submit_widget_collection_card",
+                "submit_widget_collection_list",
             ),
             bridge.loadedToolNames,
         )
-        engine.generate(
-            PromptRequest(
-                content = MessageContent.TextPrompt("stage"),
-                advertisedToolNames = setOf(stageTool.name),
-                ephemeralTools = listOf(stageTool),
-            ),
-        ).test {
-            assertEquals(GenerationEvent.Completed, awaitItem())
-            awaitComplete()
+        listOf("submit_widget_algorithm", "submit_widget_schedule", "submit_widget_collection_list").forEach { name ->
+            val newStageTool = object : EphemeralLocalLlmTool {
+                override val name = name
+                override val descriptionJson = """{"name":"$name","parameters":{"type":"object"}}"""
+                override fun execute(argumentsJson: String) = "{}"
+            }
+            engine.generate(
+                PromptRequest(
+                    content = MessageContent.TextPrompt("stage"),
+                    advertisedToolNames = setOf(name),
+                    ephemeralTools = listOf(newStageTool),
+                ),
+            ).test {
+                assertEquals(GenerationEvent.Completed, awaitItem())
+                awaitComplete()
+            }
         }
         engine.generate(
             PromptRequest(

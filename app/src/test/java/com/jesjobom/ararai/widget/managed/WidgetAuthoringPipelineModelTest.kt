@@ -129,6 +129,29 @@ class WidgetAuthoringPipelineModelTest {
     }
 
     @Test
+    fun `retry drops optional rejected evidence when it would exceed the input budget`() = runTest {
+        val engine = RecordingStageEngine(wait = false)
+        var submitted: WidgetAuthoringRoundRequest? = null
+        val base = request(repairCode = WidgetAuthoringStageFailureCode.InvalidFeasibilityFields)
+            .copy(attemptNumber = 3)
+        val inputChars = base.estimatedInputChars() + 80
+        val contextTokens = WidgetAuthoringPipelinePolicy.OUTPUT_RESERVE_TOKENS + (inputChars + 3) / 4
+        val controller = WidgetAuthoringPipelineModelController(
+            engine,
+            maxContextTokens = contextTokens,
+            onRoundRequest = { submitted = it },
+        )
+        controller.prepare(MODEL, INFERENCE)
+
+        val result = controller.capture(MODEL, base.copy(rejectedArtifact = "x".repeat(500)))
+
+        assertTrue(result is WidgetAuthoringRoundResult.Captured)
+        assertEquals(null, submitted?.rejectedArtifact)
+        assertTrue(engine.requests.single().plainChatPrompt.contains("Rejected artifact not included for this retry"))
+        assertTrue(engine.requests.single().plainChatPrompt.contains("Attempt 3 for this stage"))
+    }
+
+    @Test
     fun `feasibility prompt explains the conditional outcome contract without freezing selections`() = runTest {
         val engine = RecordingStageEngine(wait = false)
         val controller = WidgetAuthoringPipelineModelController(engine)
@@ -137,7 +160,7 @@ class WidgetAuthoringPipelineModelTest {
         controller.capture(MODEL, request())
 
         val system = engine.requests.single().chatMessages.single { it.role == PromptChatRole.System }.text
-        assertTrue(system.contains("Return exactly four fields"))
+        assertTrue(system.contains("Return exactly the fields required by the tool schema"))
         assertTrue(system.contains("achievable => message is a concise display title"))
         assertTrue(system.contains("unachievable => message is the reason"))
         assertTrue(system.contains("needs_clarification => message is one question"))
@@ -241,7 +264,7 @@ class WidgetAuthoringPipelineModelTest {
 
         val prompt = engine.requests.single().plainChatPrompt
         assertTrue(prompt.contains("Controlled failure: invalid_render_execution"))
-        assertTrue(prompt.contains("Rejected artifact omitted to prevent anchoring"))
+        assertTrue(prompt.contains("Rejected artifact not included for this retry"))
         assertTrue(prompt.contains("runtime.pickArrayItem(outcomes, alias, arrayPath"))
         assertTrue(prompt.contains("No Math.random"))
         assertTrue(prompt.contains("and an indexed loop"))
@@ -332,41 +355,20 @@ class WidgetAuthoringPipelineModelTest {
     }
 
     @Test
-    fun `repair artifact policy keeps only localized first repair`() {
+    fun `repair artifact policy keeps bounded actionable evidence on every retry`() {
         val artifact = "{\"source\":\"rejected\"}"
+        val localized = WidgetAuthoringStageFailureCode.InvalidPresentationTone
+        val algorithm = WidgetAuthoringStageFailureCode.InvalidAlgorithm
 
-        assertEquals(
-            artifact,
-            repairArtifactForPrompt(
-                WidgetAuthoringStageFailureCode.InvalidPresentationTone,
-                artifact,
-                repairAttemptNumber = 2,
-            ),
-        )
-        assertEquals(
-            null,
-            repairArtifactForPrompt(
-                WidgetAuthoringStageFailureCode.InvalidRenderExecution,
-                artifact,
-                repairAttemptNumber = 2,
-            ),
-        )
-        assertEquals(
-            null,
-            repairArtifactForPrompt(
-                WidgetAuthoringStageFailureCode.InvalidPresentationTone,
-                artifact,
-                repairAttemptNumber = 3,
-            ),
-        )
-        assertEquals(
-            null,
-            repairArtifactForPrompt(
-                WidgetAuthoringStageFailureCode.InvalidPresentationTone,
-                artifact,
-                repairAttemptNumber = 5,
-            ),
-        )
+        assertEquals(artifact, repairArtifactForPrompt(localized, artifact))
+        assertEquals(artifact, repairArtifactForPrompt(algorithm, artifact))
+        assertEquals(null, repairArtifactForPrompt(WidgetAuthoringStageFailureCode.InvalidRenderExecution, artifact))
+        assertEquals(null, repairArtifactForPrompt(WidgetAuthoringStageFailureCode.RuntimeUnavailable, artifact))
+        assertEquals(null, repairArtifactForPrompt(WidgetAuthoringStageFailureCode.InvalidAlgorithm, null))
+        val limit = WidgetAuthoringPipelinePolicy.MAX_REPAIR_PROMPT_ARTIFACT_BYTES
+        val completeEvidence = "x".repeat(limit)
+        assertEquals(completeEvidence, repairArtifactForPrompt(algorithm, completeEvidence))
+        assertEquals(null, repairArtifactForPrompt(algorithm, "é".repeat(limit)))
     }
 
     @Test

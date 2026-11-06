@@ -446,8 +446,8 @@ private class CancellableEngine : LocalLlmEngine {
     override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
 
     override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
-        started.incrementAndGet()
         try {
+            started.incrementAndGet()
             awaitCancellation()
         } catch (error: CancellationException) {
             cancellations.incrementAndGet()

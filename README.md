@@ -61,9 +61,12 @@ backend, or external database.
   Exa/Tavily excerpts. Both use configured provider credentials; a first-ranked
   link or excerpt is not a verified answer or full page.
   Feasibility, algorithm, call functions, and presentation are generated in
-  isolated structured rounds, validated between stages, and may use at most
-  two scoped repairs. Orchestration is derived locally. The algorithm selects a
-  render capability;
+  isolated structured rounds and validated between stages. Successful stages
+  advance automatically until a failure or the final draft preview; retries
+  and final source/permission/schedule confirmation remain explicit.
+  Android Home widgets show saved result lists as scrollable, individually
+  clickable links without running the model during rendering.
+  Orchestration is derived locally. The algorithm selects a render capability;
   the final round receives only its detailed contract. Simple collection cards
   use a typed configuration that the app compiles into JavaScript, while custom
   layouts retain a source-authoring path. The checked-in catalog enables this

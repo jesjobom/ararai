@@ -5,13 +5,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
 import com.jesjobom.ararai.ui.ManagedWidgetDetailScreen
 import com.jesjobom.ararai.ui.ManagedWidgetDetailUiState
 import com.jesjobom.ararai.ui.ManagedWidgetListItemUiState
@@ -25,6 +28,7 @@ import com.jesjobom.ararai.widget.runtime.StrictJson
 import com.jesjobom.ararai.widget.runtime.WidgetPresentationNode
 import com.jesjobom.ararai.widget.runtime.sha256
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -96,6 +100,7 @@ class ManagedWidgetManagementComposeTest {
                     onEdit = { actions += "edit:$it" },
                     onRefresh = { actions += "refresh" },
                     onEnabledChange = { actions += "enabled:$it" },
+                    onScheduleChange = { actions += "schedule:$it" },
                     onDuplicate = { actions += "duplicate" },
                     onDelete = { actions += "delete" },
                     onRetry = { actions += "retry" },
@@ -107,6 +112,12 @@ class ManagedWidgetManagementComposeTest {
         composeRule.onNodeWithText("Tools: wikipedia_pages@1").assertIsDisplayed()
         composeRule.onNodeWithText("No execution history.").assertIsDisplayed()
         composeRule.onNodeWithText("Frequency").assertExists()
+        composeRule.onNodeWithText("Change refresh frequency").performClick()
+        composeRule.onNodeWithTag("widget_schedule_hours").performTextReplacement("25")
+        composeRule.onNodeWithText("Save").assertIsNotEnabled()
+        composeRule.onNodeWithTag("widget_schedule_hours").performTextReplacement("6")
+        composeRule.onNodeWithText("Save").performClick()
+        assertTrue("schedule:6" in actions)
         composeRule.onNodeWithText("Active revision 1").assertExists()
         composeRule.onNodeWithText("Revision").assertDoesNotExist()
         composeRule.onNodeWithContentDescription("About background timing").assertExists()
@@ -151,6 +162,7 @@ class ManagedWidgetManagementComposeTest {
                     onEdit = {},
                     onRefresh = {},
                     onEnabledChange = {},
+                    onScheduleChange = {},
                     onDuplicate = {},
                     onDelete = {},
                     onRetry = {},

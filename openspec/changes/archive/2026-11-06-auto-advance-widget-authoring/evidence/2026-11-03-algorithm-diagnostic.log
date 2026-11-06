@@ -1,0 +1,19 @@
+Device: SM-S901E; Android 16; device time zone America/Toronto (EST).
+Installed package before diagnosis: versionCode 29894558; versionName 202611022138.
+Authoring session metadata only; no instruction or artifact bodies:
+stage=feasibility attempt=1 kind=Initial status=Interrupted failure=RuntimeUnavailable artifactBytes=0 startedMs=1793674153203 completedMs=1793674220212
+stage=feasibility attempt=2 kind=Repair status=Interrupted failure=RuntimeUnavailable artifactBytes=0 startedMs=1793674344583 completedMs=1793674447133
+stage=feasibility attempt=3 kind=Repair status=Succeeded failure=none artifactBytes=139 startedMs=1793674666961 completedMs=1793674698460
+stage=algorithm attempt=1 kind=Initial status=Failed failure=InvalidAlgorithm artifactBytes=449 startedMs=1793674791674 completedMs=1793674823424
+stage=algorithm attempt=2 kind=Repair status=Interrupted failure=RuntimeUnavailable artifactBytes=0 startedMs=1793674968455 completedMs=1793675027993
+stage=algorithm attempt=3 kind=Repair status=Failed failure=InvalidAlgorithm artifactBytes=441 startedMs=1793675213520 completedMs=1793675247819
+stage=algorithm attempt=4 kind=Repair status=Failed failure=InvalidAlgorithm artifactBytes=426 startedMs=1793675332694 completedMs=1793675364587
+stage=algorithm attempt=5 kind=Repair status=Interrupted failure=RuntimeUnavailable artifactBytes=0 startedMs=1793675461929 completedMs=1793675524190
+stage=algorithm attempt=6 kind=Repair status=Failed failure=InvalidAlgorithm artifactBytes=441 startedMs=1793675816054 completedMs=1793675850761
+stage=algorithm attempt=7 kind=Repair status=Interrupted failure=RuntimeUnavailable artifactBytes=0 startedMs=1793676030395 completedMs=1793676111714
+Relevant sanitized platform/runtime events:
+11-02 22:16:56.051 D/ArarAI.Recovery(10489): recovery event=recovery_finished ready=true
+11-02 22:17:30.737 D/ArarAI.LiteRtLm(10489): runtime event=generation_finished request=1 resource=none active=0 elapsedMillis=17323 outcome=completed threads=47 rssKiB=629036 swapKiB=335616 pssKiB=4420266 nativePssKiB=164668 nativeHeapKiB=853013 javaHeapKiB=23560 availableMemoryKiB=994456 systemLowMemory=false thermalStatus=0
+11-02 22:20:30.392 D/ArarAI.Recovery(10489): recovery event=recovery_finished ready=true
+11-02 22:20:46.647 D/ArarAI.LiteRtLm(10489): runtime event=generation_started request=2 resource=none active=1 elapsedMillis=0 outcome=none threads=48 rssKiB=590532 swapKiB=244148 pssKiB=4222064 nativePssKiB=182299 nativeHeapKiB=393305 javaHeapKiB=21712 availableMemoryKiB=1043028 systemLowMemory=false thermalStatus=0
+11-02 22:21:38.813 I/lmkd    (  641): Reclaim 'com.jesjobom.ararai' (10489), uid 10492, oom_score_adj 0, state 2 to free 368988kB rss, 509396kB swap; reason: device is low on swap (6181756kB < 4781504kB) and thrashing (302%)

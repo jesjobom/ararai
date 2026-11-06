@@ -26,6 +26,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35])
@@ -87,6 +88,24 @@ class ManagedWidgetSchedulingTest {
     }
 
     @Test
+    fun `manual refresh resets periodic baseline without an immediate duplicate run`() {
+        val scheduler = scheduler()
+        val definition = definition(interval = 24)
+        val revision = revision()
+        scheduler.reconcile(definition, revision)
+        val before = currentWork().single()
+
+        scheduler.resetBaseline(definition, revision)
+
+        val after = currentWork().single { it.state == WorkInfo.State.ENQUEUED }
+        assertTrue(before.id != after.id)
+        val request = managedWidgetPeriodicRequest(WIDGET_ID, 24, true, "schedule", resetBaseline = true)
+        assertEquals(TimeUnit.HOURS.toMillis(24), request.workSpec.initialDelay)
+        val ordinary = managedWidgetPeriodicRequest(WIDGET_ID, 24, true, "schedule", resetBaseline = false)
+        assertEquals(0L, ordinary.workSpec.initialDelay)
+    }
+
+    @Test
     fun `changed interval revision or network requirement updates the existing job`() {
         val scheduler = scheduler()
         val revision = revision()
@@ -120,7 +139,7 @@ class ManagedWidgetSchedulingTest {
         val invalid = revision().copy(manifestJson = "{}")
 
         scheduler.reconcile(definition(interval = null), revision())
-        scheduler.reconcile(definition(interval = 2), revision())
+        scheduler.reconcile(definition(interval = 25), revision())
         scheduler.reconcile(definition(interval = 24), invalid)
 
         assertTrue(currentWork().none { it.state == WorkInfo.State.ENQUEUED })

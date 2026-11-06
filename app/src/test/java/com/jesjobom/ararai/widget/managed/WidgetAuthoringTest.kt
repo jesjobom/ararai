@@ -123,7 +123,7 @@ class WidgetAuthoringTest {
     fun `proposal parser rejects unsupported schedule tool version and capabilities`() {
         assertInvalid(
             WidgetProposalFailureCode.UnsupportedSchedule,
-            validProposalObject().apply { addProperty("periodicIntervalHours", 2) },
+            validProposalObject().apply { addProperty("periodicIntervalHours", 25) },
         )
         assertInvalid(
             WidgetProposalFailureCode.UnsupportedTool,

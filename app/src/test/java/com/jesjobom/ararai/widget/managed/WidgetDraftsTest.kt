@@ -346,6 +346,8 @@ class WidgetDraftsTest {
     private class RecordingScheduler : ManagedWidgetScheduler {
         val revisions = mutableListOf<Int>()
 
+        override fun resetBaseline(definition: ManagedWidgetDefinition, revision: WidgetProgramRevision) = Unit
+
         override fun reconcile(definition: ManagedWidgetDefinition, revision: WidgetProgramRevision) {
             if (definition.enabled) revisions += revision.revision
         }

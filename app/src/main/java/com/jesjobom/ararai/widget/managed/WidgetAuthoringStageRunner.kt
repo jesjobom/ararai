@@ -229,14 +229,29 @@ internal class WidgetAuthoringStageRunner(
     ): StagePlan {
         val accepted = AcceptedArtifacts(snapshot, registry)
         val repair = snapshot.repairContext(attempt)
-        return when (val stage = attempt.stage) {
+        val plan = when (val stage = attempt.stage) {
             WidgetAuthoringStageKey.Feasibility -> StagePlan(
                 WidgetAuthoringRoundRequest(
                     WidgetAuthoringStage.Feasibility,
                     SUBMIT_WIDGET_FEASIBILITY_TOOL,
-                    WidgetAuthoringStageSchemas.feasibility,
-                    WIDGET_FEASIBILITY_OBJECTIVE,
-                    baseContext(prompt),
+                    if (snapshot.session.schemaVersion >= WidgetAuthoringWorkflowPolicy.FEASIBILITY_WITHOUT_SCHEDULE_SCHEMA_VERSION) {
+                        WidgetAuthoringStageSchemas.feasibilityWithoutSchedule
+                    } else if (snapshot.session.schemaVersion >= 2) {
+                        WidgetAuthoringStageSchemas.feasibilityWithSeparateSchedule
+                    } else {
+                        WidgetAuthoringStageSchemas.feasibility
+                    },
+                    if (snapshot.session.schemaVersion == 2) {
+                        WIDGET_FEASIBILITY_OBJECTIVE +
+                            " Set periodicIntervalHours to null; a separate stage selects the schedule."
+                    } else {
+                        WIDGET_FEASIBILITY_OBJECTIVE
+                    },
+                    if (snapshot.session.schemaVersion >= 2) {
+                        feasibilityContextWithSeparateSchedule(prompt)
+                    } else {
+                        baseContext(prompt)
+                    },
                     repair.first,
                     repair.second,
                 ),
@@ -244,7 +259,27 @@ internal class WidgetAuthoringStageRunner(
                 stageValidators.feasibility(
                     raw,
                     registry.authoringToolCapabilities(prompt.existingWidgetTools),
+                    includeScheduleField = snapshot.session.schemaVersion < WidgetAuthoringWorkflowPolicy.FEASIBILITY_WITHOUT_SCHEDULE_SCHEMA_VERSION,
                 ).failureOrNull()
+            }
+            WidgetAuthoringStageKey.Schedule -> StagePlan(
+                WidgetAuthoringRoundRequest(
+                    WidgetAuthoringStage.Schedule,
+                    SUBMIT_WIDGET_SCHEDULE_TOOL,
+                    WidgetAuthoringStageSchemas.schedule(currentWidgetIntervalHours(prompt)),
+                    WIDGET_SCHEDULE_OBJECTIVE,
+                    scheduleContext(prompt),
+                    repair.first,
+                    repair.second,
+                ),
+            ) { raw ->
+                val allowed = ManagedWidgetPolicy.MODEL_PERIODIC_INTERVAL_HOURS +
+                    listOfNotNull(currentWidgetIntervalHours(prompt))
+                if (runCatching { parseWidgetSchedule(raw, allowed) }.isSuccess) {
+                    null
+                } else {
+                    WidgetAuthoringStageFailureCode.InvalidSchedule
+                }
             }
             WidgetAuthoringStageKey.Algorithm -> {
                 val feasibility = accepted.feasibility()
@@ -331,6 +366,7 @@ internal class WidgetAuthoringStageRunner(
             }
             WidgetAuthoringStageKey.Assembly -> error("Assembly validation does not use the model")
         }
+        return plan.copy(request = plan.request.copy(attemptNumber = attempt.attemptNumber))
     }
 }
 
@@ -341,12 +377,17 @@ internal fun authoringUpstreamDigest(
     val accepted = snapshot.checkpoints.filter { it.status == WidgetAuthoringCheckpointStatus.Accepted }
     val dependencies = when (stage) {
         WidgetAuthoringStageKey.Feasibility -> emptyList()
-        WidgetAuthoringStageKey.Algorithm -> accepted.filter { it.stage == WidgetAuthoringStageKey.Feasibility }
+        WidgetAuthoringStageKey.Schedule -> accepted.filter { it.stage == WidgetAuthoringStageKey.Feasibility }
+        WidgetAuthoringStageKey.Algorithm -> accepted.filter {
+            it.stage == WidgetAuthoringStageKey.Feasibility || it.stage == WidgetAuthoringStageKey.Schedule
+        }
         is WidgetAuthoringStageKey.CallFunction -> accepted.filter {
-            it.stage == WidgetAuthoringStageKey.Feasibility || it.stage == WidgetAuthoringStageKey.Algorithm
+            it.stage == WidgetAuthoringStageKey.Feasibility || it.stage == WidgetAuthoringStageKey.Schedule ||
+                it.stage == WidgetAuthoringStageKey.Algorithm
         }
         WidgetAuthoringStageKey.Plan -> accepted.filter {
             it.stage == WidgetAuthoringStageKey.Feasibility ||
+                it.stage == WidgetAuthoringStageKey.Schedule ||
                 it.stage == WidgetAuthoringStageKey.Algorithm ||
                 it.stage is WidgetAuthoringStageKey.CallFunction
         }
@@ -415,9 +456,22 @@ internal class AcceptedArtifacts(
         .mapTo(mutableSetOf()) { WidgetToolCapability(it.id, it.version) }
 
     fun feasibility(): WidgetFeasibilityArtifact = when (
-        val parsed = WidgetFeasibilityParser.parse(artifact(WidgetAuthoringStageKey.Feasibility), availableTools)
+        val parsed = WidgetFeasibilityParser.parse(
+            artifact(WidgetAuthoringStageKey.Feasibility),
+            availableTools,
+            includeScheduleField = snapshot.session.schemaVersion < WidgetAuthoringWorkflowPolicy.FEASIBILITY_WITHOUT_SCHEDULE_SCHEMA_VERSION,
+        )
     ) {
-        is WidgetFeasibilityParseResult.Valid -> parsed.artifact
+        is WidgetFeasibilityParseResult.Valid -> if (snapshot.session.schemaVersion >= 2) {
+            parsed.artifact.copy(
+                periodicIntervalHours = parseWidgetSchedule(
+                    artifact(WidgetAuthoringStageKey.Schedule),
+                    ManagedWidgetPolicy.SUPPORTED_PERIODIC_INTERVAL_HOURS,
+                ).periodicIntervalHours,
+            )
+        } else {
+            parsed.artifact
+        }
         is WidgetFeasibilityParseResult.Invalid -> error("Persisted feasibility checkpoint is invalid")
     }
 
@@ -541,7 +595,7 @@ private fun WidgetAuthoringSessionSnapshot.repairContext(
             it.attemptNumber == attempt.attemptNumber - 1
     }
     val code = preceding.failureCode ?: WidgetAuthoringStageFailureCode.MissingArtifact
-    return code to repairArtifactForPrompt(code, preceding.artifact, attempt.attemptNumber)
+    return code to repairArtifactForPrompt(code, preceding.artifact)
 }
 
 private fun WidgetAuthoringAttempt.failure(

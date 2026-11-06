@@ -15,8 +15,9 @@ internal class WidgetAuthoringStageValidators(
     fun feasibility(
         raw: String,
         availableTools: Set<WidgetToolCapability>,
+        includeScheduleField: Boolean = true,
     ): WidgetAuthoringArtifactValidation<WidgetFeasibilityArtifact> = when (
-        val parsed = WidgetFeasibilityParser.parse(raw, availableTools)
+        val parsed = WidgetFeasibilityParser.parse(raw, availableTools, includeScheduleField)
     ) {
         is WidgetFeasibilityParseResult.Valid -> WidgetAuthoringArtifactValidation.Valid(parsed.artifact)
         is WidgetFeasibilityParseResult.Invalid -> WidgetAuthoringArtifactValidation.Invalid(parsed.code)

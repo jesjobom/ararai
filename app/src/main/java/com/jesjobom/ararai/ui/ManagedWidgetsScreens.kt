@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -34,6 +35,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -59,9 +62,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.R
 import com.jesjobom.ararai.widget.managed.ManagedWidgetExecutionStatus
+import com.jesjobom.ararai.widget.managed.ManagedWidgetPolicy
 import com.jesjobom.ararai.widget.managed.ManagedWidgetStatus
 import com.jesjobom.ararai.widget.managed.WidgetRunDiagnostic
 import com.jesjobom.ararai.widget.managed.WidgetRunOutcome
@@ -314,6 +319,12 @@ internal fun ManagedWidgetDetailRoute(
                 reload += 1
             }
         },
+        onScheduleChange = { intervalHours ->
+            operation {
+                controller.setPeriodicIntervalHours(widgetId, intervalHours)
+                reload += 1
+            }
+        },
         onDuplicate = {
             operation {
                 val duplicate = controller.duplicate(widgetId)
@@ -339,6 +350,7 @@ internal fun ManagedWidgetDetailScreen(
     onEdit: (String?) -> Unit,
     onRefresh: () -> Unit,
     onEnabledChange: (Boolean) -> Unit,
+    onScheduleChange: (Long?) -> Unit,
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
     onRetry: () -> Unit,
@@ -388,7 +400,7 @@ internal fun ManagedWidgetDetailScreen(
                         Icon(Icons.Filled.Refresh, contentDescription = null)
                         Text(stringResource(R.string.widget_refresh))
                     }
-                    WidgetScheduleSection(state)
+                    WidgetScheduleSection(state, busy, onScheduleChange)
                     WidgetPermissionSection(state)
                     WidgetRunHistory(state.definition.id, state.runs)
                     state.revision.initialPrompt?.let { prompt ->
@@ -429,7 +441,22 @@ private fun WidgetPresentationSection(
 }
 
 @Composable
-private fun WidgetScheduleSection(state: ManagedWidgetDetailUiState) {
+private fun WidgetScheduleSection(
+    state: ManagedWidgetDetailUiState,
+    busy: Boolean,
+    onScheduleChange: (Long?) -> Unit,
+) {
+    var editing by remember(state.definition.id) { mutableStateOf(false) }
+    var automatic by remember(state.definition.id, editing) {
+        mutableStateOf(state.definition.periodicIntervalHours != null)
+    }
+    var hours by remember(state.definition.id, editing) {
+        mutableStateOf(
+            state.definition.periodicIntervalHours?.takeIf {
+                it in ManagedWidgetPolicy.CONFIGURABLE_PERIODIC_INTERVAL_HOURS
+            }?.toString() ?: "24",
+        )
+    }
     MetadataField(
         label = stringResource(R.string.widget_schedule),
         value = state.definition.periodicIntervalHours?.let {
@@ -437,6 +464,54 @@ private fun WidgetScheduleSection(state: ManagedWidgetDetailUiState) {
         } ?: stringResource(R.string.widget_schedule_manual),
         showScheduleHelp = state.definition.periodicIntervalHours != null,
     )
+    OutlinedButton(onClick = { editing = true }, enabled = !busy) {
+        Text(stringResource(R.string.widget_schedule_change))
+    }
+    if (editing) {
+        val interval = hours.toLongOrNull()?.takeIf {
+            it in ManagedWidgetPolicy.CONFIGURABLE_PERIODIC_INTERVAL_HOURS
+        }
+        val selected = if (automatic) interval else null
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text(stringResource(R.string.widget_schedule_change)) },
+            text = {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.widget_schedule_automatic), modifier = Modifier.weight(1f))
+                        Switch(checked = automatic, onCheckedChange = { automatic = it })
+                    }
+                    if (automatic) {
+                        OutlinedTextField(
+                            value = hours,
+                            onValueChange = { input ->
+                                if (input.length <= 2 && input.all(Char::isDigit)) hours = input
+                            },
+                            label = { Text(stringResource(R.string.widget_schedule_hours)) },
+                            supportingText = { Text(stringResource(R.string.widget_schedule_hours_range)) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            isError = interval == null,
+                            singleLine = true,
+                            modifier = Modifier.testTag("widget_schedule_hours"),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !busy && (!automatic || interval != null) &&
+                        selected != state.definition.periodicIntervalHours,
+                    onClick = {
+                        editing = false
+                        onScheduleChange(selected)
+                    },
+                ) { Text(stringResource(R.string.action_save)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { editing = false }) { Text(stringResource(R.string.action_cancel)) }
+            },
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

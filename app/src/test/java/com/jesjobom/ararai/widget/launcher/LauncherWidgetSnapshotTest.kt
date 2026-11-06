@@ -9,6 +9,7 @@ import com.jesjobom.ararai.widget.managed.WidgetPresentationCache
 import com.jesjobom.ararai.widget.runtime.WidgetPresentationCodec
 import com.jesjobom.ararai.widget.runtime.WidgetPresentationNode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -117,6 +118,7 @@ class LauncherWidgetSnapshotTest {
         val snapshot = LauncherWidgetSnapshotProjector.project(definition(), cache(presentation))
         assertEquals("Read article", snapshot.link?.label)
         assertTrue(snapshot.link?.url?.startsWith("https://pt.wikipedia.org/wiki/") == true)
+        assertEquals(1, snapshot.rows.filterIsInstance<LauncherWidgetRow.Link>().size)
     }
 
     @Test
@@ -152,7 +154,42 @@ class LauncherWidgetSnapshotTest {
         assertEquals("1. Result 1", snapshot.headline)
         assertEquals((2..10).joinToString("\n") { "$it. Result $it" }, snapshot.body)
         assertEquals("https://example.org/1", snapshot.link?.url)
+        assertEquals(10, snapshot.rows.filterIsInstance<LauncherWidgetRow.Link>().size)
+        assertEquals(
+            (1..10).map { "https://example.org/$it" },
+            snapshot.rows.filterIsInstance<LauncherWidgetRow.Link>().map { it.value.url },
+        )
         assertEquals(LauncherWidgetState.Ready, snapshot.state)
+    }
+
+    @Test
+    fun `launcher list retains text order and gives every result its own row`() {
+        val presentation = WidgetPresentationNode.Card(
+            WidgetPresentationNode.Column(
+                listOf(
+                    WidgetPresentationNode.Text("Stocks", "neutral"),
+                    WidgetPresentationNode.HttpsLink("First", "https://example.org/1", "search", "results.0.url"),
+                    WidgetPresentationNode.HttpsLink("Second", "https://example.org/2", "search", "results.1.url"),
+                ),
+            ),
+        )
+        val snapshot = LauncherWidgetSnapshotProjector.project(definition(), cache(presentation))
+        assertEquals(
+            listOf(
+                LauncherWidgetRow.Text("Stocks"),
+                LauncherWidgetRow.Link(LauncherWidgetLink("First", "https://example.org/1")),
+                LauncherWidgetRow.Link(LauncherWidgetLink("Second", "https://example.org/2")),
+            ),
+            snapshot.rows,
+        )
+
+        val factory = LauncherWidgetRowsFactory(context) { snapshot.rows }
+        factory.onDataSetChanged()
+        assertEquals(3, factory.count)
+        assertNotNull(factory.getViewAt(0))
+        assertNotNull(factory.getViewAt(1))
+        assertNotNull(factory.getViewAt(2))
+        assertNull(factory.getViewAt(3))
     }
 
     @Test
@@ -190,4 +227,6 @@ class LauncherWidgetSnapshotTest {
         presentationJson = WidgetPresentationCodec.encode(node),
         completedAtMillis = 1000L,
     )
+
+    private val context: Context = ApplicationProvider.getApplicationContext()
 }

@@ -452,6 +452,10 @@
     <string name="widget_no_presentation">No saved presentation yet.</string>
     <string name="widget_invalid_presentation">The saved presentation is invalid and was not rendered.</string>
     <string name="widget_schedule_manual">Manual refresh only</string>
+    <string name="widget_schedule_change">Change refresh frequency</string>
+    <string name="widget_schedule_automatic">Automatic refresh</string>
+    <string name="widget_schedule_hours">Hours between updates</string>
+    <string name="widget_schedule_hours_range">Enter a whole number from 1 to 24.</string>
     <string name="widget_schedule_periodic">About every %1$d hours</string>
     <string name="widget_schedule_inexact">Android chooses an inexact background execution window.</string>
     <string name="widget_schedule">Frequency</string>
@@ -558,6 +562,7 @@
     <string name="widget_authoring_workflow_captured_content">Captured content (inert text)</string>
     <string name="widget_authoring_workflow_stage_accessibility">%1$s, %2$s</string>
     <string name="widget_authoring_workflow_stage_feasibility">Feasibility</string>
+    <string name="widget_authoring_workflow_stage_schedule">Refresh frequency</string>
     <string name="widget_authoring_workflow_stage_algorithm">Algorithm</string>
     <string name="widget_authoring_workflow_stage_call">Tool call: %1$s</string>
     <string name="widget_authoring_workflow_stage_plan">Orchestration plan</string>

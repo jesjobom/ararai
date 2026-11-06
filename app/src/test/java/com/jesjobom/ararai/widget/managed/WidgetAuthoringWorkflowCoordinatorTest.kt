@@ -115,7 +115,7 @@ class WidgetAuthoringWorkflowCoordinatorTest {
                         attemptId,
                         if (firstStage) WidgetAuthoringAttemptStatus.Succeeded else WidgetAuthoringAttemptStatus.Failed,
                         if (firstStage) ACHIEVABLE else null,
-                        if (firstStage) null else WidgetAuthoringStageFailureCode.InvalidAlgorithm,
+                        if (firstStage) null else WidgetAuthoringStageFailureCode.InvalidSchedule,
                     ),
                 )
             },
@@ -133,9 +133,165 @@ class WidgetAuthoringWorkflowCoordinatorTest {
 
         val snapshot = requireNotNull(coordinator.activeSession.value)
         assertEquals(2, executions)
-        assertEquals(WidgetAuthoringStageKey.Algorithm, snapshot.session.currentStage)
+        assertEquals(WidgetAuthoringStageKey.Schedule, snapshot.session.currentStage)
         assertEquals(2, snapshot.attempts.size)
         assertEquals(WidgetAuthoringSessionStatus.AwaitingRetry, snapshot.session.status)
+    }
+
+    @Test
+    fun `successful stage advances automatically and stops at the first failed stage`() = runTest {
+        val workflowRepository = DispatcherWidgetAuthoringWorkflowRepository(store, UnconfinedTestDispatcher())
+        lateinit var coordinator: WidgetAuthoringWorkflowCoordinator
+        var executions = 0
+        val controller = ResumableWidgetAuthoringController(
+            this,
+            workflowRepository,
+            WidgetAuthoringAttemptExecutor { _, _, _, _ ->
+                executions++
+                val active = requireNotNull(workflowRepository.activeSession.value)
+                val attemptId = requireNotNull(active.session.activeAttemptId)
+                workflowRepository.markAttemptRunning(active.session.id, attemptId)
+                workflowRepository.completeAttempt(
+                    CompleteWidgetAuthoringAttempt(
+                        active.session.id,
+                        attemptId,
+                        if (executions == 1) {
+                            WidgetAuthoringAttemptStatus.Succeeded
+                        } else {
+                            WidgetAuthoringAttemptStatus.Failed
+                        },
+                        if (executions == 1) ACHIEVABLE else null,
+                        if (executions == 1) null else WidgetAuthoringStageFailureCode.InvalidSchedule,
+                    ),
+                )
+            },
+            onSuccessfulAttempt = { snapshot, execution ->
+                coordinator.advanceAndStartNext(
+                    execution.model,
+                    execution.inference,
+                    DIGEST,
+                    "accept-${snapshot.session.revision}",
+                    "start-${snapshot.session.revision}",
+                    snapshot,
+                )
+            },
+        )
+        controller.initialize()
+        coordinator = coordinator(controller)
+        coordinator.begin(MODEL, INFERENCE, DIGEST, "Build a widget", null)
+
+        coordinator.startCurrent(MODEL, INFERENCE, DIGEST, "first")
+        runCurrent()
+
+        val snapshot = requireNotNull(coordinator.activeSession.value)
+        assertEquals(2, executions)
+        assertEquals(2, snapshot.attempts.size)
+        assertEquals(WidgetAuthoringStageKey.Schedule, snapshot.session.currentStage)
+        assertEquals(WidgetAuthoringSessionStatus.AwaitingRetry, snapshot.session.status)
+        assertEquals(WidgetAuthoringStageKey.Feasibility, snapshot.checkpoints.single().stage)
+    }
+
+    @Test
+    fun `dedicated schedule supplies interval after schedule-free feasibility`() = runTest {
+        val workflowRepository = DispatcherWidgetAuthoringWorkflowRepository(store, UnconfinedTestDispatcher())
+        lateinit var coordinator: WidgetAuthoringWorkflowCoordinator
+        val controller = ResumableWidgetAuthoringController(
+            this,
+            workflowRepository,
+            WidgetAuthoringAttemptExecutor { _, _, _, _ ->
+                val active = requireNotNull(workflowRepository.activeSession.value)
+                val attemptId = requireNotNull(active.session.activeAttemptId)
+                workflowRepository.markAttemptRunning(active.session.id, attemptId)
+                val stage = active.session.currentStage
+                val failed = stage == WidgetAuthoringStageKey.Algorithm
+                workflowRepository.completeAttempt(
+                    CompleteWidgetAuthoringAttempt(
+                        active.session.id,
+                        attemptId,
+                        if (failed) WidgetAuthoringAttemptStatus.Failed else WidgetAuthoringAttemptStatus.Succeeded,
+                        when (stage) {
+                            WidgetAuthoringStageKey.Feasibility -> ACHIEVABLE
+                            WidgetAuthoringStageKey.Schedule -> """{"periodicIntervalHours":6}"""
+                            else -> null
+                        },
+                        if (failed) WidgetAuthoringStageFailureCode.InvalidAlgorithm else null,
+                    ),
+                )
+            },
+            onSuccessfulAttempt = { snapshot, execution ->
+                coordinator.advanceAndStartNext(
+                    execution.model,
+                    execution.inference,
+                    DIGEST,
+                    "accept-${snapshot.session.revision}",
+                    "start-${snapshot.session.revision}",
+                    snapshot,
+                )
+            },
+        )
+        controller.initialize()
+        coordinator = coordinator(controller)
+        coordinator.begin(MODEL, INFERENCE, DIGEST, "Atualize 4 vezes ao dia", null)
+
+        coordinator.startCurrent(MODEL, INFERENCE, DIGEST, "start")
+        runCurrent()
+
+        val snapshot = requireNotNull(coordinator.activeSession.value)
+        assertEquals(WidgetAuthoringStageKey.Algorithm, snapshot.session.currentStage)
+        assertEquals(WidgetAuthoringSessionStatus.AwaitingRetry, snapshot.session.status)
+        assertEquals(
+            6L,
+            AcceptedArtifacts(snapshot, ApplicationToolRegistry(emptyList())).feasibility().periodicIntervalHours,
+        )
+        assertEquals(
+            listOf(WidgetAuthoringStageKey.Feasibility, WidgetAuthoringStageKey.Schedule),
+            snapshot.checkpoints.map { it.stage },
+        )
+    }
+
+    @Test
+    fun `unachievable feasibility does not start another attempt`() = runTest {
+        val workflowRepository = DispatcherWidgetAuthoringWorkflowRepository(store, UnconfinedTestDispatcher())
+        lateinit var coordinator: WidgetAuthoringWorkflowCoordinator
+        var executions = 0
+        val controller = ResumableWidgetAuthoringController(
+            this,
+            workflowRepository,
+            WidgetAuthoringAttemptExecutor { _, _, _, _ ->
+                executions++
+                val active = requireNotNull(workflowRepository.activeSession.value)
+                val attemptId = requireNotNull(active.session.activeAttemptId)
+                workflowRepository.markAttemptRunning(active.session.id, attemptId)
+                workflowRepository.completeAttempt(
+                    CompleteWidgetAuthoringAttempt(
+                        active.session.id,
+                        attemptId,
+                        WidgetAuthoringAttemptStatus.Succeeded,
+                        UNACHIEVABLE,
+                        null,
+                    ),
+                )
+            },
+            onSuccessfulAttempt = { snapshot, execution ->
+                coordinator.advanceAndStartNext(
+                    execution.model,
+                    execution.inference,
+                    DIGEST,
+                    "accept-${snapshot.session.revision}",
+                    "start-${snapshot.session.revision}",
+                    snapshot,
+                )
+            },
+        )
+        controller.initialize()
+        coordinator = coordinator(controller)
+        coordinator.begin(MODEL, INFERENCE, DIGEST, "Build a widget", null)
+
+        coordinator.startCurrent(MODEL, INFERENCE, DIGEST, "first")
+        runCurrent()
+
+        assertEquals(1, executions)
+        assertTrue(requireNotNull(coordinator.activeSession.value).checkpoints.isEmpty())
     }
 
     @Test
@@ -192,6 +348,8 @@ class WidgetAuthoringWorkflowCoordinatorTest {
             revision: WidgetProgramRevision,
         ) = Unit
 
+        override fun resetBaseline(definition: ManagedWidgetDefinition, revision: WidgetProgramRevision) = Unit
+
         override fun cancel(widgetId: String) = Unit
 
         override fun cancelUnknown(knownWidgetIds: Set<String>) = Unit
@@ -208,9 +366,8 @@ class WidgetAuthoringWorkflowCoordinatorTest {
         )
         val DIGEST = "a".repeat(64)
         const val UNACHIEVABLE =
-            "{\"outcome\":\"unachievable\",\"message\":\"No tools\",\"periodicIntervalHours\":null,\"toolIds\":[]}"
+            "{\"outcome\":\"unachievable\",\"message\":\"No tools\",\"toolIds\":[]}"
         const val ACHIEVABLE =
-            "{\"outcome\":\"achievable\",\"message\":\"Use local context\"," +
-                "\"periodicIntervalHours\":null,\"toolIds\":[]}"
+            "{\"outcome\":\"achievable\",\"message\":\"Use local context\",\"toolIds\":[]}"
     }
 }

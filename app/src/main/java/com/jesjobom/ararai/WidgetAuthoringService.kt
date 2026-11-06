@@ -51,6 +51,9 @@ class WidgetAuthoringService : Service() {
     private val workflow
         get() = (application as ArarAiApplication).widgetAuthoringWorkflowCoordinator
 
+    private val autoProgressionActive
+        get() = (application as ArarAiApplication).resumableWidgetAuthoringController.autoProgressionActive.value
+
     private val presenter
         get() = (application as ArarAiApplication).widgetAuthoringNotificationPresenter
 
@@ -99,8 +102,8 @@ class WidgetAuthoringService : Service() {
             }
         }
         workflow.activeSession.value?.let { snapshot ->
-            if (WidgetAuthoringNotificationProjector.project(snapshot).ongoing) {
-                startInForeground(workflowPresenter.notification(snapshot))
+            if (WidgetAuthoringNotificationProjector.project(snapshot, autoProgressionActive).ongoing) {
+                startInForeground(workflowPresenter.notification(snapshot, autoProgressionActive))
                 return START_NOT_STICKY
             }
         }
@@ -120,7 +123,7 @@ class WidgetAuthoringService : Service() {
         val snapshot = workflow.activeSession.value
         val legacyState = controller.state.value
         val notification = when {
-            snapshot != null -> workflowPresenter.notification(snapshot)
+            snapshot != null -> workflowPresenter.notification(snapshot, autoProgressionActive)
             legacyState != null -> presenter.notification(legacyState)
             else -> workflowPresenter.startingNotification()
         }
@@ -137,9 +140,10 @@ class WidgetAuthoringService : Service() {
             latestStartId,
             snapshot,
             legacyState,
+            autoProgressionActive,
         ) ?: return
         if (disposition == WidgetAuthoringForegroundDisposition.Keep) {
-            val notification = snapshot?.let(workflowPresenter::notification)
+            val notification = snapshot?.let { workflowPresenter.notification(it, autoProgressionActive) }
                 ?: legacyState?.let(presenter::notification)
             if (notification != null) startInForeground(notification)
         }
@@ -151,7 +155,15 @@ class WidgetAuthoringService : Service() {
         snapshot: WidgetAuthoringSessionSnapshot?,
         legacyState: WidgetAuthoringJobState?,
     ) {
-        when (widgetAuthoringForegroundDispositionForStart(startId, latestStartId, snapshot, legacyState) ?: return) {
+        when (
+            widgetAuthoringForegroundDispositionForStart(
+                startId,
+                latestStartId,
+                snapshot,
+                legacyState,
+                autoProgressionActive,
+            ) ?: return
+        ) {
             WidgetAuthoringForegroundDisposition.Keep -> Unit
             WidgetAuthoringForegroundDisposition.DetachAndStop -> {
                 stopForeground(STOP_FOREGROUND_DETACH)
@@ -279,8 +291,9 @@ internal fun widgetAuthoringForegroundDispositionForStart(
     latestStartId: Int,
     snapshot: WidgetAuthoringSessionSnapshot?,
     legacyState: WidgetAuthoringJobState?,
+    autoProgressionActive: Boolean = false,
 ): WidgetAuthoringForegroundDisposition? = if (startId == latestStartId) {
-    widgetAuthoringForegroundDisposition(snapshot, legacyState)
+    widgetAuthoringForegroundDisposition(snapshot, legacyState, autoProgressionActive)
 } else {
     null
 }
@@ -288,8 +301,9 @@ internal fun widgetAuthoringForegroundDispositionForStart(
 internal fun widgetAuthoringForegroundDisposition(
     snapshot: WidgetAuthoringSessionSnapshot?,
     legacyState: WidgetAuthoringJobState?,
+    autoProgressionActive: Boolean = false,
 ): WidgetAuthoringForegroundDisposition = when {
-    snapshot != null && WidgetAuthoringNotificationProjector.project(snapshot).ongoing ->
+    snapshot != null && WidgetAuthoringNotificationProjector.project(snapshot, autoProgressionActive).ongoing ->
         WidgetAuthoringForegroundDisposition.Keep
     snapshot != null -> WidgetAuthoringForegroundDisposition.DetachAndStop
     legacyState is WidgetAuthoringJobState.Queued ||
@@ -458,13 +472,13 @@ internal class ResumableWidgetAuthoringNotificationPresenter(
         createNotificationChannel()
     }
 
-    fun onStateChanged(snapshot: WidgetAuthoringSessionSnapshot?) {
+    fun onStateChanged(snapshot: WidgetAuthoringSessionSnapshot?, autoProgressionActive: Boolean = false) {
         if (snapshot == null) {
             stopOwnedService()
             notificationManager.cancel(WidgetAuthoringService.NOTIFICATION_ID)
             return
         }
-        val state = WidgetAuthoringNotificationProjector.project(snapshot)
+        val state = WidgetAuthoringNotificationProjector.project(snapshot, autoProgressionActive)
         if (state.ongoing) {
             androidx.core.content.ContextCompat.startForegroundService(
                 appContext,
@@ -477,7 +491,7 @@ internal class ResumableWidgetAuthoringNotificationPresenter(
         notificationManager.notifyIfAllowed(
             appContext,
             WidgetAuthoringService.NOTIFICATION_ID,
-            notification(snapshot),
+            notification(snapshot, autoProgressionActive),
         )
     }
 
@@ -492,8 +506,11 @@ internal class ResumableWidgetAuthoringNotificationPresenter(
         serviceStarted = false
     }
 
-    internal fun notification(snapshot: WidgetAuthoringSessionSnapshot): Notification {
-        val state = WidgetAuthoringNotificationProjector.project(snapshot)
+    internal fun notification(
+        snapshot: WidgetAuthoringSessionSnapshot,
+        autoProgressionActive: Boolean = false,
+    ): Notification {
+        val state = WidgetAuthoringNotificationProjector.project(snapshot, autoProgressionActive)
         val openApp = PendingIntent.getActivity(
             appContext,
             snapshot.session.revision,
