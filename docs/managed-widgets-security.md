@@ -29,7 +29,7 @@ must remain equal to, or narrower than, `WidgetRuntimePolicy`.
 | Area | v1 maximum or supported set | Enforcement verification |
 | --- | --- | --- |
 | Managed widgets | 50 per installation | Repository boundary tests in task 2.2 |
-| Periodic schedules | New model choices: 1, 2, 4, 6, 12, 24 hours; detail input: every whole hour 1–24; older 48/72/168-hour widgets remain supported; Android timing is inexact | `ManagedWidgetPolicyTest`, WorkManager tests in task 5.1, and device task 9.4 |
+| Periodic schedules | New model choices: 1, 2, 4, 6, 8, 12, 24 hours; detail input: every whole hour 1–24; older 48/72/168-hour widgets remain supported; Android timing is inexact | `ManagedWidgetPolicyTest`, WorkManager tests in task 5.1, and device task 9.4 |
 | Program revisions | 20 per widget; oldest inactive revisions evicted first | Repository retention tests in tasks 2.2-2.4 |
 | Cached presentation | One active cache per widget, at most 64 KiB, revision-bound | `ManagedWidgetPolicyTest`, repository/coordinator tests in tasks 2.2 and 4.3 |
 | Observations | 256 per widget, 90 days, name 64 characters, string value 4,096 characters | `ManagedWidgetPolicyTest` and repository tests in task 2.3 |

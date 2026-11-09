@@ -20,6 +20,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.jesjobom.ararai.R
 import com.jesjobom.ararai.tools.ApplicationToolContract
+import com.jesjobom.ararai.tools.WEATHER_FORECAST_TOOL_NAME
 import com.jesjobom.ararai.tools.WEB_SEARCH_CONTENT_TOOL_NAME
 import com.jesjobom.ararai.tools.WEB_SEARCH_TOP_RESULTS_TOOL_NAME
 import com.jesjobom.ararai.widget.managed.authoringWidgetContracts
@@ -32,6 +33,8 @@ internal fun WidgetToolsScreen(
     webSearchEnabled: Boolean = false,
     webProviderConfigured: Boolean = false,
     onWebSearchEnabledChange: (Boolean) -> Unit = {},
+    weatherEnabled: Boolean = false,
+    onWeatherEnabledChange: (Boolean) -> Unit = {},
     onConfigureWebProviders: () -> Unit = {},
     onBack: () -> Unit,
 ) {
@@ -80,10 +83,41 @@ internal fun WidgetToolsScreen(
                         onConfigureWebProviders,
                     )
                 }
+            contracts.currentWidgetToolContracts()
+                .firstOrNull { it.id == WEATHER_FORECAST_TOOL_NAME }
+                ?.let { contract ->
+                    WidgetWeatherToolCard(contract, weatherEnabled, onWeatherEnabledChange)
+                }
             Text(
                 stringResource(R.string.widgets_tools_revision_note),
                 style = MaterialTheme.typography.bodySmall,
             )
+        }
+    }
+}
+
+@Composable
+private fun WidgetWeatherToolCard(
+    contract: ApplicationToolContract,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.tools_weather_name), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.widgets_weather_description))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    stringResource(if (enabled) R.string.widgets_tools_enabled else R.string.widgets_tools_disabled),
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onEnabledChange,
+                    modifier = Modifier.testTag("widget-weather-enabled"),
+                )
+            }
+            Text("${contract.displayName} · ${contract.id}@${contract.version}")
         }
     }
 }

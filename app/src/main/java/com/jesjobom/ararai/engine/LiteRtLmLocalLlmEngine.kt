@@ -38,9 +38,11 @@ import com.jesjobom.ararai.model.ModelAccelerationPolicy
 import com.jesjobom.ararai.model.ModelInputCapabilities
 import com.jesjobom.ararai.model.ModelRuntime
 import com.jesjobom.ararai.tools.ApplicationToolDispatcher
+import com.jesjobom.ararai.tools.WEATHER_FORECAST_TOOL_NAME
 import com.jesjobom.ararai.tools.WIKIPEDIA_ON_THIS_DAY_TOOL_NAME
 import com.jesjobom.ararai.tools.WIKIPEDIA_PAGES_TOOL_NAME
 import com.jesjobom.ararai.tools.modelApplicationToolDispatcher
+import com.jesjobom.ararai.weather.WeatherOpenApiTool
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -720,7 +722,9 @@ private class AndroidLiteRtLmSession(
         val canReuse = selected.reused
         val conversation = created.conversation
         val conversationId = System.identityHashCode(conversation)
-        val reusable = key.sessionId != null
+        // LiteRT-LM can block inside sendMessageAsync when reusing a conversation
+        // after a weather tool result. Recreate those conversations each turn.
+        val reusable = key.sessionId != null && WEATHER_FORECAST_TOOL_NAME !in key.advertisedToolNames
         val completed = AtomicBoolean(false)
         val errored = AtomicBoolean(false)
         val firstCallbackObserved = AtomicBoolean(false)
@@ -783,6 +787,7 @@ private class AndroidLiteRtLmSession(
                 ),
             )
         }
+        created.weatherTool?.beginTurn()
         Log.d(
             LOG_TAG,
             "Conversation ready: reused=$canReuse, elapsed=${generationStartedAt.elapsedMillis()} ms",
@@ -794,7 +799,9 @@ private class AndroidLiteRtLmSession(
             elapsedMillis = generationStartedAt.elapsedMillis(),
         )
         try {
+            Log.d(LOG_TAG, "Activating conversation: reused=$canReuse")
             conversations.activate(conversation)
+            Log.d(LOG_TAG, "Conversation activated: reused=$canReuse")
             var previousText = ""
             var previousReasoning = ""
             val callback =
@@ -865,6 +872,7 @@ private class AndroidLiteRtLmSession(
                                     structuredWikipediaTools = created.structuredWikipediaTools,
                                     webSearchTool = created.webSearchTool,
                                     calculatorTool = created.calculatorTool,
+                                    weatherTool = created.weatherTool,
                                 ),
                             )
                         }
@@ -886,7 +894,10 @@ private class AndroidLiteRtLmSession(
                     }
                 }
 
-            conversation.sendMessageAsync(request.toCurrentLiteRtContents(), callback)
+            Log.d(LOG_TAG, "Preparing model request: reused=$canReuse")
+            val currentContents = request.toCurrentLiteRtContents()
+            Log.d(LOG_TAG, "Submitting model request: reused=$canReuse")
+            conversation.sendMessageAsync(currentContents, callback)
             Log.d(LOG_TAG, "Audio request submitted: ${generationStartedAt.elapsedMillis()} ms")
             runtimeTelemetry.record(
                 event = "request_submitted",
@@ -1015,6 +1026,7 @@ private class AndroidLiteRtLmSession(
                 structuredWikipediaTools = tools.structuredWikipedia,
                 webSearchTool = tools.webSearch,
                 calculatorTool = tools.calculator,
+                weatherTool = tools.weather,
             )
             runtimeTelemetry.record(
                 event = "conversation_create_finished",
@@ -1062,11 +1074,17 @@ private class AndroidLiteRtLmSession(
         } else {
             null
         }
+        val weather = if (WEATHER_FORECAST_TOOL_NAME in requested) {
+            WeatherOpenApiTool(toolDispatcher, supportedToolNames)
+        } else {
+            null
+        }
         return ProductionConversationTools(
             wikipedia = wikipedia,
             structuredWikipedia = structuredWikipedia,
             webSearch = webSearch,
             calculator = calculator,
+            weather = weather,
             ephemeral = request.ephemeralTools.map(::EphemeralOpenApiTool),
         )
     }
@@ -1086,6 +1104,7 @@ private class AndroidLiteRtLmSession(
         structuredWikipediaTools = state.structuredWikipediaTools,
         webSearchTool = state.webSearchTool,
         calculatorTool = state.calculatorTool,
+        weatherTool = state.weatherTool,
     )
 
     private data class ProductionConversationSelectionInput(
@@ -1108,6 +1127,7 @@ private class AndroidLiteRtLmSession(
         val structuredWikipediaTools: List<WikipediaStructuredOpenApiTool>,
         val webSearchTool: WebSearchOpenApiTool?,
         val calculatorTool: CalculatorOpenApiTool?,
+        val weatherTool: WeatherOpenApiTool?,
     )
 
     private data class ProductionConversationTools(
@@ -1115,12 +1135,14 @@ private class AndroidLiteRtLmSession(
         val structuredWikipedia: List<WikipediaStructuredOpenApiTool>,
         val webSearch: WebSearchOpenApiTool?,
         val calculator: CalculatorOpenApiTool?,
+        val weather: WeatherOpenApiTool?,
         val ephemeral: List<EphemeralOpenApiTool>,
     ) {
         val configured = listOfNotNull(
             wikipedia?.let(::tool),
             webSearch?.let(::tool),
             calculator?.let(::tool),
+            weather?.let(::tool),
         ) + structuredWikipedia.map(::tool) + ephemeral.map(::tool)
     }
 
@@ -1187,6 +1209,7 @@ private class AndroidLiteRtLmSession(
         val structuredWikipediaTools: List<WikipediaStructuredOpenApiTool> = emptyList(),
         val webSearchTool: WebSearchOpenApiTool? = null,
         val calculatorTool: CalculatorOpenApiTool? = null,
+        val weatherTool: WeatherOpenApiTool? = null,
     )
 }
 

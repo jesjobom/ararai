@@ -56,7 +56,7 @@ backend, or external database.
   history, duplication, enable/disable, and complete confirmed deletion. Refresh
   executes the stored bounded JavaScript program without loading a model. The
   structured data sources are application-owned Wikipedia page lookup,
-  historical-events-by-date, and optional web searches: up to ten ranked
+  historical-events-by-date, opt-in Open-Meteo weather forecasts, and optional web searches: up to ten ranked
   titles/HTTPS links without extraction, or up to three results with bounded
   Exa/Tavily excerpts. Both use configured provider credentials; a first-ranked
   link or excerpt is not a verified answer or full page.
@@ -248,7 +248,13 @@ enablement and operational readiness remain additional gates. The legacy
 `wikipedia_search@1` binding remains registered for compatibility.
 Checked-in Chat models advertise `wikipedia_pages@1` for direct stable page
 lookup and `wikipedia_on_this_day@1` for actual historical events on a calendar
-date; both contracts are also widget-eligible. Managed widgets keep source,
+date; both contracts are also widget-eligible. The disabled-by-default
+`weather_forecast@1` contract is independently available to Chat and widgets.
+It resolves explicitly named places; a location-less request asks for a target
+place and never accesses device location. Scheduled weather widgets must name
+their target place. Weather requests send the place to Open-Meteo,
+whose data must be attributed. The free Open-Meteo endpoint is restricted to
+non-commercial use; release use must comply with its current terms. Managed widgets keep source,
 revisions, consent, cached presentation, typed observations, and sanitized run
 history in a separate app-private SQLite database. See
 [Managed in-app widgets](docs/managed-widgets.md) for creation, consent,

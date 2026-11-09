@@ -2,6 +2,7 @@
 
 package com.jesjobom.ararai.widget.managed
 
+import com.google.gson.JsonParser
 import com.jesjobom.ararai.tools.ApplicationTool
 import com.jesjobom.ararai.tools.ApplicationToolCategory
 import com.jesjobom.ararai.tools.ApplicationToolConsumer
@@ -9,6 +10,8 @@ import com.jesjobom.ararai.tools.ApplicationToolContract
 import com.jesjobom.ararai.tools.ApplicationToolOperationalState
 import com.jesjobom.ararai.tools.ApplicationToolRegistry
 import com.jesjobom.ararai.tools.applicationToolBinding
+import com.jesjobom.ararai.tools.weatherApplicationTool
+import com.jesjobom.ararai.weather.OpenMeteoWeatherTool
 import com.jesjobom.ararai.widget.runtime.WidgetJavaScriptEngine
 import com.jesjobom.ararai.widget.runtime.WidgetPresentationCapability
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeContext
@@ -22,6 +25,39 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WidgetAuthoringPipelineValidationTest {
+    @Test
+    fun `weather render cannot show only today's date for every successful forecast`() = runTest {
+        val validator = weatherValidator { outcomes ->
+            val forecast = JsonParser.parseString(outcomes).asJsonObject.getAsJsonObject("forecast")
+            val text = when {
+                forecast.get("status").asString == "failure" -> "Weather unavailable"
+                forecast.getAsJsonObject("payload").getAsJsonArray("days").size() == 0 -> "No forecast"
+                else -> "2026-11-08"
+            }
+            WidgetScriptResult.Success("""{"type":"text","text":"$text","tone":"neutral"}""")
+        }
+
+        assertEquals(
+            WidgetAuthoringStageFailureCode.InvalidPresentationSuccessHandling,
+            validator.validateRenderFunction(emptyList(), RENDER, weatherAlgorithm(), weatherFeasibility(), RUNTIME),
+        )
+    }
+
+    @Test
+    fun `weather render using forecast temperature passes distinct successful fixtures`() = runTest {
+        val validator = weatherValidator { outcomes ->
+            val forecast = JsonParser.parseString(outcomes).asJsonObject.getAsJsonObject("forecast")
+            val text = when {
+                forecast.get("status").asString == "failure" -> "Weather unavailable"
+                forecast.getAsJsonObject("payload").getAsJsonArray("days").size() == 0 -> "No forecast"
+                else -> "${forecast.getAsJsonObject("payload").getAsJsonObject("current").get("temperatureC").asDouble} °C"
+            }
+            WidgetScriptResult.Success("""{"type":"text","text":"$text","tone":"neutral"}""")
+        }
+
+        assertEquals(null, validator.validateRenderFunction(emptyList(), RENDER, weatherAlgorithm(), weatherFeasibility(), RUNTIME))
+    }
+
     @Test
     fun `top ten web request rejects a call that fetches only one result`() = runTest {
         val web = WidgetToolCapability("web_search_top_results", 1)
@@ -185,6 +221,28 @@ class WidgetAuthoringPipelineValidationTest {
         },
     )
 
+    private fun weatherValidator(render: (String) -> WidgetScriptResult): WidgetAuthoringPipelineValidator = WidgetAuthoringPipelineValidator(
+        ApplicationToolRegistry(
+            listOf(
+                weatherApplicationTool(OpenMeteoWeatherTool(), ApplicationToolConsumer.Widget) {
+                    ApplicationToolOperationalState(enabled = true, ready = true)
+                },
+            ),
+        ),
+        WidgetJavaScriptEngine { _, entrypoint, arguments, _ ->
+            assertEquals("render", entrypoint)
+            render(arguments[1])
+        },
+    )
+
+    private fun weatherAlgorithm() = ALGORITHM.copy(
+        steps = listOf(ALGORITHM.steps.single().copy(id = "forecast", tool = WEATHER)),
+    )
+
+    private fun weatherFeasibility() = FEASIBILITY.copy(
+        tools = listOf(WidgetSelectedTool(WEATHER, "Show forecast")),
+    )
+
     private fun registry() = ApplicationToolRegistry(
         listOf(
             applicationToolBinding(
@@ -214,6 +272,7 @@ class WidgetAuthoringPipelineValidationTest {
 
     private companion object {
         val TOOL = WidgetToolCapability("wikipedia_on_this_day", 1)
+        val WEATHER = WidgetToolCapability("weather_forecast", 1)
         val FEASIBILITY = WidgetFeasibilityArtifact(
             outcome = WidgetFeasibilityOutcome.Achievable,
             displayName = "Today in history",

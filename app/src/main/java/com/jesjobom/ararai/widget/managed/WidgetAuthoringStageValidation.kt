@@ -1,5 +1,6 @@
 package com.jesjobom.ararai.widget.managed
 
+import com.jesjobom.ararai.tools.WEATHER_FORECAST_TOOL_NAME
 import com.jesjobom.ararai.tools.WEB_SEARCH_CONTENT_TOOL_NAME
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeContext
 import com.jesjobom.ararai.widget.runtime.WidgetToolCapability
@@ -37,16 +38,7 @@ internal class WidgetAuthoringStageValidators(
     ) {
         is WidgetAlgorithmParseResult.Valid -> {
             val artifact = parsed.artifact
-            val invalidList = prompt?.let { requestedWebResultsCount(it, feasibility) } != null &&
-                artifact.renderCapability != WidgetRenderCapability.CollectionList
-            val invalidCard = prompt?.let { requestedRankedWebContentCard(it, feasibility) } == true &&
-                (
-                    artifact.renderCapability != WidgetRenderCapability.CollectionCard ||
-                        artifact.toolCallSteps.singleOrNull()?.tool?.id != WEB_SEARCH_CONTENT_TOOL_NAME
-                    )
-            val invalidEventYear = prompt?.let { requestedEventYearTitle(it, feasibility) } == true &&
-                !artifact.isDirectEventCard()
-            if (invalidList || invalidCard || invalidEventYear) {
+            if (invalidPresentationRoute(artifact, feasibility, prompt)) {
                 WidgetAuthoringArtifactValidation.Invalid(WidgetAuthoringStageFailureCode.InvalidAlgorithm)
             } else {
                 WidgetAuthoringArtifactValidation.Valid(artifact)
@@ -132,6 +124,27 @@ internal class WidgetAuthoringStageValidators(
                 runtimeContext,
             ).toValidation(parsed.artifact)
         }
+    }
+}
+
+private fun invalidPresentationRoute(
+    artifact: WidgetAlgorithmArtifact,
+    feasibility: WidgetFeasibilityArtifact,
+    prompt: WidgetAuthoringPrompt?,
+): Boolean = when {
+    feasibility.tools.any { it.capability.id == WEATHER_FORECAST_TOOL_NAME } ->
+        artifact.renderCapability != WidgetRenderCapability.CustomSource
+    prompt == null -> false
+    else -> {
+        val invalidList = requestedWebResultsCount(prompt, feasibility) != null &&
+            artifact.renderCapability != WidgetRenderCapability.CollectionList
+        val invalidCard = requestedRankedWebContentCard(prompt, feasibility) &&
+            (
+                artifact.renderCapability != WidgetRenderCapability.CollectionCard ||
+                    artifact.toolCallSteps.singleOrNull()?.tool?.id != WEB_SEARCH_CONTENT_TOOL_NAME
+                )
+        val invalidEventYear = requestedEventYearTitle(prompt, feasibility) && !artifact.isDirectEventCard()
+        invalidList || invalidCard || invalidEventYear
     }
 }
 

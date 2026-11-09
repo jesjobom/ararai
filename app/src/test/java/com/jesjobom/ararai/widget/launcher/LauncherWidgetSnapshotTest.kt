@@ -21,6 +21,17 @@ import org.robolectric.annotation.Config
 @Config(application = Application::class, sdk = [35])
 class LauncherWidgetSnapshotTest {
     @Test
+    fun `weather snapshot includes application owned attribution link`() {
+        val snapshot = LauncherWidgetSnapshotProjector.project(
+            definition(),
+            cache(WidgetPresentationNode.Text("22°C", "neutral")),
+            weatherAttribution = true,
+        )
+        assertEquals("https://open-meteo.com/", snapshot.link?.url)
+        assertTrue(snapshot.rows.any { it is LauncherWidgetRow.Link && it.value.url == "https://open-meteo.com/" })
+    }
+
+    @Test
     fun `separates first heading from remaining text and a validated link`() {
         val presentation = WidgetPresentationNode.Card(
             WidgetPresentationNode.Column(

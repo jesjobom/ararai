@@ -452,8 +452,9 @@ private val REPAIR_INSTRUCTIONS = mapOf(
     WidgetAuthoringStageFailureCode.InvalidPresentationProvenance to
         "For an array card, use runtime.collectionCard with the URL field name, not its URL value; it constructs a result-proven link.",
     WidgetAuthoringStageFailureCode.InvalidPresentationSuccessHandling to
-        "The nonempty success result rendered the fallback. For an array card, use runtime.collectionCard " +
-        "with the exact array, title, and optional body fields.",
+        "The successful result must change the visible presentation when its requested data changes; " +
+        "show a result field, not only the date or a generic success label. For an array card, use " +
+        "runtime.collectionCard with the exact array, title, and optional body fields.",
     WidgetAuthoringStageFailureCode.InvalidPresentationEmptyHandling to
         "For an array card, use runtime.collectionCard; it returns the fallback for an empty collection.",
     WidgetAuthoringStageFailureCode.InvalidPresentationFailureHandling to

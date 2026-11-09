@@ -36,6 +36,7 @@ class WidgetAuthoringScheduleTest {
             values.filterNot { it.isJsonNull }.map { it.asLong }.toSet(),
         )
         assertEquals(6L, parseWidgetSchedule("""{"periodicIntervalHours":6}""").periodicIntervalHours)
+        assertEquals(8L, parseWidgetSchedule("""{"periodicIntervalHours":8.0}""").periodicIntervalHours)
         assertTrue(values.any { it.isJsonNull })
         val existing = JsonParser.parseString(WidgetAuthoringStageSchemas.schedule(3)).asJsonObject
             .getAsJsonObject("parameters").getAsJsonObject("properties")

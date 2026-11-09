@@ -3,6 +3,7 @@ package com.jesjobom.ararai.chat
 import android.content.Context
 import com.jesjobom.ararai.knowledge.WebSearchProvider
 import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.tools.WEATHER_FORECAST_TOOL_NAME
 import com.jesjobom.ararai.tools.WIKIPEDIA_ON_THIS_DAY_TOOL_NAME
 import com.jesjobom.ararai.tools.WIKIPEDIA_PAGES_TOOL_NAME
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,6 +15,7 @@ data class InstructionSettings(
     val voiceInstruction: String = InstructionDefaults.VOICE,
     val wikipediaEnabled: Boolean = false,
     val calculatorEnabled: Boolean = false,
+    val weatherEnabled: Boolean = false,
 )
 
 object InstructionDefaults {
@@ -44,6 +46,7 @@ interface InstructionPreferences {
     fun restoreDefault(mode: InteractionMode)
     fun setWikipediaEnabled(enabled: Boolean)
     fun setCalculatorEnabled(enabled: Boolean)
+    fun setWeatherEnabled(enabled: Boolean)
 }
 
 class InMemoryInstructionPreferences(
@@ -78,6 +81,10 @@ class InMemoryInstructionPreferences(
     override fun setCalculatorEnabled(enabled: Boolean) {
         mutableSettings.value = mutableSettings.value.copy(calculatorEnabled = enabled)
     }
+
+    override fun setWeatherEnabled(enabled: Boolean) {
+        mutableSettings.value = mutableSettings.value.copy(weatherEnabled = enabled)
+    }
 }
 
 class SharedPreferencesInstructionPreferences(context: Context) : InstructionPreferences {
@@ -93,6 +100,7 @@ class SharedPreferencesInstructionPreferences(context: Context) : InstructionPre
                     ?: InstructionDefaults.VOICE,
                 wikipediaEnabled = preferences.getBoolean(KEY_WIKIPEDIA, false),
                 calculatorEnabled = preferences.getBoolean(KEY_CALCULATOR, false),
+                weatherEnabled = preferences.getBoolean(KEY_WEATHER, false),
             ),
         )
 
@@ -120,6 +128,11 @@ class SharedPreferencesInstructionPreferences(context: Context) : InstructionPre
         preferences.edit().putBoolean(KEY_CALCULATOR, enabled).apply()
     }
 
+    override fun setWeatherEnabled(enabled: Boolean) {
+        delegate.setWeatherEnabled(enabled)
+        preferences.edit().putBoolean(KEY_WEATHER, enabled).apply()
+    }
+
     private fun instructionFor(mode: InteractionMode): String = if (mode == InteractionMode.Chat) {
         settings.value.chatInstruction
     } else {
@@ -132,6 +145,7 @@ class SharedPreferencesInstructionPreferences(context: Context) : InstructionPre
         const val KEY_VOICE = "voice_instruction"
         const val KEY_WIKIPEDIA = "wikipedia_enabled"
         const val KEY_CALCULATOR = "calculator_enabled"
+        const val KEY_WEATHER = "weather_enabled"
     }
 }
 
@@ -188,6 +202,17 @@ fun conversationTurnSettings(
                 add(
                     "Use calculator for arithmetic and supported numeric functions. Pass only the expression, " +
                         "use at most three calls, and never expose tool protocol or JSON.",
+                )
+            }
+            if (WEATHER_FORECAST_TOOL_NAME in normalizedTools) {
+                add(
+                    "Use weather_forecast for current conditions and forecasts, including rain questions. " +
+                        "If the user does not specify a target place, do not call the tool. " +
+                        "Ask them to name a city or place AND explicitly tell them that ArarAI " +
+                        "cannot access current device location. Never guess or reuse a prior place. " +
+                        "Do not invent weather when the tool fails. " +
+                        "Interpret umbrella advice from precipitation probability and amount. " +
+                        "Mention Open-Meteo as the source and never expose tool JSON.",
                 )
             }
         }
@@ -256,6 +281,9 @@ fun eligibleToolNames(
     }
     if (settings.calculatorEnabled && model?.toolCapabilities?.supports(CALCULATOR_TOOL_NAME) == true) {
         add(CALCULATOR_TOOL_NAME)
+    }
+    if (settings.weatherEnabled && model?.toolCapabilities?.supports(WEATHER_FORECAST_TOOL_NAME) == true) {
+        add(WEATHER_FORECAST_TOOL_NAME)
     }
 }
 

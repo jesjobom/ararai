@@ -12,6 +12,7 @@ import android.widget.RemoteViewsService
 import com.jesjobom.ararai.ArarAiApplication
 import com.jesjobom.ararai.R
 import com.jesjobom.ararai.knowledge.validWidgetExternalUrl
+import com.jesjobom.ararai.widget.managed.usesWeatherTool
 import kotlinx.coroutines.runBlocking
 
 /** Reads only the saved, validated presentation; launcher rendering never executes a widget. */
@@ -28,7 +29,11 @@ private fun loadLauncherWidgetRows(context: Context, appWidgetId: Int): List<Lau
     val repository = app.managedWidgetApplicationServices.repository
     val definition = repository.listDefinitions().firstOrNull { it.id == widgetId }
         ?: return@runBlocking emptyList()
-    LauncherWidgetSnapshotProjector.project(definition, repository.cachedPresentation(widgetId)).rows
+    LauncherWidgetSnapshotProjector.project(
+        definition,
+        repository.cachedPresentation(widgetId),
+        repository.activeRevision(widgetId)?.usesWeatherTool() == true,
+    ).rows
 }
 
 internal class LauncherWidgetRowsFactory(

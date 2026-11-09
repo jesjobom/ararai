@@ -125,6 +125,8 @@ class ArarAiApplication :
 
     val instructionPreferences by lazy { SharedPreferencesInstructionPreferences(this) }
 
+    val weatherTool by lazy { com.jesjobom.ararai.weather.OpenMeteoWeatherTool() }
+
     val widgetToolPreferences by lazy { com.jesjobom.ararai.widget.SharedPreferencesWidgetToolPreferences(this) }
 
     val reportDeliveryReceiptStore by lazy { SharedPreferencesReportDeliveryReceiptStore(this) }
@@ -186,6 +188,7 @@ class ArarAiApplication :
             webSearchTool = webSearchResolver::resolve,
             calculatorEngine = calculatorEngine,
             experimentalWebSearchEnabled = com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH,
+            weatherTool = weatherTool,
         )
     }
 
@@ -231,6 +234,13 @@ class ArarAiApplication :
                     }
                     .takeIf(List<*>::isNotEmpty)
                     ?.let(::FallbackKnowledgeTool)
+            },
+            weatherTool = weatherTool,
+            weatherState = {
+                ApplicationToolOperationalState(
+                    enabled = widgetToolPreferences.weatherEnabled.value,
+                    ready = true,
+                )
             },
         )
     }

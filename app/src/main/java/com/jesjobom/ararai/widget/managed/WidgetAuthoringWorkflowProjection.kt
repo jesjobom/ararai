@@ -37,6 +37,12 @@ internal data class WidgetAuthoringStageProjection(
     val acceptedCheckpoint: WidgetAuthoringCheckpoint?,
     val attempts: List<WidgetAuthoringAttemptDetails>,
     val warnings: List<WidgetAuthoringWarning> = emptyList(),
+    val feasibilityReview: WidgetFeasibilityReview? = null,
+)
+
+internal data class WidgetFeasibilityReview(
+    val outcome: WidgetFeasibilityOutcome,
+    val message: String,
 )
 
 internal enum class WidgetAuthoringWarning {
@@ -57,6 +63,7 @@ internal data class WidgetAuthoringWorkflowProjection(
 
 internal object WidgetAuthoringWorkflowProjector {
     fun project(snapshot: WidgetAuthoringSessionSnapshot): WidgetAuthoringWorkflowProjection {
+        val feasibilityReview = feasibilityReview(snapshot)
         val knownStages = buildList {
             add(WidgetAuthoringStageKey.Feasibility)
             if (snapshot.session.schemaVersion >= 2) add(WidgetAuthoringStageKey.Schedule)
@@ -87,6 +94,7 @@ internal object WidgetAuthoringWorkflowProjector {
                     status = displayStatus(snapshot, stage, checkpoint, attempts.lastOrNull()),
                     acceptedCheckpoint = checkpoint,
                     attempts = attempts.map { it.toDetails() },
+                    feasibilityReview = feasibilityReview.takeIf { stage == WidgetAuthoringStageKey.Feasibility },
                     warnings = WidgetAuthoringWarningDetector.detect(
                         snapshot.session.instruction,
                         stage,
@@ -101,8 +109,31 @@ internal object WidgetAuthoringWorkflowProjector {
                     ),
                 )
             },
-            allowedActions = WidgetAuthoringWorkflowStateMachine.allowedActions(snapshot),
+            allowedActions = WidgetAuthoringWorkflowStateMachine.allowedActions(snapshot).let { actions ->
+                if (feasibilityReview == null) actions else actions - WidgetAuthoringUserAction.Continue
+            },
         )
+    }
+
+    @Suppress("ReturnCount") // Invalid or unrelated persisted candidates do not provide UI decisions.
+    private fun feasibilityReview(snapshot: WidgetAuthoringSessionSnapshot): WidgetFeasibilityReview? {
+        if (snapshot.session.currentStage != WidgetAuthoringStageKey.Feasibility ||
+            snapshot.session.status != WidgetAuthoringSessionStatus.AwaitingReview
+        ) {
+            return null
+        }
+        val raw = snapshot.attempts.lastOrNull {
+            it.stage == WidgetAuthoringStageKey.Feasibility && it.status == WidgetAuthoringAttemptStatus.Succeeded
+        }?.artifact ?: return null
+        val parsed = WidgetFeasibilityParser.parse(
+            raw,
+            availableTools = emptySet(),
+            includeScheduleField = snapshot.session.schemaVersion <
+                WidgetAuthoringWorkflowPolicy.FEASIBILITY_WITHOUT_SCHEDULE_SCHEMA_VERSION,
+        ) as? WidgetFeasibilityParseResult.Valid ?: return null
+        val artifact = parsed.artifact
+        val message = artifact.reason ?: artifact.clarificationQuestion ?: return null
+        return WidgetFeasibilityReview(artifact.outcome, message)
     }
 
     private fun displayStatus(

@@ -47,6 +47,12 @@ inference remains device-, driver-, model-, and workload-dependent.
   historical events for a calendar date; both are typed contracts available to
   verified models and widgets. The legacy `wikipedia_search@1` binding remains
   registered for compatibility.
+- Opt-in Open-Meteo `weather_forecast@1` supplies bounded current and forecast
+  data to eligible models and widgets. Chat and widget enablement are separate;
+  calls require an explicit place name and never access device location.
+  Missing-place requests return a controlled prompt for a target place.
+  Explicit place names are geocoded. Provider attribution is displayed with
+  weather widget results.
 - Chat web search uses a focused-evidence `web_search@1` contract with Exa/Tavily
   fallback. Managed widgets may use `web_search_top_results@1` for up to ten
   ranked title/HTTPS URL results or `web_search_content@1` for up to three

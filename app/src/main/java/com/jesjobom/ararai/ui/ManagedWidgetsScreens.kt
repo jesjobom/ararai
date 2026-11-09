@@ -71,6 +71,7 @@ import com.jesjobom.ararai.widget.managed.ManagedWidgetStatus
 import com.jesjobom.ararai.widget.managed.WidgetRunDiagnostic
 import com.jesjobom.ararai.widget.managed.WidgetRunOutcome
 import com.jesjobom.ararai.widget.managed.WidgetRunRecord
+import com.jesjobom.ararai.widget.managed.usesWeatherTool
 import com.jesjobom.ararai.widget.runtime.WidgetProgramParser
 import com.jesjobom.ararai.widget.runtime.WidgetProgramValidationResult
 import kotlinx.coroutines.CancellationException
@@ -430,6 +431,11 @@ private fun WidgetPresentationSection(
             modifier = Modifier.fillMaxWidth(),
         )
         else -> Text(stringResource(R.string.widget_no_presentation))
+    }
+    if (state.presentation != null && state.revision.usesWeatherTool()) {
+        TextButton(onClick = { onOpenArticle(com.jesjobom.ararai.widget.managed.WEATHER_ATTRIBUTION_URL) }) {
+            Text(stringResource(R.string.widgets_weather_attribution))
+        }
     }
     if (state.stale) Text(stringResource(R.string.widgets_stale), color = MaterialTheme.colorScheme.error)
     state.presentationCompletedAtMillis?.let {

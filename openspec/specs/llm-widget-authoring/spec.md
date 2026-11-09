@@ -1418,12 +1418,18 @@ When a single-step algorithm chooses `collection_card` with `wikipedia_pages@2`,
 
 ### Requirement: Select refresh cadence in a dedicated authoring stage
 
-For new schema-version-3 authoring sessions, achievable feasibility SHALL advance to a distinct schedule stage before algorithm generation. Only that stage SHALL receive the six new-choice intervals of 1, 2, 4, 6, 12, and 24 hours; an editing session MAY also retain its current interval. It SHALL also offer no-periodic-refresh and return exactly one permitted choice. It SHALL select the closest offered cadence when a requested cadence is not exactly supported, without introducing a frequency-specific clarification outcome. The accepted schedule artifact SHALL be authoritative for the draft; feasibility SHALL neither request nor return a periodic interval. Existing schema-version-1 sessions SHALL retain their original stage path and schedule meaning; schema-version-2 sessions SHALL retain the separate schedule stage and their four-field feasibility artifact with a null interval.
+For new schema-version-3 authoring sessions, achievable feasibility SHALL advance to a distinct schedule stage before algorithm generation. Only that stage SHALL receive the seven new-choice intervals of 1, 2, 4, 6, 8, 12, and 24 hours; an editing session MAY also retain its current interval. It SHALL also offer no-periodic-refresh and return exactly one permitted choice. It SHALL select the closest offered cadence when a requested cadence is not exactly supported, without introducing a frequency-specific clarification outcome. The accepted schedule artifact SHALL be authoritative for the draft; feasibility SHALL neither request nor return a periodic interval. Existing schema-version-1 sessions SHALL retain their original stage path and schedule meaning; schema-version-2 sessions SHALL retain the separate schedule stage and their four-field feasibility artifact with a null interval.
 
 #### Scenario: Four updates per day
 
 - **WHEN** a user requests four updates per day
 - **THEN** feasibility omits the schedule field and the dedicated stage selects the offered 6-hour interval
+- **AND** the draft uses the accepted schedule-stage interval.
+
+#### Scenario: Three updates per day
+
+- **WHEN** a user requests three updates per day
+- **THEN** feasibility omits the schedule field and the dedicated stage accepts the offered 8-hour interval
 - **AND** the draft uses the accepted schedule-stage interval.
 
 #### Scenario: Closest supported cadence
@@ -1498,3 +1504,23 @@ The algorithm capture schema SHALL derive step-kind and render-capability values
 
 - **WHEN** an algorithm artifact is rejected and included as bounded repair evidence
 - **THEN** the complete repair request retains that evidence while restating the same allowed step kinds and presentation routes as the initial contract.
+
+### Requirement: Clear terminal feasibility review
+
+When staged widget feasibility returns a validated terminal outcome, the
+application SHALL show its outcome and bounded reason or clarification question
+directly in the stage card. It SHALL NOT offer Advance when there is no next
+stage. The captured attempt SHALL remain inspectable and the user SHALL retain
+the option to reprocess or discard and start a revised request.
+
+#### Scenario: Unachievable widget
+
+- **WHEN** a persisted feasibility candidate has outcome `unachievable`
+- **THEN** the stage card identifies the request as not feasible and shows the model's validated reason
+- **AND** Advance is not offered while reprocess and discard remain available.
+
+#### Scenario: Missing details
+
+- **WHEN** a persisted feasibility candidate has outcome `needs_clarification`
+- **THEN** the stage card identifies the need for clarification and shows the validated question
+- **AND** Advance is not offered while the user can start a revised request.

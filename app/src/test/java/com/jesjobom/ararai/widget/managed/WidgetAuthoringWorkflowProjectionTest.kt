@@ -6,6 +6,49 @@ import org.junit.Test
 
 class WidgetAuthoringWorkflowProjectionTest {
     @Test
+    fun `terminal feasibility shows its reason or question and offers no advance`() {
+        val cases = listOf(
+            Triple(1, "unachievable", "No supported provider"),
+            Triple(3, "needs_clarification", "Which city should the widget show?"),
+        )
+        cases.forEach { (schemaVersion, outcome, message) ->
+            val scheduleField = if (schemaVersion < 3) "\"periodicIntervalHours\":null," else ""
+            val artifact = """{"outcome":"$outcome","message":"$message",$scheduleField"toolIds":[]}"""
+            val base = snapshot(
+                status = WidgetAuthoringSessionStatus.AwaitingReview,
+                currentStage = WidgetAuthoringStageKey.Feasibility,
+                attempts = listOf(
+                    attempt(
+                        stage = WidgetAuthoringStageKey.Feasibility,
+                        status = WidgetAuthoringAttemptStatus.Succeeded,
+                        artifact = artifact,
+                    ),
+                ),
+                checkpoints = emptyList(),
+            )
+
+            val projection = WidgetAuthoringWorkflowProjector.project(
+                base.copy(session = base.session.copy(schemaVersion = schemaVersion)),
+            )
+
+            val feasibility = projection.stages.single { it.stage == WidgetAuthoringStageKey.Feasibility }
+            assertEquals(message, feasibility.feasibilityReview?.message)
+            assertEquals(
+                if (outcome == "unachievable") {
+                    WidgetFeasibilityOutcome.Unachievable
+                } else {
+                    WidgetFeasibilityOutcome.NeedsClarification
+                },
+                feasibility.feasibilityReview?.outcome,
+            )
+            assertEquals(
+                setOf(WidgetAuthoringUserAction.Reprocess, WidgetAuthoringUserAction.Discard),
+                projection.allowedActions,
+            )
+        }
+    }
+
+    @Test
     fun `warning on review candidate does not block continuing`() {
         val algorithm = attempt(
             stage = WidgetAuthoringStageKey.Algorithm,

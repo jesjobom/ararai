@@ -17,6 +17,7 @@ import com.google.gson.JsonPrimitive
 import com.jesjobom.ararai.tools.ApplicationToolConsumer
 import com.jesjobom.ararai.tools.ApplicationToolContract
 import com.jesjobom.ararai.tools.ApplicationToolRegistry
+import com.jesjobom.ararai.tools.WEATHER_FORECAST_TOOL_NAME
 import com.jesjobom.ararai.tools.WidgetDraftToolValidation
 import com.jesjobom.ararai.widget.runtime.PlannedWidgetToolCall
 import com.jesjobom.ararai.widget.runtime.StrictJson
@@ -243,7 +244,7 @@ internal class WidgetAuthoringPipelineValidator(
     private fun renderFixtures(
         algorithm: WidgetAlgorithmArtifact,
         contracts: Map<WidgetToolCapability, ApplicationToolContract>,
-    ): List<RenderFixture> = listOf(
+    ): List<RenderFixture> = listOfNotNull(
         RenderFixture(
             syntheticOutcomes(
                 algorithm,
@@ -253,6 +254,20 @@ internal class WidgetAuthoringPipelineValidator(
             ),
             WidgetAuthoringStageFailureCode.InvalidRenderExecution,
         ),
+        if (algorithm.toolCallSteps.any { it.tool?.id == WEATHER_FORECAST_TOOL_NAME }) {
+            RenderFixture(
+                syntheticOutcomes(
+                    algorithm,
+                    contracts,
+                    emptyCollections = false,
+                    collectionSize = if (algorithm.renderCapability == WidgetRenderCapability.CollectionList) 3 else 1,
+                    differentWeatherMetrics = true,
+                ),
+                WidgetAuthoringStageFailureCode.InvalidPresentationSuccessHandling,
+            )
+        } else {
+            null
+        },
         RenderFixture(
             syntheticOutcomes(algorithm, contracts, emptyCollections = true),
             WidgetAuthoringStageFailureCode.InvalidPresentationEmptyHandling,
@@ -497,15 +512,41 @@ private fun syntheticOutcomes(
     contracts: Map<WidgetToolCapability, ApplicationToolContract>,
     emptyCollections: Boolean,
     collectionSize: Int = 1,
+    differentWeatherMetrics: Boolean = false,
 ): List<WidgetToolOutcome> = algorithm.toolCallSteps.map { step ->
     val tool = requireNotNull(step.tool)
     val payload = synthesizeObject(contracts.getValue(tool).outputSchemaJson, emptyCollections, collectionSize)
+    if (differentWeatherMetrics && tool.id == WEATHER_FORECAST_TOOL_NAME) varyWeatherMetrics(payload)
     WidgetToolOutcome(
         alias = step.id,
         payload = payload,
         rejection = null,
     )
 }
+
+private fun varyWeatherMetrics(value: JsonElement) {
+    when {
+        value.isJsonObject -> value.asJsonObject.entrySet().toList().forEach { (name, child) ->
+            val alternate = ALTERNATE_WEATHER_METRICS[name]
+            if (alternate == null) varyWeatherMetrics(child) else value.asJsonObject.addProperty(name, alternate)
+        }
+        value.isJsonArray -> value.asJsonArray.forEach(::varyWeatherMetrics)
+    }
+}
+
+private val ALTERNATE_WEATHER_METRICS: Map<String, Number> = mapOf(
+    "temperatureC" to 28.4,
+    "temperatureMaxC" to 31.8,
+    "temperatureMinC" to 17.2,
+    "feelsLikeC" to 30.1,
+    "humidityPercent" to 73,
+    "precipitationMm" to 6.7,
+    "precipitationSumMm" to 12.4,
+    "precipitationProbabilityPercent" to 82,
+    "precipitationProbabilityMaxPercent" to 91,
+    "weatherCode" to 95,
+    "windSpeedKmh" to 24.5,
+)
 
 private fun failureOutcomes(algorithm: WidgetAlgorithmArtifact): List<WidgetToolOutcome> = algorithm.toolCallSteps.map { step ->
     WidgetToolOutcome(

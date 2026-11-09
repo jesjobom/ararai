@@ -8,18 +8,23 @@ import kotlinx.coroutines.flow.asStateFlow
 interface WidgetToolPreferences {
     val wikipediaEnabled: StateFlow<Boolean>
     val webSearchEnabled: StateFlow<Boolean>
+    val weatherEnabled: StateFlow<Boolean>
     fun setWikipediaEnabled(enabled: Boolean)
     fun setWebSearchEnabled(enabled: Boolean)
+    fun setWeatherEnabled(enabled: Boolean)
 }
 
 class InMemoryWidgetToolPreferences(
     initialWikipediaEnabled: Boolean = false,
     initialWebSearchEnabled: Boolean = false,
+    initialWeatherEnabled: Boolean = false,
 ) : WidgetToolPreferences {
     private val mutableWikipediaEnabled = MutableStateFlow(initialWikipediaEnabled)
     private val mutableWebSearchEnabled = MutableStateFlow(initialWebSearchEnabled)
+    private val mutableWeatherEnabled = MutableStateFlow(initialWeatherEnabled)
     override val wikipediaEnabled = mutableWikipediaEnabled.asStateFlow()
     override val webSearchEnabled = mutableWebSearchEnabled.asStateFlow()
+    override val weatherEnabled = mutableWeatherEnabled.asStateFlow()
 
     override fun setWikipediaEnabled(enabled: Boolean) {
         mutableWikipediaEnabled.value = enabled
@@ -28,12 +33,17 @@ class InMemoryWidgetToolPreferences(
     override fun setWebSearchEnabled(enabled: Boolean) {
         mutableWebSearchEnabled.value = enabled
     }
+
+    override fun setWeatherEnabled(enabled: Boolean) {
+        mutableWeatherEnabled.value = enabled
+    }
 }
 
 class SharedPreferencesWidgetToolPreferences(context: Context) : WidgetToolPreferences {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val mutableWikipediaEnabled: MutableStateFlow<Boolean>
     private val mutableWebSearchEnabled: MutableStateFlow<Boolean>
+    private val mutableWeatherEnabled: MutableStateFlow<Boolean>
 
     init {
         // Snapshot the old shared switch once; future Chat changes must not alter widget availability.
@@ -44,10 +54,12 @@ class SharedPreferencesWidgetToolPreferences(context: Context) : WidgetToolPrefe
         }
         mutableWikipediaEnabled = MutableStateFlow(preferences.getBoolean(KEY_WIDGET_WIKIPEDIA, false))
         mutableWebSearchEnabled = MutableStateFlow(preferences.getBoolean(KEY_WIDGET_WEB_SEARCH, false))
+        mutableWeatherEnabled = MutableStateFlow(preferences.getBoolean(KEY_WIDGET_WEATHER, false))
     }
 
     override val wikipediaEnabled: StateFlow<Boolean> get() = mutableWikipediaEnabled.asStateFlow()
     override val webSearchEnabled: StateFlow<Boolean> get() = mutableWebSearchEnabled.asStateFlow()
+    override val weatherEnabled: StateFlow<Boolean> get() = mutableWeatherEnabled.asStateFlow()
 
     override fun setWikipediaEnabled(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_WIDGET_WIKIPEDIA, enabled).apply()
@@ -59,10 +71,16 @@ class SharedPreferencesWidgetToolPreferences(context: Context) : WidgetToolPrefe
         mutableWebSearchEnabled.value = enabled
     }
 
+    override fun setWeatherEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_WIDGET_WEATHER, enabled).apply()
+        mutableWeatherEnabled.value = enabled
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "instruction_preferences"
         const val KEY_CHAT_WIKIPEDIA = "wikipedia_enabled"
         const val KEY_WIDGET_WIKIPEDIA = "widget_wikipedia_enabled"
         const val KEY_WIDGET_WEB_SEARCH = "widget_web_search_enabled"
+        const val KEY_WIDGET_WEATHER = "widget_weather_enabled"
     }
 }

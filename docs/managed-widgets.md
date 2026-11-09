@@ -138,7 +138,7 @@ confirmed before this change have no recoverable initial request.
 
 ## Refresh and scheduling
 
-The model's dedicated schedule stage offers 1, 2, 4, 6, 12, or 24 hours, plus
+The model's dedicated schedule stage offers 1, 2, 4, 6, 8, 12, or 24 hours, plus
 no periodic refresh. The feasibility stage does not decide the schedule. The
 new feasibility response omits the interval field entirely; in-progress older
 sessions retain their original response schema until completion. The
@@ -187,6 +187,12 @@ distinct selection instructions.
 Provider credentials, headers, endpoints, raw
 transport, authoring prompts, Chat history, and unrelated widgets are not given
 to the program.
+
+Weather widgets may invoke the opt-in `weather_forecast@1` contract. Every call
+must include an explicitly named city or place; the app never accesses device
+location for weather. A missing place fails with a request to specify one.
+The application adds a
+fixed Open-Meteo attribution link alongside valid weather presentations.
 
 Only a validated presentation tree reaches fixed Compose components. JavaScript
 cannot construct Compose, HTML, a WebView, Android intents, or executable UI

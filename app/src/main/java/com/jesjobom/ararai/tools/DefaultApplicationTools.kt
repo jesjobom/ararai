@@ -34,6 +34,7 @@ import com.jesjobom.ararai.math.EvalExLocalMathEngine
 import com.jesjobom.ararai.math.LocalMathEngine
 import com.jesjobom.ararai.math.MathEvaluationResult
 import com.jesjobom.ararai.model.LocalModel
+import com.jesjobom.ararai.weather.OpenMeteoWeatherTool
 import java.time.DateTimeException
 import java.time.LocalDate
 import java.util.Locale
@@ -48,6 +49,7 @@ fun defaultApplicationToolRegistry(
     calculatorEngine: LocalMathEngine = EvalExLocalMathEngine(),
     experimentalWebSearchEnabled: Boolean,
     languageProvider: () -> String = { Locale.getDefault().language },
+    weatherTool: OpenMeteoWeatherTool? = null,
 ): ApplicationToolRegistry = ApplicationToolRegistry(
     listOf(
         wikipediaApplicationTool(
@@ -98,7 +100,7 @@ fun defaultApplicationToolRegistry(
                 )
             },
         ),
-    ),
+    ) + listOfNotNull(weatherTool?.let { weatherModelBinding(it, instructionPreferences) }),
 )
 
 /** Curated widget tool set; Chat bindings are not implicitly widget eligible. */
@@ -110,6 +112,8 @@ internal fun defaultWidgetApplicationToolRegistry(
     webResultsTool: (() -> WebSearchResultsTool?)? = null,
     webSearchState: (() -> ApplicationToolOperationalState)? = null,
     webContentTool: (() -> KnowledgeTool?)? = null,
+    weatherTool: OpenMeteoWeatherTool? = null,
+    weatherState: (() -> ApplicationToolOperationalState)? = null,
 ): ApplicationToolRegistry = ApplicationToolRegistry(
     listOf(
         wikipediaPagesApplicationTool(pagesTool, state),
@@ -121,6 +125,9 @@ internal fun defaultWidgetApplicationToolRegistry(
         },
         webContentTool?.let { tool ->
             webSearchContentApplicationTool(tool, requireNotNull(webSearchState))
+        },
+        weatherTool?.let { tool ->
+            weatherApplicationTool(tool, ApplicationToolConsumer.Widget, requireNotNull(weatherState))
         },
     ),
 )

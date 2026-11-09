@@ -3,6 +3,7 @@ package com.jesjobom.ararai.widget.launcher
 import com.jesjobom.ararai.knowledge.validWidgetExternalUrl
 import com.jesjobom.ararai.widget.managed.ManagedWidgetDefinition
 import com.jesjobom.ararai.widget.managed.ManagedWidgetStatus
+import com.jesjobom.ararai.widget.managed.WEATHER_ATTRIBUTION_URL
 import com.jesjobom.ararai.widget.managed.WidgetPresentationCache
 import com.jesjobom.ararai.widget.runtime.WidgetPresentationCodec
 import com.jesjobom.ararai.widget.runtime.WidgetPresentationNode
@@ -27,32 +28,47 @@ internal data class LauncherWidgetSnapshot(
 )
 
 internal object LauncherWidgetSnapshotProjector {
-    fun project(definition: ManagedWidgetDefinition?, cache: WidgetPresentationCache?): LauncherWidgetSnapshot {
+    fun project(
+        definition: ManagedWidgetDefinition?,
+        cache: WidgetPresentationCache?,
+        weatherAttribution: Boolean = false,
+    ): LauncherWidgetSnapshot {
         if (definition == null) return LauncherWidgetSnapshot("", "", "", null, LauncherWidgetState.Unavailable)
         val usableCache = cache?.takeIf { it.revision <= definition.activeRevision }
         val presentation = usableCache
             ?.let { runCatching { WidgetPresentationCodec.decodeCached(it.presentationJson) }.getOrNull() }
         val content = presentation?.let(::projectContent) ?: ProjectedContent("", "", null, emptyList())
         val hasContent = content.headline.isNotBlank() || content.body.isNotBlank() || content.link != null
-        val state = when {
-            !definition.enabled -> LauncherWidgetState.Disabled
-            definition.status == ManagedWidgetStatus.NeedsAttention -> LauncherWidgetState.NeedsAttention
-            hasContent && (
-                usableCache?.revision != definition.activeRevision ||
-                    definition.lastAttemptAtMillis != definition.lastSuccessAtMillis
-                ) -> LauncherWidgetState.Stale
-            !hasContent -> LauncherWidgetState.Empty
-            else -> LauncherWidgetState.Ready
+        val state = projectState(definition, usableCache, hasContent)
+        val attribution = if (hasContent && weatherAttribution) {
+            LauncherWidgetLink("Open-Meteo.com · CC BY 4.0", WEATHER_ATTRIBUTION_URL)
+        } else {
+            null
         }
         return LauncherWidgetSnapshot(
             definition.displayName,
             content.headline,
             content.body,
-            content.link,
+            content.link ?: attribution,
             state,
             usableCache?.completedAtMillis,
-            content.rows,
+            content.rows + listOfNotNull(attribution?.let(LauncherWidgetRow::Link)),
         )
+    }
+
+    private fun projectState(
+        definition: ManagedWidgetDefinition,
+        usableCache: WidgetPresentationCache?,
+        hasContent: Boolean,
+    ): LauncherWidgetState = when {
+        !definition.enabled -> LauncherWidgetState.Disabled
+        definition.status == ManagedWidgetStatus.NeedsAttention -> LauncherWidgetState.NeedsAttention
+        hasContent && (
+            usableCache?.revision != definition.activeRevision ||
+                definition.lastAttemptAtMillis != definition.lastSuccessAtMillis
+            ) -> LauncherWidgetState.Stale
+        !hasContent -> LauncherWidgetState.Empty
+        else -> LauncherWidgetState.Ready
     }
 
     private fun projectContent(presentation: WidgetPresentationNode): ProjectedContent {

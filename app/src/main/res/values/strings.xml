@@ -323,6 +323,10 @@
     <string name="tools_chat_scope">These controls apply to Chat. Widget tools are managed under Widgets.</string>
     <string name="tools_wikipedia_unavailable_model">Unavailable to the selected model in chat. Enabled widgets can still use it.</string>
     <string name="tools_web_search">Focused web search</string>
+    <string name="tools_weather_name">Open-Meteo weather</string>
+    <string name="tools_weather_description">When enabled, weather requests send your explicitly named city or place to Open-Meteo. A place is required; ArarAI does not access your current location. Weather data is model-based, not a local station measurement. Data: Open-Meteo (CC BY 4.0).</string>
+    <string name="widgets_weather_description">Scheduled weather widgets require an explicitly named city or place and send it to Open-Meteo. ArarAI does not access device location. Weather data: Open-Meteo (CC BY 4.0).</string>
+    <string name="widgets_weather_attribution">Weather data by Open-Meteo</string>
     <string name="tools_web_search_description">Experimental providers send the query and retrieval metadata directly from this device. Your own provider token and provider terms, retention, quota, and charges apply. When both are enabled, Exa runs first and Tavily is used only after a controlled provider failure. A fallback can send the same request to both services and consume quota from both.</string>
     <string name="tools_create_token">Create account / API token ↗</string>
     <string name="tools_configure_provider">Configure %1$s</string>
@@ -534,6 +538,9 @@
     <string name="widget_authoring_workflow_show_attempts">Show attempts</string>
     <string name="widget_authoring_workflow_hide_attempts">Hide attempts</string>
     <string name="widget_authoring_workflow_attempt_succeeded">Succeeded</string>
+    <string name="widget_authoring_feasibility_unachievable">Not feasible</string>
+    <string name="widget_authoring_feasibility_clarification">Needs clarification</string>
+    <string name="widget_authoring_feasibility_next_step">Review the reason above. Reprocess this stage, or start a new request with the missing details.</string>
     <string name="widget_authoring_workflow_attempt_failed">Failed</string>
     <string name="widget_authoring_workflow_retry">Retry this stage</string>
     <string name="widget_authoring_workflow_reprocess">Reprocess stage</string>

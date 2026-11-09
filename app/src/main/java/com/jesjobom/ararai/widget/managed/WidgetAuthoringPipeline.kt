@@ -11,6 +11,7 @@ import com.google.gson.JsonPrimitive
 import com.jesjobom.ararai.model.InferenceConfig
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.tools.ApplicationToolRegistry
+import com.jesjobom.ararai.tools.WEATHER_FORECAST_TOOL_NAME
 import com.jesjobom.ararai.tools.WEB_SEARCH_CONTENT_TOOL_NAME
 import com.jesjobom.ararai.widget.runtime.StrictJson
 import com.jesjobom.ararai.widget.runtime.WidgetRuntimeContext
@@ -96,7 +97,12 @@ internal fun algorithmCaptureSchema(feasibility: WidgetFeasibilityArtifact, prom
         properties.getAsJsonObject("steps").getAsJsonObject("items")
             .getAsJsonObject("properties").remove("selectionMode")
     }
-    if (prompt != null && requestedWebResultsCount(prompt, feasibility) != null) {
+    if (feasibility.tools.any { it.capability.id == WEATHER_FORECAST_TOOL_NAME }) {
+        properties.getAsJsonObject("renderCapability").add(
+            "enum",
+            JsonArray().apply { add(WidgetAlgorithmPresentationRoute.ProcessedResult.capability.wireName) },
+        )
+    } else if (prompt != null && requestedWebResultsCount(prompt, feasibility) != null) {
         properties.getAsJsonObject("renderCapability").add(
             "enum",
             JsonArray().apply { add(WidgetAlgorithmPresentationRoute.DirectList.capability.wireName) },
@@ -276,7 +282,8 @@ internal class ManagedWidgetAuthoringPipeline(
         activeArtifacts += planFunction
 
         onProgress(WidgetAuthoringProgress.GeneratingPresentation)
-        val deterministicRender = WidgetCollectionListArtifact.rankedWebResults(algorithm)
+        val deterministicRender = WidgetWeatherRenderArtifact.forecast(algorithm)
+            ?: WidgetCollectionListArtifact.rankedWebResults(algorithm)
             ?: WidgetCollectionCardArtifact.rankedWebContent(algorithm, prompt, feasibility)
             ?: WidgetCollectionCardArtifact.eventYearTitle(algorithm, prompt, feasibility)
             ?: WidgetCollectionCardArtifact.selectedWikipediaPage(algorithm)
@@ -578,6 +585,13 @@ internal fun algorithmContext(
     JsonObject().apply {
         addProperty("userInstruction", prompt.userInstruction)
         add("feasibility", feasibility.toJson())
+        if (feasibility.tools.any { it.capability.id == WEATHER_FORECAST_TOOL_NAME }) {
+            addProperty(
+                "weatherRenderPolicy",
+                "Use custom_source for weather measurements. The application supplies a fixed weather presentation " +
+                    "from the tool result; do not add a presentation-only transform step.",
+            )
+        }
         requestedWebResultsCount(prompt, feasibility)?.let { count ->
             add(
                 "rankedListPolicy",
@@ -714,6 +728,14 @@ internal fun renderContext(
             JsonArray().apply { feasibility.presentation.map { it.wireName }.sorted().forEach(::add) },
         )
         add("toolResults", renderToolResults(prompt, algorithm))
+        if (algorithm.toolCallSteps.any { it.tool?.id == WEATHER_FORECAST_TOOL_NAME }) {
+            addProperty(
+                "weatherResultContract",
+                "Read outcomes[alias].payload only after status is success. Show at least one weather measurement " +
+                    "from current, days, or hours that matches the requested period; a date or place name alone " +
+                    "is not a forecast. Keep provider failure distinct from a valid forecast.",
+            )
+        }
     },
 )
 

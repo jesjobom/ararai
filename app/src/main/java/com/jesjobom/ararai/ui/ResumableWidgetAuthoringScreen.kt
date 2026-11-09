@@ -58,6 +58,7 @@ import com.jesjobom.ararai.widget.managed.WidgetAuthoringWorkflowCoordinator
 import com.jesjobom.ararai.widget.managed.WidgetAuthoringWorkflowProjector
 import com.jesjobom.ararai.widget.managed.WidgetConfirmationMode
 import com.jesjobom.ararai.widget.managed.WidgetConfirmationResult
+import com.jesjobom.ararai.widget.managed.WidgetFeasibilityOutcome
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -456,6 +457,12 @@ internal fun AuthoringStageCard(
     var expanded by rememberSaveable(stage.stage.wireValue) { mutableStateOf(false) }
     val stageLabel = stage.stage.label()
     val statusLabel = stage.status.label()
+    val latestResultLabel = when (stage.feasibilityReview?.outcome) {
+        WidgetFeasibilityOutcome.Unachievable -> stringResource(R.string.widget_authoring_feasibility_unachievable)
+        WidgetFeasibilityOutcome.NeedsClarification ->
+            stringResource(R.string.widget_authoring_feasibility_clarification)
+        else -> stage.attempts.lastOrNull()?.status?.label() ?: "—"
+    }
     val accessibilityLabel = stringResource(
         R.string.widget_authoring_workflow_stage_accessibility,
         stageLabel,
@@ -477,12 +484,29 @@ internal fun AuthoringStageCard(
                     stringResource(
                         R.string.widget_authoring_workflow_stage_summary,
                         stage.attempts.size,
-                        stage.attempts.lastOrNull()?.status?.label() ?: "—",
+                        latestResultLabel,
                         stage.attempts.lastOrNull()?.durationMillis?.let { "$it ms" } ?: "—",
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                stage.feasibilityReview?.let { review ->
+                    Text(
+                        latestResultLabel,
+                        color = if (review.outcome == WidgetFeasibilityOutcome.Unachievable) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.tertiary
+                        },
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    SelectionContainer { Text(review.message) }
+                    Text(
+                        stringResource(R.string.widget_authoring_feasibility_next_step),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (stage.attempts.isNotEmpty()) {
                     TextButton(onClick = { expanded = !expanded }) {
                         Text(

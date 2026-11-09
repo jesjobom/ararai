@@ -12,7 +12,7 @@ class ManagedWidgetPolicyTest {
         assertEquals(20, ManagedWidgetPolicy.MAX_REVISIONS_PER_WIDGET)
         assertEquals((1L..24L).toSet() + setOf(48L, 72L, 168L), ManagedWidgetPolicy.SUPPORTED_PERIODIC_INTERVAL_HOURS)
         assertEquals((1L..24L).toSet(), ManagedWidgetPolicy.CONFIGURABLE_PERIODIC_INTERVAL_HOURS)
-        assertEquals(setOf(1L, 2L, 4L, 6L, 12L, 24L), ManagedWidgetPolicy.MODEL_PERIODIC_INTERVAL_HOURS)
+        assertEquals(setOf(1L, 2L, 4L, 6L, 8L, 12L, 24L), ManagedWidgetPolicy.MODEL_PERIODIC_INTERVAL_HOURS)
         assertTrue(ManagedWidgetPolicy.SUPPORTED_PERIODIC_INTERVAL_HOURS.all { it >= 1L })
         assertEquals(256, ManagedWidgetPolicy.MAX_OBSERVATIONS_PER_WIDGET)
         assertEquals(90, ManagedWidgetPolicy.MAX_OBSERVATION_AGE_DAYS)

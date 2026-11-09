@@ -145,6 +145,7 @@ import com.jesjobom.ararai.settings.TranscriptionLanguage
 import com.jesjobom.ararai.settings.TranscriptionLanguagePreferences
 import com.jesjobom.ararai.tools.ApplicationToolContract
 import com.jesjobom.ararai.tools.ApplicationToolDispatcher
+import com.jesjobom.ararai.tools.WEATHER_FORECAST_TOOL_NAME
 import com.jesjobom.ararai.tools.defaultApplicationToolRegistry
 import com.jesjobom.ararai.ui.tour.ScreenTour
 import com.jesjobom.ararai.ui.tour.TourOverlay
@@ -244,6 +245,10 @@ internal fun ArarAiApp(
     val wikipediaTool = remember { WikipediaKnowledgeTool() }
     val wikipediaOnThisDayTool = remember { WikipediaOnThisDayKnowledgeTool() }
     val calculatorEngine = remember { EvalExLocalMathEngine() }
+    val weatherTool = remember(appContext) {
+        (appContext as? com.jesjobom.ararai.ArarAiApplication)?.weatherTool
+            ?: com.jesjobom.ararai.weather.OpenMeteoWeatherTool()
+    }
     val webSearchResolver = remember(webSearchPreferences, webSearchToolFactory) {
         WebSearchKnowledgeToolResolver {
             webSearchPreferences.settings.value.orderedEnabledProviders
@@ -262,6 +267,7 @@ internal fun ArarAiApp(
         wikipediaTool,
         wikipediaOnThisDayTool,
         calculatorEngine,
+        weatherTool,
         webSearchResolver,
     ) {
         defaultApplicationToolRegistry(
@@ -273,6 +279,7 @@ internal fun ArarAiApp(
             webSearchTool = webSearchResolver::resolve,
             calculatorEngine = calculatorEngine,
             experimentalWebSearchEnabled = com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH,
+            weatherTool = weatherTool,
         )
     }
     val applicationToolDispatcher = remember(applicationToolRegistry) {
@@ -322,6 +329,7 @@ internal fun ArarAiApp(
     val instructionSettings by instructionPreferences.settings.collectAsState()
     val widgetWikipediaEnabled by widgetToolPreferences.wikipediaEnabled.collectAsState()
     val widgetWebSearchEnabled by widgetToolPreferences.webSearchEnabled.collectAsState()
+    val widgetWeatherEnabled by widgetToolPreferences.weatherEnabled.collectAsState()
     val generationSettings by generationPreferences.state.collectAsState()
     val transcriptionLanguage by transcriptionLanguagePreferences.language.collectAsState()
     val webSearchSettings by webSearchPreferences.settings.collectAsState()
@@ -642,6 +650,8 @@ internal fun ArarAiApp(
             webSearchEnabled = widgetWebSearchEnabled,
             webProviderConfigured = webSearchSettings.configuredProviders.isNotEmpty(),
             onWebSearchEnabledChange = widgetToolPreferences::setWebSearchEnabled,
+            weatherEnabled = widgetWeatherEnabled,
+            onWeatherEnabledChange = widgetToolPreferences::setWeatherEnabled,
             onConfigureWebProviders = {
                 providerSettingsFromWidgetTools = true
                 destination = AppDestination.InstructionsTools
@@ -885,6 +895,9 @@ internal fun ArarAiApp(
             calculatorCompatible =
             (startupState as? ModelStartupState.Available)?.model?.toolCapabilities
                 ?.supports(com.jesjobom.ararai.chat.CALCULATOR_TOOL_NAME) == true,
+            weatherCompatible =
+            (startupState as? ModelStartupState.Available)?.model?.toolCapabilities
+                ?.supports(WEATHER_FORECAST_TOOL_NAME) == true,
             webSearchCompatible =
             com.jesjobom.ararai.BuildConfig.EXPERIMENTAL_WEB_SEARCH &&
                 (startupState as? ModelStartupState.Available)
@@ -895,6 +908,7 @@ internal fun ArarAiApp(
             onRestoreDefault = instructionPreferences::restoreDefault,
             onWikipediaEnabledChange = instructionPreferences::setWikipediaEnabled,
             onCalculatorEnabledChange = instructionPreferences::setCalculatorEnabled,
+            onWeatherEnabledChange = instructionPreferences::setWeatherEnabled,
             onContextTokensChange = { generationPreferences.setContextTokens(modelConfig.id, it) },
             onTemperatureChange = { generationPreferences.setTemperature(modelConfig.id, it) },
             onRestoreGenerationDefaults = { generationPreferences.restoreDefaults(modelConfig.id) },
@@ -1216,11 +1230,13 @@ internal fun InstructionsAndToolsScreen(
     generationModel: GenerationModelUiState? = null,
     wikipediaCompatible: Boolean,
     calculatorCompatible: Boolean = false,
+    weatherCompatible: Boolean = false,
     webSearchCompatible: Boolean = false,
     onInstructionChange: (InteractionMode, String) -> Unit,
     onRestoreDefault: (InteractionMode) -> Unit,
     onWikipediaEnabledChange: (Boolean) -> Unit,
     onCalculatorEnabledChange: (Boolean) -> Unit = {},
+    onWeatherEnabledChange: (Boolean) -> Unit = {},
     onContextTokensChange: (Int) -> Unit = {},
     onTemperatureChange: (Float) -> Unit = {},
     onRestoreGenerationDefaults: () -> Unit = {},
@@ -1319,6 +1335,8 @@ internal fun InstructionsAndToolsScreen(
                             onWikipediaEnabledChange = onWikipediaEnabledChange,
                             calculatorCompatible = calculatorCompatible,
                             onCalculatorEnabledChange = onCalculatorEnabledChange,
+                            weatherCompatible = weatherCompatible,
+                            onWeatherEnabledChange = onWeatherEnabledChange,
                             webSearchSettings = webSearchSettings,
                             webSearchCompatible = webSearchCompatible,
                             webSmokeRunning = webSmokeRunning,
@@ -1595,6 +1613,8 @@ private fun ToolsTab(
     onWikipediaEnabledChange: (Boolean) -> Unit,
     calculatorCompatible: Boolean,
     onCalculatorEnabledChange: (Boolean) -> Unit,
+    weatherCompatible: Boolean,
+    onWeatherEnabledChange: (Boolean) -> Unit,
     webSearchSettings: WebSearchSettings,
     webSearchCompatible: Boolean,
     webSmokeRunning: WebSearchProvider?,
@@ -1644,6 +1664,26 @@ private fun ToolsTab(
                     onCheckedChange = onCalculatorEnabledChange,
                     enabled = calculatorCompatible || settings.calculatorEnabled,
                     modifier = Modifier.testTag("calculator-enabled"),
+                )
+            }
+        }
+    }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(stringResource(R.string.tools_weather_name), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.tools_weather_description), style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(
+                        if (weatherCompatible) R.string.tools_available_model else R.string.tools_unavailable_model,
+                    ),
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = settings.weatherEnabled,
+                    onCheckedChange = onWeatherEnabledChange,
+                    enabled = weatherCompatible || settings.weatherEnabled,
+                    modifier = Modifier.testTag("weather-enabled"),
                 )
             }
         }

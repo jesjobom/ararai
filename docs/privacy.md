@@ -132,7 +132,7 @@ report and establish that disclosure would not expose another person's data.
 ## Optional network features
 
 Model downloads contact the artifact locations declared in ArarAI's checked-in
-catalog. Optional Wikipedia and experimental web-search providers have separate
+catalog. Optional Wikipedia, Open-Meteo weather, and experimental web-search providers have separate
 in-app controls and bounded disclosures. Provider credentials supplied by a user
 are stored with Android Keystore-backed encryption and are not included in
 model context, conversation history, reports, logs, backup, or export.
@@ -145,6 +145,13 @@ fixed official Wikipedia HTTPS API path. Scheduled and manual refreshes execute 
 loading or prompting a model. Widget JavaScript has no direct network, file,
 database, Android intent, or credential access.
 
+When the Open-Meteo weather tool is explicitly enabled and invoked, ArarAI sends
+the explicitly named place to Open-Meteo's geocoding API. A place is required
+for Chat and weather widgets; ArarAI does not access device location or request
+Android location permission. Weather widget results identify Open-Meteo as
+their data source. Open-Meteo may receive normal HTTPS connection metadata such
+as the device's IP address; its own terms and privacy notice apply.
+
 Widget authoring prompts, bounded captured stage artifacts, controlled failure
 codes, and checkpoint metadata remain on-device in app-private storage and are
 excluded from backup and device transfer. They are not added to Chat, reports,
@@ -155,7 +162,8 @@ removes the transient session; only a confirmed normalized source revision and
 consent record remain durable. Users can disable a widget to cancel future work
 or confirm deletion to remove its definition, all source revisions, cache,
 observations, run history, and schedule. Widgets do not sync, export, share,
-notify, or appear as Android launcher widgets.
+notify, or sync. A bounded snapshot of a confirmed widget may also appear on
+the Android launcher at the user's request.
 
 ## Security and incidents
 

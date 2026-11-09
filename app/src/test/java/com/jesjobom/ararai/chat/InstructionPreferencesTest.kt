@@ -3,6 +3,7 @@ package com.jesjobom.ararai.chat
 import com.jesjobom.ararai.knowledge.WebSearchProvider
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.model.ModelToolCapabilities
+import com.jesjobom.ararai.tools.WEATHER_FORECAST_TOOL_NAME
 import com.jesjobom.ararai.tools.WIKIPEDIA_ON_THIS_DAY_TOOL_NAME
 import com.jesjobom.ararai.tools.WIKIPEDIA_PAGES_TOOL_NAME
 import org.junit.Assert.assertEquals
@@ -11,6 +12,29 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InstructionPreferencesTest {
+    @Test
+    fun `advertises weather only after explicit enablement for capable model`() {
+        val model = LocalModel(
+            id = "weather",
+            name = "Weather",
+            filePath = "/tmp/model",
+            toolCapabilities = ModelToolCapabilities(setOf(WEATHER_FORECAST_TOOL_NAME)),
+        )
+        assertEquals(emptySet<String>(), eligibleToolNames(InstructionSettings(), model))
+        assertEquals(
+            setOf(WEATHER_FORECAST_TOOL_NAME),
+            eligibleToolNames(InstructionSettings(weatherEnabled = true), model),
+        )
+        val turn = conversationTurnSettings(
+            settings = InstructionSettings(weatherEnabled = true),
+            mode = InteractionMode.Chat,
+            advertisedToolNames = setOf(WEATHER_FORECAST_TOOL_NAME),
+        )
+        assertTrue(turn.systemInstruction.contains("Ask them to name a city or place"))
+        assertTrue(turn.systemInstruction.contains("explicitly tell them that ArarAI"))
+        assertTrue(turn.systemInstruction.contains("cannot access current device location"))
+    }
+
     @Test
     fun `recognizes current and legacy Wikipedia model capabilities`() {
         fun model(vararg tools: String) = LocalModel(

@@ -20,6 +20,7 @@ import com.jesjobom.ararai.R
 import com.jesjobom.ararai.settings.SharedPreferencesApplicationLanguagePreferenceStore
 import com.jesjobom.ararai.widget.managed.ManagedWidgetDefinition
 import com.jesjobom.ararai.widget.managed.ManagedWidgetRepository
+import com.jesjobom.ararai.widget.managed.usesWeatherTool
 import java.text.DateFormat
 import java.util.Date
 
@@ -93,6 +94,7 @@ internal object LauncherWidgetRenderer {
             LauncherWidgetSnapshotProjector.project(
                 definition,
                 definition?.let { repository.cachedPresentation(widgetId) },
+                definition?.let { repository.activeRevision(widgetId)?.usesWeatherTool() } == true,
             )
         }
         val language = SharedPreferencesApplicationLanguagePreferenceStore(context).language

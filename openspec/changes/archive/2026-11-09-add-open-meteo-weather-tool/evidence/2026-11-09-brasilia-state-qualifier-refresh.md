@@ -1,0 +1,7 @@
+# Brasília named-place widget refresh — 2026-11-09 UTC
+
+- The confirmed, enabled widget requested current temperature and humidity for Brasília, DF, Brasil, every eight hours. Its saved call used `location: "Brasília, DF, Brazil"` and `period: "now"`. Three initial runs showed the coarse `ToolUnavailable` diagnostic and no saved presentation.
+- The widget weather tool was enabled. Open-Meteo geocoding returned `Brasília, BR` with `admin1: "Federal District"`; the local qualifier filter previously required a literal match for `DF`, so this result was discarded before a forecast request. A separate forecast API request returned HTTP 200 with current temperature and relative humidity fields.
+- The geocoder now recognizes Brazilian ISO 3166-2 state abbreviations against the matching provider administrative name and Portuguese country names. Regression tests accept `Brasília, DF, Brasil` and `Brasília, DF, Brazil` while rejecting a wrong state or country. The full `scripts/quality-gate.sh` and strict OpenSpec validation passed.
+- Installed release candidate `202611081608` (versionCode `29902868`) on the SM-S901E with `adb install -r`; the first-install date remained unchanged. A manual refresh of the **same saved revision** succeeded and displayed `Brasília, BR`, `21.2 °C`, `Umidade 91%`, and the Open-Meteo attribution. The widget still showed the inexact eight-hour schedule.
+- This verifies a named-place manual refresh on device, not a completed background periodic cycle or a real-model missing-place conversation.
