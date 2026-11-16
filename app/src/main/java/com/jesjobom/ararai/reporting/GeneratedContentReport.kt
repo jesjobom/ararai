@@ -70,7 +70,10 @@ class GeneratedContentReportProjector(
     fun isReportable(message: StoredChatMessage): Boolean {
         val content = message.content as? MessageContent.TextPrompt ?: return false
         return message.role == ChatRole.Assistant &&
-            content.completionStatus == AssistantCompletionStatus.Complete &&
+            (
+                content.completionStatus == AssistantCompletionStatus.Complete ||
+                    content.completionStatus == AssistantCompletionStatus.PossiblyIncomplete
+                ) &&
             content.text.isNotBlank()
     }
 

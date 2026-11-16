@@ -328,24 +328,6 @@ internal fun MessageContentView(
                         )
                     }
                 }
-                if (content.completionStatus == AssistantCompletionStatus.Incomplete && !isStreaming) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                        shape = MaterialTheme.shapes.medium,
-                    ) {
-                        Column(Modifier.padding(10.dp)) {
-                            Text(
-                                stringResource(R.string.chat_incomplete_response),
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                stringResource(R.string.chat_no_final_answer),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                }
                 if (content.text.isNotBlank()) {
                     MarkdownText(text = content.text)
                 } else if (content.completionStatus == AssistantCompletionStatus.Complete) {
@@ -371,6 +353,7 @@ internal fun MessageContentView(
                         )
                     }
                 }
+                AssistantCompletionNotice(content, isStreaming)
             }
         }
         is MessageContent.AudioPromptContent -> AudioPromptContentView(

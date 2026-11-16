@@ -37,6 +37,28 @@ class WebSearchOpenApiToolTest {
     }
 
     @Test
+    fun `passes the normalized evidence through without a second model-specific truncation`() {
+        val result = FocusedWebEvidenceNormalizer(clock = { 1L }).normalize(
+            provider = WebSearchProvider.Exa,
+            language = "en",
+            candidates = (1..3).map { index ->
+                FocusedEvidenceCandidate(
+                    title = "Source $index",
+                    canonicalUrl = "https://example.com/$index",
+                    excerpts = listOf("Evidence $index " + "x".repeat(500)),
+                )
+            },
+        ) as ToolResult.Success
+        val tool = WebSearchToolTurn(KnowledgeTool { result })
+
+        val response = JsonParser.parseString(tool.execute("""{"query":"coffee"}""")).asJsonObject
+
+        assertTrue(result.untrustedContext.length > 600)
+        assertEquals(result.untrustedContext, response.get("untrustedReference").asString)
+        assertEquals(result.sources, tool.consumeCapturedSources())
+    }
+
+    @Test
     fun `rejects extra arguments before provider execution`() {
         var calls = 0
         val tool = WebSearchToolTurn(

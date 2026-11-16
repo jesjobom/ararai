@@ -14,6 +14,28 @@ import org.junit.Test
 
 class ConversationCoordinatorTest {
     @Test
+    fun `large context pages beyond the old 512 message limit`() {
+        val store = InMemoryChatSessionStore()
+        val session = store.createSession("Long history")
+        val first = store.appendMessage(session.id, ChatRole.User, "question 0")
+        store.appendMessage(session.id, ChatRole.Assistant, "answer 0")
+        repeat(260) { index ->
+            store.appendMessage(session.id, ChatRole.User, "question ${index + 1}")
+            store.appendMessage(session.id, ChatRole.Assistant, "answer ${index + 1}")
+        }
+        val coordinator = ConversationCoordinator(store, ConversationContextProjector("system"))
+        val projection = coordinator.preview(
+            session.id,
+            MessageContent.TextPrompt("next"),
+            InferenceConfig(8_192, 128, 0.7f, 0.9f),
+            "system",
+        )
+
+        assertEquals(first.id, projection.oldestIncludedHistoryId)
+        assertEquals(false, projection.hasOmittedHistory)
+    }
+
+    @Test
     fun `forwards knowledge lifecycle events without transforming protocol`() = runTest {
         val events =
             listOf(

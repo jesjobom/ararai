@@ -6,6 +6,8 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.jesjobom.ararai.chat.CALCULATOR_TOOL_NAME
 import com.jesjobom.ararai.chat.InstructionPreferences
+import com.jesjobom.ararai.chat.MEMORY_WRITE_TOOL_NAME
+import com.jesjobom.ararai.chat.MemoryWriteResult
 import com.jesjobom.ararai.chat.WEB_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.knowledge.KnowledgeSource
@@ -100,7 +102,53 @@ fun defaultApplicationToolRegistry(
                 )
             },
         ),
+        memoryWriteApplicationTool(instructionPreferences),
     ) + listOfNotNull(weatherTool?.let { weatherModelBinding(it, instructionPreferences) }),
+)
+
+internal fun memoryWriteApplicationTool(
+    preferences: InstructionPreferences,
+): RegisteredApplicationTool = applicationToolBinding(
+    contract = ApplicationToolContract(
+        id = MEMORY_WRITE_TOOL_NAME,
+        version = CURRENT_TOOL_CONTRACT_VERSION,
+        displayName = "Save shared memory",
+        category = ApplicationToolCategory.LocalState,
+        consumers = setOf(ApplicationToolConsumer.Model),
+        inputSchemaJson = MEMORY_WRITE_INPUT_SCHEMA,
+        outputSchemaJson = MEMORY_WRITE_OUTPUT_SCHEMA,
+    ),
+    state = {
+        ApplicationToolOperationalState(
+            enabled = preferences.settings.value.memoryWriteEnabled,
+            ready = true,
+        )
+    },
+    executor = ApplicationTool("Save shared memory", ApplicationToolCategory.LocalState) { text: String ->
+        preferences.addMemory(text)
+    },
+    decodeArguments = { args ->
+        args.takeIf { it.keySet() == setOf("text") }
+            ?.strictString("text")
+            ?.takeIf { it.isNotBlank() && it.length <= 500 }
+    },
+    encodeResult = { result ->
+        JsonObject().apply {
+            when (result) {
+                is MemoryWriteResult.Saved -> {
+                    addProperty("ok", true)
+                    addProperty("saved", result.entry.text)
+                    add("evicted", JsonArray().apply { result.evicted.forEach { add(it.text) } })
+                }
+                MemoryWriteResult.NotFound,
+                MemoryWriteResult.TooLarge,
+                -> {
+                    addProperty("ok", false)
+                    addProperty("reason", "NO_CAPACITY")
+                }
+            }
+        }.toString()
+    },
 )
 
 /** Curated widget tool set; Chat bindings are not implicitly widget eligible. */
@@ -702,6 +750,10 @@ private const val WEB_SEARCH_CONTENT_OUTPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"results":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string","maxLength":200},"canonicalUrl":{"type":"string","maxLength":2048},"provider":{"type":"string"},"retrievedAtMillis":{"type":"integer"},"excerpt":{"type":"string","maxLength":500},"excerpts":{"type":"array","maxItems":2,"items":{"type":"string","maxLength":500}}},"required":["title","canonicalUrl","provider","retrievedAtMillis","excerpt","excerpts"]}},"reason":{"type":"string"}},"required":["kind"]}"""
 private const val CALCULATOR_INPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"expression":{"type":"string","maxLength":512}},"required":["expression"]}"""
+private const val MEMORY_WRITE_INPUT_SCHEMA =
+    """{"type":"object","additionalProperties":false,"properties":{"text":{"type":"string","minLength":1,"maxLength":500}},"required":["text"]}"""
+private const val MEMORY_WRITE_OUTPUT_SCHEMA =
+    """{"type":"object","additionalProperties":false,"properties":{"ok":{"type":"boolean"},"saved":{"type":"string","maxLength":500},"evicted":{"type":"array","items":{"type":"string","maxLength":500}},"reason":{"type":"string"}},"required":["ok"]}"""
 private const val KNOWLEDGE_OUTPUT_SCHEMA =
     """{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"},"untrustedContext":{"type":"string"},"sources":{"type":"array"},"reason":{"type":"string"}},"required":["kind"]}"""
 private const val WIKIPEDIA_PAGES_OUTPUT_SCHEMA =

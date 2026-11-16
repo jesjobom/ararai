@@ -1,5 +1,102 @@
 # ArarAI physical-device validation
 
+## 2026-11-16 — possible context-capacity warning on SM-S901E
+
+Debug APK SHA-256 `843599db0958c6ebfa9ad19950fdfff2e015f605ed6a5a89c90624782721e1a1`
+was installed using `adb install -r` while ArarAI was not foreground. The
+original first-install timestamp (`2026-10-04 22:04:26`, device local time) was
+preserved. The app launched successfully, then the device was returned to its
+launcher. No conversation or model setting was changed. The yellow notice's
+native-generation path was not exercised on-device: it requires a new turn
+reaching the model's context capacity. The synthetic Compose test was compiled
+but not run on this data-bearing device because connected instrumentation tests
+may erase app data.
+
+## 2026-11-15 — Chat context boundary on SM-S901E
+
+The later 10% headroom build (`29913066`, SHA-256
+`7dd1f4c945b748e2d634f2eb3104c54e728beb642442abb160a30107b2790754`)
+passed the quality gate and was installed without clearing app data. On the
+unlocked device, temporarily changing the model context from 2048 to 1024
+showed the “All previous messages are outside the context” indicator in an
+existing Chat session after scrolling to the end. Restoring 2048 removed the
+indicator. The 2048 setting was restored and no conversation messages were
+changed. Native inference was not rerun, so the earlier input-overflow case is
+not claimed fixed. See the change's device evidence for details.
+
+The debug APK for `show-chat-context-history-boundary` was installed with
+`adb install -r`, preserving the original first-install timestamp. A focused
+synthetic Compose test and a pre-existing Compose control test both stopped
+before assertions with `No compose hierarchies found in the app` while the
+device was at its secure lock screen. The divider's physical-device behavior
+remains unverified; rerun after unlocking the device. See the change's
+`evidence/2026-11-15-sm-s901e-check.md` for the APK identity and observations.
+
+## 2026-11-15 — web-search context-limit experiment on SM-S901E
+
+Gemma 4 E4B with reasoning and web search reproduced the missing final answer
+at exactly 2048/2048 cumulative native conversation tokens. An A/B build with
+a 600-character model-visible web-search reference returned an answer at
+1936/2048, but the fixed reduction removed potentially useful evidence and
+was rejected as the product behavior. The normal 1800-character normalized
+reference was restored. The app instead reports likely context exhaustion when
+the cumulative native count is near the configured capacity. See the
+`clarify-incomplete-chat-response` change evidence for the observations and
+build identities. On the first restored build, the same synthetic question
+again ended at 2048/2048 with no final answer; the actionable message was
+visible when reasoning display was off. Its placement before long visible
+reasoning was verified in the final debug APK `202611151133` on SM-S901E:
+the same question reached 2048/2048, and the context message appeared above
+the reasoning without changing the user's display preference. The synthetic
+session was deleted afterward.
+
+## 2026-11-15 — incomplete-response message on SM-S901E
+
+The user-reported E4B Chat turn reached the runtime completion callback but
+had no final answer after a tool call. The device showed a 2048-token context
+setting and last-turn metrics of 535 prefill and 78 decode tokens; those
+last-phase counters could not measure cumulative context usage. A later native
+measurement on the same reproducible scenario reached exactly 2048/2048 tokens,
+confirming context exhaustion; the earlier conclusion was wrong. After the full gate passed
+(924 unit tests, lint, builds, 11 OpenSpec items), debug APK `202611142356`
+(SHA-256 `23d0ae58ba235efc51082935678f592fb952561a9624cbc409f9f17db1aadaae`)
+was installed with `adb install -r`. The first-install timestamp was preserved.
+Reopening the existing conversation displayed the specific tool-without-final
+message instead of claiming a context-limit cause. A new model turn and the
+near-capacity branch were not exercised on-device. See
+`openspec/changes/archive/2026-11-16-clarify-incomplete-chat-response/evidence/2026-11-15-sm-s901e-incomplete-response.md`
+(evidence SHA-256
+`2e14190599a05c57ea36e704f2d7c89bb1ea534a185c3aa07be581b092c8b41c`).
+
+## 2026-11-14 — default-on tool switches on SM-S901E
+
+Debug APK `202611142116` (SHA-256
+`474125c60bcced32054a0872f79f627b2f3beb542a7f8986d1cd096e422ae3b4`)
+was installed with `adb install -r` on the retained SM-S901E, preserving the
+original first-install timestamp. The full quality gate passed with 921 debug
+unit tests. Assistant configuration → Tools showed Shared memory and Local
+calculator available and enabled. The memory card directed users to Context
+for viewing and editing saved memories. Both switches responded to explicit
+opt-outs and were restored to on after testing. This was a UI check; model
+inference was not repeated. See
+`openspec/changes/archive/2026-11-16-add-shared-conversation-memory/evidence/2026-11-14-sm-s901e-tool-switches.md`
+(evidence SHA-256
+`448af4055b6915507945dff6c300678556328183541e712cfba1c63d2eb9d86d`).
+
+## 2026-11-14 — shared memory on SM-S901E
+
+On the retained SM-S901E (Android 16), Gemma 4 E4B IT LiteRT-LM with debug APK
+`202611141638` (SHA-256
+`6ebb5f176faee7d2cd1b24c5f193217e37d195aa81352c7f3cbe3eb34deb0439`)
+passed manual UI add/edit/delete, an explicit model-driven memory write, and
+recall in a new Chat session after a process restart. The APK was installed
+with `adb install -r`; the first-install timestamp was unchanged. The synthetic
+memories and Chat sessions were removed afterward. Voice Chat and physical
+capacity rotation were not tested. Detailed sanitized observations are in
+`openspec/changes/archive/2026-11-16-add-shared-conversation-memory/evidence/2026-11-14-sm-s901e-memory.md`.
+That evidence file's SHA-256 is
+`73bf3240a88549b544cbad6569d141ad502ee0fe6c0b1a5bcc0ae25f011843a7`.
+
 ## 2026-10-18 — E2B native stream cancellation and reload
 
 On the connected SM-S901E (Android 16), debug APK `202610181748` (SHA-256

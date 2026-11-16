@@ -12,28 +12,49 @@ class PromptContextBuilder(
         history: List<ChatMessage>,
         userPrompt: String,
         inferenceConfig: InferenceConfig,
-    ): List<PromptChatMessage> {
+    ): List<PromptChatMessage> = project(systemPrompt, history, userPrompt, inferenceConfig).messages
+
+    fun project(
+        systemPrompt: String,
+        history: List<ChatMessage>,
+        userPrompt: String,
+        inferenceConfig: InferenceConfig,
+    ): PromptContextProjection {
         val systemMessage = PromptChatMessage(PromptChatRole.System, systemPrompt.trim())
         val currentTurn = PromptChatMessage(PromptChatRole.User, userPrompt.trim())
+        val contextTokens = inferenceConfig.contextTokens
+        val headroomTokens = contextTokens / 10 + if (contextTokens % 10 == 0) 0 else 1
         val maxChars =
-            ((inferenceConfig.contextTokens - inferenceConfig.promptReserveTokens).coerceAtLeast(32) * charsPerToken)
-                .coerceAtLeast(systemMessage.estimatedLength() + currentTurn.estimatedLength())
-        val selectedHistory = mutableListOf<ChatMessage>()
-        var used = systemMessage.estimatedLength() + currentTurn.estimatedLength()
-
-        history.asReversed().forEach { message ->
-            val formattedLength = message.toPromptMessage().estimatedLength()
-            if (used + formattedLength <= maxChars) {
-                selectedHistory += message
-                used += formattedLength
+            (contextTokens - inferenceConfig.promptReserveTokens - headroomTokens).coerceAtLeast(0) * charsPerToken
+        val turns = mutableListOf<MutableList<ChatMessage>>()
+        history.forEach { message ->
+            if (message.role == ChatRole.User) {
+                turns += mutableListOf(message)
+            } else {
+                turns.lastOrNull()?.add(message)
             }
         }
+        val selectedTurns = mutableListOf<List<ChatMessage>>()
+        var used = systemMessage.estimatedLength() + currentTurn.estimatedLength()
 
-        return buildList {
+        for (turn in turns.asReversed()) {
+            val formattedLength = turn.sumOf { it.toPromptMessage().estimatedLength() }
+            if (used + formattedLength > maxChars) break
+            selectedTurns += turn
+            used += formattedLength
+        }
+        val selectedHistory = selectedTurns.asReversed().flatten()
+
+        val messages = buildList {
             if (systemMessage.text.isNotBlank()) add(systemMessage)
-            selectedHistory.asReversed().forEach { add(it.toPromptMessage()) }
+            selectedHistory.forEach { add(it.toPromptMessage()) }
             if (currentTurn.text.isNotBlank()) add(currentTurn)
         }
+        return PromptContextProjection(
+            messages = messages,
+            oldestIncludedHistoryId = selectedHistory.firstOrNull()?.id,
+            hasOmittedHistory = selectedHistory.size < history.size,
+        )
     }
 
     private fun ChatMessage.toPromptMessage(): PromptChatMessage {
@@ -47,3 +68,9 @@ class PromptContextBuilder(
 
     private fun PromptChatMessage.estimatedLength(): Int = role.transcriptLabel.length + text.length + 3
 }
+
+data class PromptContextProjection(
+    val messages: List<PromptChatMessage>,
+    val oldestIncludedHistoryId: String?,
+    val hasOmittedHistory: Boolean,
+)

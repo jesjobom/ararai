@@ -8,7 +8,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.charset.StandardCharsets
 
-enum class ApplicationToolCategory { ExternalKnowledge, LocalCompute }
+enum class ApplicationToolCategory { ExternalKnowledge, LocalCompute, LocalState }
 
 interface ApplicationTool<in Request, out Result> {
     val displayName: String

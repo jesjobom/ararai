@@ -57,6 +57,15 @@ interface ChatSessionStore {
         return getMessages(sessionId).takeLast(limit)
     }
 
+    fun getMessagesBefore(
+        sessionId: String,
+        before: StoredChatMessage,
+        limit: Int,
+    ): List<StoredChatMessage> {
+        require(limit > 0)
+        return getMessages(sessionId).takeWhile { it.id != before.id }.takeLast(limit)
+    }
+
     fun countMessages(sessionId: String): Int = getMessages(sessionId).size
 
     fun mediaUrisForSession(sessionId: String): Set<String> {
@@ -140,6 +149,18 @@ class DeferredNewChatSessionStore(
         } else {
             delegate.getRecentMessages(resolveSessionId(sessionId), limit).map { it.copy(sessionId = sessionId) }
         }
+    }
+
+    @Synchronized
+    override fun getMessagesBefore(
+        sessionId: String,
+        before: StoredChatMessage,
+        limit: Int,
+    ): List<StoredChatMessage> = if (pendingSession?.id == sessionId) {
+        pendingMessages.values.takeWhile { it.id != before.id }.takeLast(limit)
+    } else {
+        delegate.getMessagesBefore(resolveSessionId(sessionId), before, limit)
+            .map { it.copy(sessionId = sessionId) }
     }
 
     @Synchronized
@@ -448,6 +469,37 @@ class SqliteChatSessionStore(
                 LIMIT ?
                 """.trimIndent(),
                 arrayOf(sessionId, limit.toString()),
+            ).use { cursor ->
+                val result = mutableListOf<StoredChatMessage>()
+                while (cursor.moveToNext()) result += cursor.toStoredChatMessage()
+                return result.asReversed()
+            }
+    }
+
+    @Synchronized
+    override fun getMessagesBefore(
+        sessionId: String,
+        before: StoredChatMessage,
+        limit: Int,
+    ): List<StoredChatMessage> {
+        require(limit > 0)
+        readableDatabase
+            .rawQuery(
+                """
+                SELECT id, session_id, role, text, content_kind, content_payload, created_at_millis
+                FROM chat_messages
+                WHERE session_id = ?
+                  AND (created_at_millis < ? OR (created_at_millis = ? AND id < ?))
+                ORDER BY created_at_millis DESC, id DESC
+                LIMIT ?
+                """.trimIndent(),
+                arrayOf(
+                    sessionId,
+                    before.createdAtMillis.toString(),
+                    before.createdAtMillis.toString(),
+                    before.id,
+                    limit.toString(),
+                ),
             ).use { cursor ->
                 val result = mutableListOf<StoredChatMessage>()
                 while (cursor.moveToNext()) result += cursor.toStoredChatMessage()
@@ -847,6 +899,10 @@ private object MessageContentCodec {
             append("completion\t")
             appendLine(content.completionStatus.name.encodeField())
         }
+        content.incompleteReason?.let { reason ->
+            append("incomplete_reason\t")
+            appendLine(reason.name.encodeField())
+        }
         content.imageAttachments.forEach { image ->
             append("image\t")
             append(
@@ -913,7 +969,15 @@ private object MessageContentCodec {
                     ?.takeIf { fields.firstOrNull() == "completion" }
                     ?.let { runCatching { AssistantCompletionStatus.valueOf(it) }.getOrNull() }
             } ?: AssistantCompletionStatus.Complete
-        return MessageContent.TextPrompt(text, images, reasoningText, sources, completionStatus)
+        val incompleteReason =
+            lines.drop(1).firstNotNullOfOrNull { line ->
+                val fields = line.split('\t')
+                fields.getOrNull(1)
+                    ?.decodeField()
+                    ?.takeIf { fields.firstOrNull() == "incomplete_reason" }
+                    ?.let { runCatching { AssistantIncompleteReason.valueOf(it) }.getOrNull() }
+            }
+        return MessageContent.TextPrompt(text, images, reasoningText, sources, completionStatus, incompleteReason)
     }
 
     private fun String.encodeField(): String = java.util.Base64

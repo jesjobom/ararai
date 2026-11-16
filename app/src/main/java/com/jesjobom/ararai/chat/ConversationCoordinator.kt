@@ -14,21 +14,50 @@ class ConversationCoordinator(
         sessionId: String,
         content: MessageContent,
     ): BegunConversationTurn {
-        val history = sessionStore.getRecentMessages(sessionId, MAX_CONTEXT_HISTORY_MESSAGES)
+        val history = sessionStore.getRecentMessages(sessionId, CONTEXT_HISTORY_PAGE_SIZE)
         val message = sessionStore.appendMessage(sessionId, ChatRole.User, content)
         return BegunConversationTurn(history = history, userMessage = message)
     }
 
     fun project(
+        sessionId: String,
         history: List<StoredChatMessage>,
         current: MessageContent,
         inferenceConfig: InferenceConfig,
         effectiveSystemPrompt: String? = null,
-    ): ProjectedConversationContext = if (effectiveSystemPrompt == null) {
-        contextProjector.project(history, current, inferenceConfig)
-    } else {
-        contextProjector.project(history, current, inferenceConfig, effectiveSystemPrompt)
+    ): ProjectedConversationContext {
+        var loadedHistory = history
+        fun projectLoaded(): ProjectedConversationContext = if (effectiveSystemPrompt == null) {
+            contextProjector.project(loadedHistory, current, inferenceConfig)
+        } else {
+            contextProjector.project(loadedHistory, current, inferenceConfig, effectiveSystemPrompt)
+        }
+        var projected = projectLoaded()
+        while (
+            loadedHistory.size >= CONTEXT_HISTORY_PAGE_SIZE &&
+            !(projected.hasOmittedHistory && loadedHistory.first().role == ChatRole.User)
+        ) {
+            val older =
+                sessionStore.getMessagesBefore(sessionId, loadedHistory.first(), CONTEXT_HISTORY_PAGE_SIZE)
+            if (older.isEmpty()) break
+            loadedHistory = older + loadedHistory
+            projected = projectLoaded()
+        }
+        return projected
     }
+
+    fun preview(
+        sessionId: String,
+        current: MessageContent,
+        inferenceConfig: InferenceConfig,
+        effectiveSystemPrompt: String,
+    ): ProjectedConversationContext = project(
+        sessionId = sessionId,
+        history = sessionStore.getRecentMessages(sessionId, CONTEXT_HISTORY_PAGE_SIZE),
+        current = current,
+        inferenceConfig = inferenceConfig,
+        effectiveSystemPrompt = effectiveSystemPrompt,
+    )
 
     fun appendAssistant(
         sessionId: String,
@@ -48,7 +77,7 @@ class ConversationCoordinator(
     ): Flow<GenerationEvent> = engine.generate(request)
 
     private companion object {
-        const val MAX_CONTEXT_HISTORY_MESSAGES = 512
+        const val CONTEXT_HISTORY_PAGE_SIZE = 64
     }
 }
 

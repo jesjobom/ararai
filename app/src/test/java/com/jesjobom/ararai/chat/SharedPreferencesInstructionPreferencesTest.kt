@@ -31,6 +31,7 @@ class SharedPreferencesInstructionPreferencesTest {
         first.setInstruction(InteractionMode.Voice, "Brief answers.")
         first.setWikipediaEnabled(true)
         first.setCalculatorEnabled(true)
+        first.setMemoryWriteEnabled(false)
 
         val restored = SharedPreferencesInstructionPreferences(context)
 
@@ -38,6 +39,21 @@ class SharedPreferencesInstructionPreferencesTest {
         assertEquals("Brief answers.", restored.settings.value.voiceInstruction)
         assertTrue(restored.settings.value.wikipediaEnabled)
         assertTrue(restored.settings.value.calculatorEnabled)
+        assertFalse(restored.settings.value.memoryWriteEnabled)
+    }
+
+    @Test
+    fun `new defaults are enabled but explicit tool opt outs survive reload`() {
+        val first = SharedPreferencesInstructionPreferences(context)
+        assertTrue(first.settings.value.calculatorEnabled)
+        assertTrue(first.settings.value.memoryWriteEnabled)
+
+        first.setCalculatorEnabled(false)
+        first.setMemoryWriteEnabled(false)
+
+        val restored = SharedPreferencesInstructionPreferences(context)
+        assertFalse(restored.settings.value.calculatorEnabled)
+        assertFalse(restored.settings.value.memoryWriteEnabled)
     }
 
     @Test
@@ -52,6 +68,20 @@ class SharedPreferencesInstructionPreferencesTest {
         assertEquals(InstructionDefaults.CHAT, restored.settings.value.chatInstruction)
         assertEquals("Custom Voice.", restored.settings.value.voiceInstruction)
         assertFalse(restored.settings.value.wikipediaEnabled)
-        assertFalse(restored.settings.value.calculatorEnabled)
+        assertTrue(restored.settings.value.calculatorEnabled)
+        assertTrue(restored.settings.value.memoryWriteEnabled)
+    }
+
+    @Test
+    fun `shared memory persists across preference instances and prompt changes`() {
+        val first = SharedPreferencesInstructionPreferences(context)
+        first.addMemory("Remember this")
+        first.setInstruction(InteractionMode.Chat, "Custom prompt")
+
+        val restored = SharedPreferencesInstructionPreferences(context)
+        assertEquals(listOf("Remember this"), restored.settings.value.memory.map { it.text })
+        assertEquals("Custom prompt", restored.settings.value.chatInstruction)
+        restored.clearMemory()
+        assertTrue(SharedPreferencesInstructionPreferences(context).settings.value.memory.isEmpty())
     }
 }

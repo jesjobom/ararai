@@ -20,6 +20,8 @@ data class ChatUiState(
     val selectedSessionId: String? = null,
     val messages: List<ChatMessage> = emptyList(),
     val hasOlderMessages: Boolean = false,
+    val oldestIncludedContextMessageId: String? = null,
+    val hasOmittedContextHistory: Boolean = false,
     val isLoadingOlderMessages: Boolean = false,
     val isPersistenceBusy: Boolean = false,
     val messageDisplayRevision: Long = 0L,
@@ -92,6 +94,7 @@ sealed interface MessageContent {
         val reasoningText: String = "",
         val sources: List<KnowledgeSource> = emptyList(),
         val completionStatus: AssistantCompletionStatus = AssistantCompletionStatus.Complete,
+        val incompleteReason: AssistantIncompleteReason? = null,
     ) : MessageContent
 
     data class AudioPromptContent(
@@ -110,6 +113,13 @@ sealed interface MessageContent {
 enum class AssistantCompletionStatus {
     Complete,
     Incomplete,
+    Cancelled,
+    PossiblyIncomplete,
+}
+
+enum class AssistantIncompleteReason {
+    ContextCapacityLikely,
+    AfterToolCall,
 }
 
 enum class AudioTranscriptionStatus { NotRequested, Pending, Completed, Failed }

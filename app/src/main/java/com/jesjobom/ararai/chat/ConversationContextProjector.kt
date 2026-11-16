@@ -14,19 +14,23 @@ class ConversationContextProjector(
         inferenceConfig: InferenceConfig,
         effectiveSystemPrompt: String = systemPrompt,
     ): ProjectedConversationContext {
-        val reconstructibleHistory =
-            history
-                .filter { message ->
-                    val audio = message.content as? MessageContent.AudioPromptContent
-                    audio == null || audio.transcriptionStatus == AudioTranscriptionStatus.Completed
-                }.map {
-                    ChatMessage(
-                        role = it.role,
-                        content = it.content,
-                        id = it.id,
-                        createdAtMillis = it.createdAtMillis,
-                    )
-                }
+        val reconstructibleHistory = mutableListOf<ChatMessage>()
+        var eligibleTurn = false
+        history.forEach { message ->
+            if (message.role == ChatRole.User) {
+                val audio = message.content as? MessageContent.AudioPromptContent
+                eligibleTurn = audio == null || audio.transcriptionStatus == AudioTranscriptionStatus.Completed
+                if (!eligibleTurn) reconstructibleHistory.clear()
+            }
+            if (eligibleTurn) {
+                reconstructibleHistory += ChatMessage(
+                    role = message.role,
+                    content = message.content,
+                    id = message.id,
+                    createdAtMillis = message.createdAtMillis,
+                )
+            }
+        }
         val userPrompt =
             when (current) {
                 is MessageContent.TextPrompt ->
@@ -35,8 +39,8 @@ class ConversationContextProjector(
                     }
                 is MessageContent.AudioPromptContent -> ""
             }
-        val messages =
-            promptContextBuilder.build(
+        val projection =
+            promptContextBuilder.project(
                 systemPrompt = effectiveSystemPrompt,
                 history = reconstructibleHistory,
                 userPrompt = userPrompt,
@@ -46,12 +50,17 @@ class ConversationContextProjector(
             when (current) {
                 is MessageContent.TextPrompt ->
                     current.copy(
-                        text = messages.toPlainChatPrompt(),
+                        text = projection.messages.toPlainChatPrompt(),
                         imageAttachments = current.imageAttachments.ifEmpty { history.latestImageAttachments() },
                     )
                 is MessageContent.AudioPromptContent -> current
             }
-        return ProjectedConversationContext(messages, requestContent)
+        return ProjectedConversationContext(
+            messages = projection.messages,
+            requestContent = requestContent,
+            oldestIncludedHistoryId = projection.oldestIncludedHistoryId,
+            hasOmittedHistory = projection.hasOmittedHistory || reconstructibleHistory.size < history.size,
+        )
     }
 
     private fun List<StoredChatMessage>.latestImageAttachments(): List<ImageAttachment> = asReversed()
@@ -67,4 +76,6 @@ internal const val DEFAULT_IMAGE_PROMPT = "Describe this image."
 data class ProjectedConversationContext(
     val messages: List<PromptChatMessage>,
     val requestContent: MessageContent,
+    val oldestIncludedHistoryId: String?,
+    val hasOmittedHistory: Boolean,
 )

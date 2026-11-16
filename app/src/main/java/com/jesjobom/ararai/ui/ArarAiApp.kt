@@ -94,9 +94,14 @@ import com.jesjobom.ararai.chat.ConversationContextProjector
 import com.jesjobom.ararai.chat.ConversationCoordinator
 import com.jesjobom.ararai.chat.ConversationSelection
 import com.jesjobom.ararai.chat.InMemoryInstructionPreferences
+import com.jesjobom.ararai.chat.InstructionDefaults
 import com.jesjobom.ararai.chat.InstructionPreferences
 import com.jesjobom.ararai.chat.InteractionMode
+import com.jesjobom.ararai.chat.MemoryEntry
+import com.jesjobom.ararai.chat.MemoryWriteResult
 import com.jesjobom.ararai.chat.conversationTurnSettings
+import com.jesjobom.ararai.chat.memoryCapacity
+import com.jesjobom.ararai.chat.memoryEvictionsForPrompt
 import com.jesjobom.ararai.chat.supportsWikipediaTools
 import com.jesjobom.ararai.engine.AndroidLiteRtLmBridge
 import com.jesjobom.ararai.engine.AppLocalLlmRuntime
@@ -895,6 +900,9 @@ internal fun ArarAiApp(
             calculatorCompatible =
             (startupState as? ModelStartupState.Available)?.model?.toolCapabilities
                 ?.supports(com.jesjobom.ararai.chat.CALCULATOR_TOOL_NAME) == true,
+            memoryWriteCompatible =
+            (startupState as? ModelStartupState.Available)?.model?.toolCapabilities
+                ?.supports(com.jesjobom.ararai.chat.MEMORY_WRITE_TOOL_NAME) == true,
             weatherCompatible =
             (startupState as? ModelStartupState.Available)?.model?.toolCapabilities
                 ?.supports(WEATHER_FORECAST_TOOL_NAME) == true,
@@ -906,8 +914,13 @@ internal fun ArarAiApp(
                     ?.supports(com.jesjobom.ararai.chat.WEB_SEARCH_TOOL_NAME) == true,
             onInstructionChange = instructionPreferences::setInstruction,
             onRestoreDefault = instructionPreferences::restoreDefault,
+            onMemoryAdd = instructionPreferences::addMemory,
+            onMemoryEdit = instructionPreferences::editMemory,
+            onMemoryDelete = instructionPreferences::deleteMemory,
+            onMemoryClear = instructionPreferences::clearMemory,
             onWikipediaEnabledChange = instructionPreferences::setWikipediaEnabled,
             onCalculatorEnabledChange = instructionPreferences::setCalculatorEnabled,
+            onMemoryWriteEnabledChange = instructionPreferences::setMemoryWriteEnabled,
             onWeatherEnabledChange = instructionPreferences::setWeatherEnabled,
             onContextTokensChange = { generationPreferences.setContextTokens(modelConfig.id, it) },
             onTemperatureChange = { generationPreferences.setTemperature(modelConfig.id, it) },
@@ -1230,12 +1243,18 @@ internal fun InstructionsAndToolsScreen(
     generationModel: GenerationModelUiState? = null,
     wikipediaCompatible: Boolean,
     calculatorCompatible: Boolean = false,
+    memoryWriteCompatible: Boolean = false,
     weatherCompatible: Boolean = false,
     webSearchCompatible: Boolean = false,
     onInstructionChange: (InteractionMode, String) -> Unit,
     onRestoreDefault: (InteractionMode) -> Unit,
+    onMemoryAdd: (String) -> MemoryWriteResult = { MemoryWriteResult.TooLarge },
+    onMemoryEdit: (String, String) -> MemoryWriteResult = { _, _ -> MemoryWriteResult.NotFound },
+    onMemoryDelete: (String) -> Unit = {},
+    onMemoryClear: () -> Unit = {},
     onWikipediaEnabledChange: (Boolean) -> Unit,
     onCalculatorEnabledChange: (Boolean) -> Unit = {},
+    onMemoryWriteEnabledChange: (Boolean) -> Unit = {},
     onWeatherEnabledChange: (Boolean) -> Unit = {},
     onContextTokensChange: (Int) -> Unit = {},
     onTemperatureChange: (Float) -> Unit = {},
@@ -1328,6 +1347,10 @@ internal fun InstructionsAndToolsScreen(
                             settings = settings,
                             onInstructionChange = onInstructionChange,
                             onRestoreDefault = onRestoreDefault,
+                            onMemoryAdd = onMemoryAdd,
+                            onMemoryEdit = onMemoryEdit,
+                            onMemoryDelete = onMemoryDelete,
+                            onMemoryClear = onMemoryClear,
                         )
                         1 -> ToolsTab(
                             settings = settings,
@@ -1335,6 +1358,8 @@ internal fun InstructionsAndToolsScreen(
                             onWikipediaEnabledChange = onWikipediaEnabledChange,
                             calculatorCompatible = calculatorCompatible,
                             onCalculatorEnabledChange = onCalculatorEnabledChange,
+                            memoryWriteCompatible = memoryWriteCompatible,
+                            onMemoryWriteEnabledChange = onMemoryWriteEnabledChange,
                             weatherCompatible = weatherCompatible,
                             onWeatherEnabledChange = onWeatherEnabledChange,
                             webSearchSettings = webSearchSettings,
@@ -1584,6 +1609,10 @@ private fun InstructionsTab(
     settings: com.jesjobom.ararai.chat.InstructionSettings,
     onInstructionChange: (InteractionMode, String) -> Unit,
     onRestoreDefault: (InteractionMode) -> Unit,
+    onMemoryAdd: (String) -> MemoryWriteResult,
+    onMemoryEdit: (String, String) -> MemoryWriteResult,
+    onMemoryDelete: (String) -> Unit,
+    onMemoryClear: () -> Unit,
 ) {
     Text(
         stringResource(R.string.instructions_description),
@@ -1593,6 +1622,8 @@ private fun InstructionsTab(
         title = stringResource(R.string.instructions_chat),
         value = settings.chatInstruction,
         tag = "chat-instruction",
+        evictionPreview = { memoryEvictionsForPrompt(settings, InteractionMode.Chat, it) },
+        defaultValue = InstructionDefaults.CHAT,
         onValueChange = { onInstructionChange(InteractionMode.Chat, it) },
         onRestore = { onRestoreDefault(InteractionMode.Chat) },
     )
@@ -1600,8 +1631,151 @@ private fun InstructionsTab(
         title = stringResource(R.string.instructions_voice_chat),
         value = settings.voiceInstruction,
         tag = "voice-instruction",
+        evictionPreview = { memoryEvictionsForPrompt(settings, InteractionMode.Voice, it) },
+        defaultValue = InstructionDefaults.VOICE,
         onValueChange = { onInstructionChange(InteractionMode.Voice, it) },
         onRestore = { onRestoreDefault(InteractionMode.Voice) },
+    )
+    MemorySection(settings, onMemoryAdd, onMemoryEdit, onMemoryDelete, onMemoryClear)
+}
+
+@Composable
+private fun MemorySection(
+    settings: com.jesjobom.ararai.chat.InstructionSettings,
+    onAdd: (String) -> MemoryWriteResult,
+    onEdit: (String, String) -> MemoryWriteResult,
+    onDelete: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    var editing by remember { mutableStateOf<MemoryEntry?>(null) }
+    var showEditor by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+    var showClearConfirmation by remember { mutableStateOf(false) }
+    var resultMessage by remember { mutableStateOf<String?>(null) }
+    var editorError by remember { mutableStateOf<String?>(null) }
+    val evictedMessage = stringResource(R.string.memory_evicted)
+    val tooLargeMessage = stringResource(R.string.memory_too_large)
+    MemorySummary(settings, resultMessage) {
+        editing = null
+        draft = ""
+        editorError = null
+        showEditor = true
+    }
+    MemoryEntries(settings.memory, onDelete) { entry ->
+        editing = entry
+        draft = entry.text
+        editorError = null
+        showEditor = true
+    }
+    if (settings.memory.isNotEmpty()) {
+        TextButton(onClick = { showClearConfirmation = true }) { Text(stringResource(R.string.memory_clear)) }
+    }
+    if (showEditor) {
+        MemoryEditorDialog(
+            draft = draft,
+            error = editorError,
+            onDraftChange = {
+                draft = it
+                editorError = null
+            },
+            onDismiss = { showEditor = false },
+            onSave = {
+                val result = editing?.let { onEdit(it.id, draft) } ?: onAdd(draft)
+                when (result) {
+                    is MemoryWriteResult.Saved -> {
+                        resultMessage = if (result.evicted.isEmpty()) {
+                            null
+                        } else {
+                            "$evictedMessage ${result.evicted.joinToString { it.text }}"
+                        }
+                        showEditor = false
+                    }
+                    MemoryWriteResult.NotFound, MemoryWriteResult.TooLarge -> editorError = tooLargeMessage
+                }
+            },
+        )
+    }
+    if (showClearConfirmation) {
+        ClearMemoryDialog(
+            onDismiss = { showClearConfirmation = false },
+            onClear = {
+                onClear()
+                showClearConfirmation = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun MemorySummary(
+    settings: com.jesjobom.ararai.chat.InstructionSettings,
+    resultMessage: String?,
+    onAdd: () -> Unit,
+) {
+    Text(stringResource(R.string.memory_title), style = MaterialTheme.typography.titleLarge)
+    Text(stringResource(R.string.memory_description), color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val used = InstructionDefaults.MAX_LENGTH - settings.memoryCapacity() + settings.memory.sumOf { it.text.length }
+    Text(stringResource(R.string.memory_usage, used, InstructionDefaults.MAX_LENGTH))
+    resultMessage?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    Button(onClick = onAdd, modifier = Modifier.testTag("memory-add")) {
+        Text(stringResource(R.string.memory_add))
+    }
+}
+
+@Composable
+private fun MemoryEntries(entries: List<MemoryEntry>, onDelete: (String) -> Unit, onEdit: (MemoryEntry) -> Unit) {
+    if (entries.isEmpty()) Text(stringResource(R.string.memory_empty))
+    entries.asReversed().forEach { entry ->
+        Card(Modifier.fillMaxWidth().testTag("memory-entry-${entry.id}")) {
+            Column(Modifier.padding(16.dp)) {
+                Text(entry.text)
+                Row {
+                    TextButton(onClick = { onEdit(entry) }) { Text(stringResource(R.string.memory_edit)) }
+                    TextButton(onClick = { onDelete(entry.id) }) { Text(stringResource(R.string.memory_delete)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemoryEditorDialog(
+    draft: String,
+    error: String?,
+    onDraftChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.memory_entry)) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { onDraftChange(it.take(InstructionDefaults.MAX_MEMORY_ENTRY_LENGTH)) },
+                    modifier = Modifier.fillMaxWidth().testTag("memory-editor"),
+                    minLines = 3,
+                    supportingText = { Text("${draft.length} / ${InstructionDefaults.MAX_MEMORY_ENTRY_LENGTH}") },
+                )
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSave, enabled = draft.isNotBlank()) { Text(stringResource(R.string.action_save)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+    )
+}
+
+@Composable
+private fun ClearMemoryDialog(onDismiss: () -> Unit, onClear: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.memory_clear)) },
+        text = { Text(stringResource(R.string.memory_clear_confirm)) },
+        confirmButton = { TextButton(onClick = onClear) { Text(stringResource(R.string.memory_clear)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
 
@@ -1613,6 +1787,8 @@ private fun ToolsTab(
     onWikipediaEnabledChange: (Boolean) -> Unit,
     calculatorCompatible: Boolean,
     onCalculatorEnabledChange: (Boolean) -> Unit,
+    memoryWriteCompatible: Boolean,
+    onMemoryWriteEnabledChange: (Boolean) -> Unit,
     weatherCompatible: Boolean,
     onWeatherEnabledChange: (Boolean) -> Unit,
     webSearchSettings: WebSearchSettings,
@@ -1629,6 +1805,37 @@ private fun ToolsTab(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(stringResource(R.string.tools_shared_memory), style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.tools_shared_memory_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.tools_allow_memory_write))
+                    Text(
+                        stringResource(
+                            if (memoryWriteCompatible) {
+                                R.string.tools_available_model
+                            } else {
+                                R.string.tools_unavailable_model
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(
+                    checked = settings.memoryWriteEnabled,
+                    onCheckedChange = onMemoryWriteEnabledChange,
+                    enabled = memoryWriteCompatible || settings.memoryWriteEnabled,
+                    modifier = Modifier.testTag("memory-write-enabled"),
+                )
+            }
+        }
+    }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
@@ -1956,19 +2163,59 @@ private fun InstructionEditor(
     title: String,
     value: String,
     tag: String,
+    defaultValue: String,
+    evictionPreview: (String) -> List<MemoryEntry>,
     onValueChange: (String) -> Unit,
     onRestore: () -> Unit,
 ) {
+    var draft by remember(value) { mutableStateOf(value) }
+    var pendingValue by remember { mutableStateOf<String?>(null) }
+    var pendingRestore by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
+            value = draft,
+            onValueChange = { draft = it.take(InstructionDefaults.MAX_LENGTH) },
             modifier = Modifier.fillMaxWidth().testTag(tag),
             minLines = 4,
-            supportingText = { Text("${value.length} / 2000") },
+            supportingText = { Text("${draft.length} / ${InstructionDefaults.MAX_LENGTH}") },
         )
-        TextButton(onClick = onRestore) { Text(stringResource(R.string.instructions_restore_default)) }
+        Row {
+            TextButton(onClick = {
+                if (evictionPreview(draft).isEmpty()) {
+                    onValueChange(draft)
+                } else {
+                    pendingValue = draft
+                    pendingRestore = false
+                }
+            }, enabled = draft != value) { Text(stringResource(R.string.action_save)) }
+            TextButton(onClick = {
+                if (evictionPreview(defaultValue).isEmpty()) {
+                    onRestore()
+                } else {
+                    pendingValue = defaultValue
+                    pendingRestore = true
+                }
+            }) { Text(stringResource(R.string.instructions_restore_default)) }
+        }
+    }
+    pendingValue?.let { next ->
+        AlertDialog(
+            onDismissRequest = { pendingValue = null },
+            title = { Text(stringResource(R.string.memory_prompt_eviction_title)) },
+            text = { Text(stringResource(R.string.memory_prompt_eviction_body, evictionPreview(next).size)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (pendingRestore) onRestore() else onValueChange(next)
+                    pendingValue = null
+                }) { Text(stringResource(R.string.action_save)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingValue = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
     }
 }
 

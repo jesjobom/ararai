@@ -128,7 +128,8 @@ class InstructionPreferencesTest {
         assertEquals(InstructionDefaults.CHAT, preferences.settings.value.chatInstruction)
         assertEquals(InstructionDefaults.VOICE, preferences.settings.value.voiceInstruction)
         assertFalse(preferences.settings.value.wikipediaEnabled)
-        assertFalse(preferences.settings.value.calculatorEnabled)
+        assertTrue(preferences.settings.value.calculatorEnabled)
+        assertTrue(preferences.settings.value.memoryWriteEnabled)
     }
 
     @Test
@@ -144,13 +145,37 @@ class InstructionPreferencesTest {
             setOf(CALCULATOR_TOOL_NAME),
             eligibleToolNames(InstructionSettings(calculatorEnabled = true), supported),
         )
-        assertEquals(emptySet<String>(), eligibleToolNames(InstructionSettings(), supported))
+        assertEquals(setOf(CALCULATOR_TOOL_NAME), eligibleToolNames(InstructionSettings(), supported))
+        assertEquals(
+            emptySet<String>(),
+            eligibleToolNames(InstructionSettings(calculatorEnabled = false), supported),
+        )
         assertEquals(
             emptySet<String>(),
             eligibleToolNames(
                 InstructionSettings(calculatorEnabled = true),
                 supported.copy(toolCapabilities = ModelToolCapabilities()),
             ),
+        )
+    }
+
+    @Test
+    fun `advertises memory write only while enabled for a capable model`() {
+        val supported = LocalModel(
+            id = "supported",
+            name = "Supported",
+            filePath = "/tmp/model",
+            toolCapabilities = ModelToolCapabilities(setOf(MEMORY_WRITE_TOOL_NAME)),
+        )
+
+        assertEquals(setOf(MEMORY_WRITE_TOOL_NAME), eligibleToolNames(InstructionSettings(), supported))
+        assertEquals(
+            emptySet<String>(),
+            eligibleToolNames(InstructionSettings(memoryWriteEnabled = false), supported),
+        )
+        assertEquals(
+            emptySet<String>(),
+            eligibleToolNames(InstructionSettings(), supported.copy(toolCapabilities = ModelToolCapabilities())),
         )
     }
 

@@ -79,6 +79,7 @@ class ChatSessionStoreTest {
                     text = "",
                     reasoningText = "partial",
                     completionStatus = AssistantCompletionStatus.Incomplete,
+                    incompleteReason = AssistantIncompleteReason.ContextCapacityLikely,
                 ),
             )
 
@@ -86,7 +87,28 @@ class ChatSessionStoreTest {
             store.getMessages(session.id).single { it.id == incomplete.id }.content as MessageContent.TextPrompt
 
         assertEquals(AssistantCompletionStatus.Incomplete, restored.completionStatus)
+        assertEquals(AssistantIncompleteReason.ContextCapacityLikely, restored.incompleteReason)
         assertEquals("partial", restored.reasoningText)
+    }
+
+    @Test
+    fun `persists a possible context warning alongside nonblank assistant output`() {
+        val store = store()
+        val session = store.createSession("Context warning")
+        val message = store.appendMessage(
+            session.id,
+            ChatRole.Assistant,
+            MessageContent.TextPrompt(
+                text = "Thell",
+                completionStatus = AssistantCompletionStatus.PossiblyIncomplete,
+                incompleteReason = AssistantIncompleteReason.ContextCapacityLikely,
+            ),
+        )
+
+        val restored = store.getMessages(session.id).single { it.id == message.id }.content as MessageContent.TextPrompt
+        assertEquals("Thell", restored.text)
+        assertEquals(AssistantCompletionStatus.PossiblyIncomplete, restored.completionStatus)
+        assertEquals(AssistantIncompleteReason.ContextCapacityLikely, restored.incompleteReason)
     }
 
     @Test
@@ -105,6 +127,26 @@ class ChatSessionStoreTest {
         val content = restored.content as MessageContent.TextPrompt
 
         assertEquals(AssistantCompletionStatus.Incomplete, content.completionStatus)
+    }
+
+    @Test
+    fun `preserves explicit cancellation instead of reclassifying a blank answer`() {
+        val store = store()
+        val session = store.createSession("Cancelled response")
+        val message =
+            store.appendMessage(
+                session.id,
+                ChatRole.Assistant,
+                MessageContent.TextPrompt(
+                    text = "",
+                    reasoningText = "partial reasoning",
+                    completionStatus = AssistantCompletionStatus.Cancelled,
+                ),
+            )
+
+        val restored = store.getMessages(session.id).single { it.id == message.id }.content as MessageContent.TextPrompt
+        assertEquals(AssistantCompletionStatus.Cancelled, restored.completionStatus)
+        assertEquals("partial reasoning", restored.reasoningText)
     }
 
     @Test
@@ -152,6 +194,11 @@ class ChatSessionStoreTest {
             assertEquals(
                 listOf("message-5", "message-6", "message-7"),
                 candidate.getRecentMessages(session.id, 3).map(StoredChatMessage::text),
+            )
+            val before = candidate.getRecentMessages(session.id, 3).first()
+            assertEquals(
+                listOf("message-2", "message-3", "message-4"),
+                candidate.getMessagesBefore(session.id, before, 3).map(StoredChatMessage::text),
             )
             assertTrue(candidate.getRecentMessages("missing-session", 3).isEmpty())
             assertEquals(0, candidate.countMessages("missing-session"))

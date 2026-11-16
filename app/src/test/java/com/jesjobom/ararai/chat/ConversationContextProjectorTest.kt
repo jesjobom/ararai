@@ -72,6 +72,31 @@ class ConversationContextProjectorTest {
 
         assertFalse(projected.messages.any { it.text.contains("pending.wav") })
         assertTrue(projected.messages.contains(PromptChatMessage(PromptChatRole.User, "Continue")))
+        assertTrue(projected.hasOmittedHistory)
+    }
+
+    @Test
+    fun `pending audio cuts off older history instead of leaving a gap`() {
+        val projected = ConversationContextProjector("system").project(
+            history = listOf(
+                stored(ChatRole.User, MessageContent.TextPrompt("older question")),
+                stored(ChatRole.Assistant, MessageContent.TextPrompt("older answer")),
+                stored(
+                    ChatRole.User,
+                    MessageContent.AudioPromptContent(
+                        audio = AudioPrompt("/pending.wav", "audio/wav"),
+                        transcriptionStatus = AudioTranscriptionStatus.Pending,
+                    ),
+                ),
+                stored(ChatRole.Assistant, MessageContent.TextPrompt("pending answer")),
+            ),
+            current = MessageContent.TextPrompt("next"),
+            inferenceConfig = inference,
+        )
+
+        assertEquals(null, projected.oldestIncludedHistoryId)
+        assertTrue(projected.hasOmittedHistory)
+        assertFalse(projected.messages.any { it.text.contains("older") || it.text.contains("pending") })
     }
 
     @Test

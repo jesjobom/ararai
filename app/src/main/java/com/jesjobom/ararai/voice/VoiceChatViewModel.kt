@@ -440,6 +440,7 @@ internal class VoiceChatViewModel(
                 val projected =
                     if (activeModel.inputCapabilities.audio) {
                         conversationCoordinator.project(
+                            sessionId,
                             history,
                             effectiveContent,
                             activeInference,
@@ -447,6 +448,7 @@ internal class VoiceChatViewModel(
                         )
                     } else {
                         conversationCoordinator.project(
+                            sessionId,
                             history,
                             MessageContent.TextPrompt(
                                 text = effectiveContent.transcript.orEmpty(),
@@ -498,6 +500,7 @@ internal class VoiceChatViewModel(
                         }
                         is GenerationEvent.ReasoningToken -> reasoning.append(event.text)
                         is GenerationEvent.Metrics -> generationMetricsConsumer(activeModel, event.value)
+                        is GenerationEvent.ConversationTokenCount -> Unit
                         is GenerationEvent.ToolStarted -> {
                             mutableState.update {
                                 it.copy(

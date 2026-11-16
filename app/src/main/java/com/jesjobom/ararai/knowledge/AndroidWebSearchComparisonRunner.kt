@@ -140,6 +140,7 @@ class AndroidWebSearchComparisonRunner(
                     is GenerationEvent.ReasoningToken -> Unit
                     is GenerationEvent.Metrics -> metrics = event.value
                     is GenerationEvent.Failed -> failure = event.message
+                    is GenerationEvent.ConversationTokenCount,
                     is GenerationEvent.ToolStarted,
                     is GenerationEvent.ToolFinished,
                     -> Unit

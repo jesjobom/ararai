@@ -31,7 +31,8 @@ inference remains device-, driver-, model-, and workload-dependent.
   notification progress, and the selected model persists locally.
 - The Chat supports streamed generation, cancellation, persistent and
   renameable sessions, per-model conversational context and temperature
-  overrides, bounded context, selectable Markdown and local LaTeX math output, settings, and
+  overrides, bounded context with 10% estimation headroom beyond the output
+  reserve, selectable Markdown and local LaTeX math output, settings, and
   capability-gated reasoning, plus language-aware native speech playback for
   completed assistant responses.
 - Assistant configuration groups mode-specific instructions, optional tools,
@@ -40,6 +41,16 @@ inference remains device-, driver-, model-, and workload-dependent.
   applied to its KV-cache capacity; unsupported independent response limits are
   disclosed rather than simulated. Runtime-backed last-turn metrics are
   ephemeral and benchmark runs retain fixed isolated parameters.
+- Assistant configuration's Context tab shows mode-specific prompts and ordered,
+  locally persisted memory shared across Chat and Voice Chat sessions. Eligible
+  models may write one memory entry on an explicit user request when the Tools-tab
+  memory-write switch is on (the default); disabling writes does not hide or
+  delete stored memory. The model decides whether the user requested a memory
+  write; the dispatcher gates the tool by user enablement and model capability.
+  Prompts and
+  memory share a bounded editable-content allowance; only whole oldest memory
+  entries rotate. E4B tool writing and cross-session recall passed on the
+  SM-S901E; Voice Chat and physical capacity rotation remain untested.
 - Application tools are registered once with stable versioned contracts,
   independently declared model/widget eligibility, user enablement, credential
   readiness, and bounded structured dispatch. `wikipedia_pages@1` provides
@@ -83,12 +94,18 @@ inference remains device-, driver-, model-, and workload-dependent.
   Wikipedia and web-result links must be result-proven and pass a second
   application-owned destination policy before a user gesture opens them.
 - The optional calculator uses EvalEx 3.7.0 behind an application-owned bounded
-  grammar and generic local-compute tool boundary. It is disabled by default,
+  grammar and generic local-compute tool boundary. It is enabled by default
+  unless explicitly disabled by the user,
   capability-gated per model, runs without network access, and never persists
   raw tool protocol or intermediate values.
 - Reasoning-only terminal generations are persisted as incomplete assistant
-  responses. Normal Chat can show partial reasoning, while Voice Chat avoids
-  empty TTS and recovers its loop.
+  responses. Normal Chat can show partial reasoning and labels a possible
+  context-capacity cause only when cumulative native conversation tokens are near the configured
+  limit. A non-blank answer whose native count reaches or exceeds the limit is
+  retained with a yellow possible-incompleteness warning, not a confirmed stop
+  reason. If a tool completed without a final answer, Chat identifies that
+  sequence without guessing why the model stopped. Voice Chat avoids empty TTS and
+  recovers its loop.
 - Structured prompts can contain text, normalized images, recorded audio, or a
   current image paired with an audio turn.
   Audio-capable models receive recordings directly. With a valid downloaded

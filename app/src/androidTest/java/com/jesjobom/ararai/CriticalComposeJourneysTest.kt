@@ -377,6 +377,29 @@ class CriticalComposeJourneysTest {
     }
 
     @Test
+    fun capacityWarningFollowsTheGeneratedAnswer() {
+        composeRule.setContent {
+            MaterialTheme {
+                MessageContentView(
+                    content = MessageContent.TextPrompt(
+                        text = "Thell",
+                        completionStatus = AssistantCompletionStatus.PossiblyIncomplete,
+                        incompleteReason = com.jesjobom.ararai.chat.AssistantIncompleteReason.ContextCapacityLikely,
+                    ),
+                    showReasoning = false,
+                    showAudioTranscriptions = false,
+                    mediaServices = fakeMediaServices(),
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Thell").assertIsDisplayed()
+        composeRule.onNodeWithText("Possibly incomplete response").assertIsDisplayed()
+        composeRule.onNodeWithText("The runtime counted at least as many tokens as the configured context limit.", substring = true)
+            .assertIsDisplayed()
+    }
+
+    @Test
     fun historicalChatImageOpensAndClosesExpandedView() {
         val mediaServices =
             fakeMediaServices().copy(
@@ -580,6 +603,51 @@ class CriticalComposeJourneysTest {
         composeRule.onNodeWithText("Conversation history").assertIsDisplayed()
         composeRule.onNodeWithText("A Chat model is ready", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText("Download and select a Chat model", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun chatContextDividerMovesWhenContextIncreasesWithoutRemovingMessages() {
+        val store = InMemoryChatSessionStore()
+        val session = store.ensureSession()
+        repeat(2) { index ->
+            store.appendMessage(session.id, com.jesjobom.ararai.chat.ChatRole.User, "question $index".padEnd(25, 'x'))
+            store.appendMessage(session.id, com.jesjobom.ararai.chat.ChatRole.Assistant, "answer $index".padEnd(25, 'y'))
+        }
+        val model = availableModel()
+        val smallContext = inference.copy(contextTokens = 54, promptReserveTokens = 16)
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(),
+            initialModel = model,
+            inferenceConfig = smallContext,
+            systemPrompt = "s",
+            conversationTurnSettingsProvider = { com.jesjobom.ararai.chat.ConversationTurnSettings("s") },
+            sessionStore = store,
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                ChatScreen(
+                    viewModel = viewModel,
+                    mediaServices = fakeMediaServices(),
+                    textToSpeechServiceFactory = ::NoOpTextToSpeechService,
+                    languageIdentifierFactory = ::ImmediateLanguageIdentifier,
+                    onBack = {},
+                )
+            }
+        }
+
+        val boundary = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+            .targetContext.getString(R.string.chat_context_boundary)
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText(boundary).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.runOnIdle {
+            viewModel.onModelStartupState(ModelStartupState.Available(model, smallContext.copy(contextTokens = 100)))
+        }
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText(boundary).fetchSemanticsNodes().isEmpty()
+        }
+        assertEquals(4, store.getMessages(session.id).size)
+        viewModel.close()
     }
 
     @Test

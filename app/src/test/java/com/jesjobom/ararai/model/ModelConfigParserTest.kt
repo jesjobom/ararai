@@ -358,7 +358,14 @@ class ModelConfigParserTest {
             assertEquals(ModelArtifactFormat.LiteRtLmBundle, model.artifactFormat)
             assertEquals("gemma-4", model.family)
             assertEquals(
-                setOf("wikipedia_pages", "wikipedia_on_this_day", "web_search", "calculator", "weather_forecast"),
+                setOf(
+                    "wikipedia_pages",
+                    "wikipedia_on_this_day",
+                    "web_search",
+                    "calculator",
+                    "weather_forecast",
+                    "memory_write",
+                ),
                 model.toolCapabilities.toolNames,
             )
         }

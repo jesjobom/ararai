@@ -4,6 +4,7 @@ import com.google.gson.JsonParser
 import com.jesjobom.ararai.chat.CALCULATOR_TOOL_NAME
 import com.jesjobom.ararai.chat.InMemoryInstructionPreferences
 import com.jesjobom.ararai.chat.InstructionSettings
+import com.jesjobom.ararai.chat.MEMORY_WRITE_TOOL_NAME
 import com.jesjobom.ararai.chat.WEB_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.knowledge.InMemoryWebSearchPreferences
@@ -22,6 +23,7 @@ import com.jesjobom.ararai.model.ModelToolCapabilities
 import com.jesjobom.ararai.model.PROPOSE_WIDGET_TOOL_NAME
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DefaultApplicationToolsTest {
@@ -36,6 +38,7 @@ class DefaultApplicationToolsTest {
                 WIKIPEDIA_ON_THIS_DAY_TOOL_NAME,
                 WEB_SEARCH_TOOL_NAME,
                 CALCULATOR_TOOL_NAME,
+                MEMORY_WRITE_TOOL_NAME,
             ),
             registry.descriptors().mapTo(mutableSetOf()) { it.id },
         )
@@ -114,6 +117,7 @@ class DefaultApplicationToolsTest {
                     WIKIPEDIA_ON_THIS_DAY_TOOL_NAME,
                     WEB_SEARCH_TOOL_NAME,
                     CALCULATOR_TOOL_NAME,
+                    MEMORY_WRITE_TOOL_NAME,
                 ),
             ),
         )
@@ -130,6 +134,9 @@ class DefaultApplicationToolsTest {
 
         instructions.setCalculatorEnabled(false)
         assertFalse(CALCULATOR_TOOL_NAME in eligibleModelToolIds(registry, allCapable))
+        assertTrue(MEMORY_WRITE_TOOL_NAME in eligibleModelToolIds(registry, allCapable))
+        instructions.setMemoryWriteEnabled(false)
+        assertFalse(MEMORY_WRITE_TOOL_NAME in eligibleModelToolIds(registry, allCapable))
         assertEquals(
             setOf(WIKIPEDIA_PAGES_TOOL_NAME, WIKIPEDIA_ON_THIS_DAY_TOOL_NAME),
             registry.availableToolIds(ApplicationToolConsumer.Widget),

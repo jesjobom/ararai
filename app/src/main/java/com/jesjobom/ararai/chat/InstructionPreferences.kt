@@ -1,6 +1,8 @@
 package com.jesjobom.ararai.chat
 
 import android.content.Context
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import com.jesjobom.ararai.knowledge.WebSearchProvider
 import com.jesjobom.ararai.model.LocalModel
 import com.jesjobom.ararai.tools.WEATHER_FORECAST_TOOL_NAME
@@ -9,17 +11,21 @@ import com.jesjobom.ararai.tools.WIKIPEDIA_PAGES_TOOL_NAME
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.UUID
 
 data class InstructionSettings(
     val chatInstruction: String = InstructionDefaults.CHAT,
     val voiceInstruction: String = InstructionDefaults.VOICE,
+    val memory: List<MemoryEntry> = emptyList(),
     val wikipediaEnabled: Boolean = false,
-    val calculatorEnabled: Boolean = false,
+    val calculatorEnabled: Boolean = true,
+    val memoryWriteEnabled: Boolean = true,
     val weatherEnabled: Boolean = false,
 )
 
 object InstructionDefaults {
     const val MAX_LENGTH = 2_000
+    const val MAX_MEMORY_ENTRY_LENGTH = 500
     const val CHAT = "Answer directly and clearly. Use enough detail to be useful."
     const val VOICE = "Answer concisely in natural, speech-friendly language."
     const val APP_INVARIANTS =
@@ -44,26 +50,36 @@ interface InstructionPreferences {
     val settings: StateFlow<InstructionSettings>
     fun setInstruction(mode: InteractionMode, value: String)
     fun restoreDefault(mode: InteractionMode)
+    fun addMemory(text: String): MemoryWriteResult
+    fun editMemory(id: String, text: String): MemoryWriteResult
+    fun deleteMemory(id: String)
+    fun clearMemory()
     fun setWikipediaEnabled(enabled: Boolean)
     fun setCalculatorEnabled(enabled: Boolean)
+    fun setMemoryWriteEnabled(enabled: Boolean)
     fun setWeatherEnabled(enabled: Boolean)
 }
 
 class InMemoryInstructionPreferences(
     initial: InstructionSettings = InstructionSettings(),
 ) : InstructionPreferences {
-    private val mutableSettings = MutableStateFlow(initial)
+    private val mutableSettings = MutableStateFlow(
+        initial.copy(memory = initial.memory.fitToBudget(initial.memoryCapacity())),
+    )
     override val settings = mutableSettings.asStateFlow()
 
+    @Synchronized
     override fun setInstruction(mode: InteractionMode, value: String) {
         val normalized = normalizeEditableInstruction(value)
-        mutableSettings.value =
+        val updated =
             when (mode) {
                 InteractionMode.Chat -> mutableSettings.value.copy(chatInstruction = normalized)
                 InteractionMode.Voice -> mutableSettings.value.copy(voiceInstruction = normalized)
             }
+        mutableSettings.value = updated.copy(memory = updated.memory.fitToBudget(updated.memoryCapacity()))
     }
 
+    @Synchronized
     override fun restoreDefault(mode: InteractionMode) {
         setInstruction(
             mode,
@@ -74,14 +90,71 @@ class InMemoryInstructionPreferences(
         )
     }
 
+    @Synchronized
+    override fun addMemory(text: String): MemoryWriteResult = saveMemory(null, text)
+
+    @Synchronized
+    override fun editMemory(id: String, text: String): MemoryWriteResult = saveMemory(id, text)
+
+    private fun saveMemory(id: String?, text: String): MemoryWriteResult {
+        val normalized = normalizeMemoryText(text)
+        val current = mutableSettings.value
+        val existing = id?.let { key -> current.memory.firstOrNull { it.id == key } }
+        val capacity = current.memoryCapacity()
+        return when {
+            normalized == null -> MemoryWriteResult.TooLarge
+            id != null && existing == null -> MemoryWriteResult.NotFound
+            normalized.length > capacity -> MemoryWriteResult.TooLarge
+            else -> {
+                val entry = MemoryEntry(existing?.id ?: UUID.randomUUID().toString(), normalized)
+                val remaining = current.memory.filterNot { it.id == entry.id }.toMutableList()
+                val evicted = mutableListOf<MemoryEntry>()
+                while (remaining.sumOf { it.text.length } + entry.text.length > capacity) {
+                    evicted += remaining.removeAt(0)
+                }
+                // An edit retains its original age. An insertion is newest.
+                val next = if (existing == null) {
+                    remaining + entry
+                } else {
+                    val originalIndex = current.memory.indexOf(existing)
+                    (remaining + entry).sortedBy { candidate ->
+                        if (candidate.id == entry.id) originalIndex else current.memory.indexOf(candidate)
+                    }
+                }
+                mutableSettings.value = current.copy(memory = next)
+                MemoryWriteResult.Saved(entry, evicted)
+            }
+        }
+    }
+
+    @Synchronized
+    override fun deleteMemory(id: String) {
+        mutableSettings.value = mutableSettings.value.copy(
+            memory = mutableSettings.value.memory.filterNot { it.id == id },
+        )
+    }
+
+    @Synchronized
+    override fun clearMemory() {
+        mutableSettings.value = mutableSettings.value.copy(memory = emptyList())
+    }
+
+    @Synchronized
     override fun setWikipediaEnabled(enabled: Boolean) {
         mutableSettings.value = mutableSettings.value.copy(wikipediaEnabled = enabled)
     }
 
+    @Synchronized
     override fun setCalculatorEnabled(enabled: Boolean) {
         mutableSettings.value = mutableSettings.value.copy(calculatorEnabled = enabled)
     }
 
+    @Synchronized
+    override fun setMemoryWriteEnabled(enabled: Boolean) {
+        mutableSettings.value = mutableSettings.value.copy(memoryWriteEnabled = enabled)
+    }
+
+    @Synchronized
     override fun setWeatherEnabled(enabled: Boolean) {
         mutableSettings.value = mutableSettings.value.copy(weatherEnabled = enabled)
     }
@@ -98,24 +171,73 @@ class SharedPreferencesInstructionPreferences(context: Context) : InstructionPre
                 voiceInstruction =
                 preferences.getString(KEY_VOICE, InstructionDefaults.VOICE)
                     ?: InstructionDefaults.VOICE,
+                memory = loadMemory(preferences.getString(KEY_MEMORY, null)),
                 wikipediaEnabled = preferences.getBoolean(KEY_WIKIPEDIA, false),
-                calculatorEnabled = preferences.getBoolean(KEY_CALCULATOR, false),
+                calculatorEnabled = preferences.getBoolean(KEY_CALCULATOR, true),
+                memoryWriteEnabled = preferences.getBoolean(KEY_MEMORY_WRITE, true),
                 weatherEnabled = preferences.getBoolean(KEY_WEATHER, false),
             ),
         )
 
     override val settings = delegate.settings
 
+    @Synchronized
     override fun setInstruction(mode: InteractionMode, value: String) {
         delegate.setInstruction(mode, value)
         val key = if (mode == InteractionMode.Chat) KEY_CHAT else KEY_VOICE
-        preferences.edit().putString(key, instructionFor(mode)).apply()
+        val instruction = if (mode == InteractionMode.Chat) {
+            settings.value.chatInstruction
+        } else {
+            settings.value.voiceInstruction
+        }
+        preferences.edit().putString(key, instruction).apply()
+        persistMemory()
     }
 
+    @Synchronized
     override fun restoreDefault(mode: InteractionMode) {
         delegate.restoreDefault(mode)
         val key = if (mode == InteractionMode.Chat) KEY_CHAT else KEY_VOICE
         preferences.edit().remove(key).apply()
+        persistMemory()
+    }
+
+    @Synchronized
+    override fun addMemory(text: String): MemoryWriteResult = delegate.addMemory(text).also { result ->
+        if (result is MemoryWriteResult.Saved) persistMemory()
+    }
+
+    @Synchronized
+    override fun editMemory(id: String, text: String): MemoryWriteResult {
+        val result = delegate.editMemory(id, text)
+        if (result is MemoryWriteResult.Saved) persistMemory()
+        return result
+    }
+
+    @Synchronized
+    override fun deleteMemory(id: String) {
+        delegate.deleteMemory(id)
+        persistMemory()
+    }
+
+    @Synchronized
+    override fun clearMemory() {
+        delegate.clearMemory()
+        persistMemory()
+    }
+
+    private fun persistMemory() {
+        val entries = JsonArray().apply {
+            settings.value.memory.forEach { entry ->
+                add(
+                    JsonObject().apply {
+                        addProperty("id", entry.id)
+                        addProperty("text", entry.text)
+                    },
+                )
+            }
+        }
+        preferences.edit().putString(KEY_MEMORY, entries.toString()).apply()
     }
 
     override fun setWikipediaEnabled(enabled: Boolean) {
@@ -128,23 +250,24 @@ class SharedPreferencesInstructionPreferences(context: Context) : InstructionPre
         preferences.edit().putBoolean(KEY_CALCULATOR, enabled).apply()
     }
 
+    override fun setMemoryWriteEnabled(enabled: Boolean) {
+        delegate.setMemoryWriteEnabled(enabled)
+        preferences.edit().putBoolean(KEY_MEMORY_WRITE, enabled).apply()
+    }
+
     override fun setWeatherEnabled(enabled: Boolean) {
         delegate.setWeatherEnabled(enabled)
         preferences.edit().putBoolean(KEY_WEATHER, enabled).apply()
-    }
-
-    private fun instructionFor(mode: InteractionMode): String = if (mode == InteractionMode.Chat) {
-        settings.value.chatInstruction
-    } else {
-        settings.value.voiceInstruction
     }
 
     private companion object {
         const val PREFERENCES_NAME = "instruction_preferences"
         const val KEY_CHAT = "chat_instruction"
         const val KEY_VOICE = "voice_instruction"
+        const val KEY_MEMORY = "shared_memory"
         const val KEY_WIKIPEDIA = "wikipedia_enabled"
         const val KEY_CALCULATOR = "calculator_enabled"
+        const val KEY_MEMORY_WRITE = "memory_write_enabled"
         const val KEY_WEATHER = "weather_enabled"
     }
 }
@@ -158,7 +281,10 @@ fun effectiveSystemInstruction(
             InteractionMode.Chat -> settings.chatInstruction
             InteractionMode.Voice -> settings.voiceInstruction
         }.let(::normalizeEditableInstruction)
-    return listOf(InstructionDefaults.APP_INVARIANTS, editable)
+    val memory = settings.memory.takeIf { it.isNotEmpty() }
+        ?.joinToString("\n", prefix = "Shared memory (user-saved facts and preferences):\n") { "- ${it.text}" }
+        .orEmpty()
+    return listOf(InstructionDefaults.APP_INVARIANTS, editable, memory)
         .filter(String::isNotBlank)
         .joinToString("\n\n")
 }
@@ -215,6 +341,7 @@ fun conversationTurnSettings(
                         "Mention Open-Meteo as the source and never expose tool JSON.",
                 )
             }
+            MEMORY_WRITE_INSTRUCTION.takeIf { MEMORY_WRITE_TOOL_NAME in normalizedTools }?.let(::add)
         }
             .joinToString("\n")
     return ConversationTurnSettings(
@@ -268,6 +395,9 @@ fun eligibleToolNames(
     selectedWebProvider: WebSearchProvider? = null,
     experimentalWebSearchEnabled: Boolean = false,
 ): Set<String> = buildSet {
+    if (settings.memoryWriteEnabled && model?.toolCapabilities?.supports(MEMORY_WRITE_TOOL_NAME) == true) {
+        add(MEMORY_WRITE_TOOL_NAME)
+    }
     if (settings.wikipediaEnabled) {
         WIKIPEDIA_MODEL_TOOL_NAMES
             .filter { model?.toolCapabilities?.supports(it) == true }
@@ -292,6 +422,7 @@ fun supportsWikipediaTools(model: LocalModel?): Boolean = WIKIPEDIA_MODEL_TOOL_N
 const val WIKIPEDIA_SEARCH_TOOL_NAME = "wikipedia_search"
 const val WEB_SEARCH_TOOL_NAME = "web_search"
 const val CALCULATOR_TOOL_NAME = "calculator"
+const val MEMORY_WRITE_TOOL_NAME = "memory_write"
 
 private val WIKIPEDIA_MODEL_TOOL_NAMES = setOf(
     WIKIPEDIA_SEARCH_TOOL_NAME,
@@ -304,6 +435,11 @@ private fun LocalModel?.supportsTool(name: String): Boolean = this?.toolCapabili
 private const val CALCULATOR_UNAVAILABLE_INSTRUCTION =
     "No calculator or math tool is available for this turn. Answer directly without emitting " +
         "tool-call markup, tool protocol, XML-like tags, or JSON."
+
+private const val MEMORY_WRITE_INSTRUCTION =
+    "Use memory_write only when the user explicitly asks you to remember a fact or preference. " +
+        "Save a concise self-contained entry, then report what was saved and any evicted entries. " +
+        "Never claim a memory was saved when the tool fails."
 
 fun normalizeEditableInstruction(value: String): String = value
     .take(InstructionDefaults.MAX_LENGTH)

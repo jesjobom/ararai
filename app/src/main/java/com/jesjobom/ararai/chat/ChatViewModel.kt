@@ -23,8 +23,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 @Suppress("LongParameterList")
 class ChatViewModel(
@@ -87,6 +89,8 @@ class ChatViewModel(
     private val messageWindowSizes = ConcurrentHashMap<String, Int>()
     private val submissionPending = AtomicBoolean(false)
     private val sessionMutationPending = AtomicBoolean(false)
+    private val contextBoundaryRevision = AtomicLong(0L)
+    private var contextBoundaryJob: Job? = null
     private val initialSession =
         conversationSelection.currentSessionId
             ?.let { selected -> sessionStore.listSessions().firstOrNull { it.id == selected } }
@@ -121,6 +125,46 @@ class ChatViewModel(
 
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
+    init {
+        refreshContextBoundary()
+    }
+
+    private fun refreshContextBoundary() {
+        contextBoundaryJob?.cancel()
+        val revision = contextBoundaryRevision.incrementAndGet()
+        val snapshot = _uiState.value
+        val sessionId = snapshot.selectedSessionId
+        if (snapshot.isGenerating || sessionId == null) return
+        val selectedModel = model
+        if (selectedModel == null) {
+            _uiState.update { it.copy(oldestIncludedContextMessageId = null, hasOmittedContextHistory = false) }
+            return
+        }
+        val current = snapshot.toSubmittedContent(audioTranscriber.isAvailable)
+        contextBoundaryJob = scope.launch {
+            delay(CONTEXT_BOUNDARY_DEBOUNCE_MILLIS)
+            val config = generationConfigProvider(selectedModel, inferenceConfig)
+            val instruction = conversationTurnSettingsProvider(selectedModel).systemInstruction
+            val projected = withContext(persistenceDispatcher) {
+                conversationCoordinator.preview(sessionId, current, config, instruction)
+            }
+            _uiState.update { state ->
+                if (
+                    revision != contextBoundaryRevision.get() ||
+                    state.selectedSessionId != sessionId ||
+                    state.isGenerating
+                ) {
+                    state
+                } else {
+                    state.copy(
+                        oldestIncludedContextMessageId = projected.oldestIncludedHistoryId,
+                        hasOmittedContextHistory = projected.hasOmittedHistory,
+                    )
+                }
+            }
+        }
+    }
+
     fun onPromptChanged(prompt: String) {
         _uiState.update {
             if (it.audioPrompt != null) {
@@ -129,6 +173,7 @@ class ChatViewModel(
                 it.copy(prompt = prompt, error = null, errorKey = null)
             }
         }
+        refreshContextBoundary()
     }
 
     fun attachImage(image: ImageAttachment) {
@@ -139,6 +184,7 @@ class ChatViewModel(
                 it.copy(imageAttachments = it.imageAttachments + image, error = null, errorKey = null)
             }
         }
+        refreshContextBoundary()
     }
 
     fun removeImage(uri: String) {
@@ -151,6 +197,7 @@ class ChatViewModel(
             )
         }
         if (removed) mediaRepository.deleteDraft(uri, sessionStore.referencedMediaUris())
+        refreshContextBoundary()
     }
 
     fun useAudioPrompt(audio: AudioPrompt) {
@@ -170,6 +217,7 @@ class ChatViewModel(
         if (current.canUseAudioPrompt) {
             deleteDraftMedia(listOfNotNull(current.audioPrompt?.uri))
         }
+        refreshContextBoundary()
     }
 
     fun submitAudioPrompt(audio: AudioPrompt) {
@@ -181,6 +229,7 @@ class ChatViewModel(
         val removedUri = _uiState.value.audioPrompt?.uri
         _uiState.update { it.copy(audioPrompt = null, error = null, errorKey = null) }
         removedUri?.let { mediaRepository.deleteDraft(it, sessionStore.referencedMediaUris()) }
+        refreshContextBoundary()
     }
 
     fun setReasoningEnabled(enabled: Boolean) {
@@ -221,6 +270,8 @@ class ChatViewModel(
                 selectedSessionId = session.id,
                 messages = emptyList(),
                 hasOlderMessages = false,
+                oldestIncludedContextMessageId = null,
+                hasOmittedContextHistory = false,
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
@@ -250,6 +301,8 @@ class ChatViewModel(
                 sessions = sessionStore.listSessions().toUiState(),
                 messages = displayedMessages(sessionId),
                 hasOlderMessages = hasOlderMessages(sessionId),
+                oldestIncludedContextMessageId = null,
+                hasOmittedContextHistory = false,
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
@@ -319,6 +372,8 @@ class ChatViewModel(
                 selectedSessionId = next.id,
                 messages = displayedMessages(next.id),
                 hasOlderMessages = hasOlderMessages(next.id),
+                oldestIncludedContextMessageId = null,
+                hasOmittedContextHistory = false,
                 prompt = "",
                 imageAttachments = if (deletingSelectedSession) emptyList() else it.imageAttachments,
                 audioPrompt = if (deletingSelectedSession) null else it.audioPrompt,
@@ -349,6 +404,8 @@ class ChatViewModel(
                 selectedSessionId = replacement.id,
                 messages = emptyList(),
                 hasOlderMessages = false,
+                oldestIncludedContextMessageId = null,
+                hasOmittedContextHistory = false,
                 prompt = "",
                 imageAttachments = emptyList(),
                 audioPrompt = null,
@@ -371,6 +428,7 @@ class ChatViewModel(
             } finally {
                 sessionMutationPending.set(false)
                 _uiState.update { it.copy(isPersistenceBusy = false) }
+                refreshContextBoundary()
             }
         }
     }
@@ -504,6 +562,7 @@ class ChatViewModel(
                 }
             }
         }
+        refreshContextBoundary()
     }
 
     private fun ModelStartupState.Downloading.downloadStatusText(): String {
@@ -609,11 +668,18 @@ class ChatViewModel(
                         }
                     val projected =
                         conversationCoordinator.project(
+                            sessionId = sessionId,
                             history = history,
                             current = effectiveContent,
                             inferenceConfig = inferenceForRequest,
                             effectiveSystemPrompt = turnSettings.systemInstruction,
                         )
+                    _uiState.update {
+                        it.copy(
+                            oldestIncludedContextMessageId = projected.oldestIncludedHistoryId,
+                            hasOmittedContextHistory = projected.hasOmittedHistory,
+                        )
+                    }
                     val requestContent =
                         if (
                             effectiveContent is MessageContent.AudioPromptContent &&
@@ -628,6 +694,8 @@ class ChatViewModel(
                     engine.load(modelForRequest, inferenceForRequest)
                     _uiState.update { it.copy(isLoadingModel = false) }
 
+                    var latestContextTokenCount: Int? = null
+                    var toolCalled = false
                     conversationCoordinator
                         .generate(
                             engine,
@@ -642,7 +710,11 @@ class ChatViewModel(
                             when (event) {
                                 is GenerationEvent.Token -> appendAssistantToken(event.text)
                                 is GenerationEvent.ReasoningToken -> appendAssistantReasoningToken(event.text)
-                                is GenerationEvent.Metrics -> generationMetricsConsumer(modelForRequest, event.value)
+                                is GenerationEvent.Metrics -> {
+                                    latestContextTokenCount = event.value.contextTokenCount ?: latestContextTokenCount
+                                    generationMetricsConsumer(modelForRequest, event.value)
+                                }
+                                is GenerationEvent.ConversationTokenCount -> latestContextTokenCount = event.value
                                 is GenerationEvent.ToolStarted -> {
                                     _uiState.update {
                                         it.copy(
@@ -653,6 +725,7 @@ class ChatViewModel(
                                     }
                                 }
                                 is GenerationEvent.ToolFinished -> {
+                                    toolCalled = true
                                     pendingResearchSources =
                                         (pendingResearchSources + event.sources)
                                             .distinctBy { source -> source.canonicalUrl }
@@ -692,7 +765,11 @@ class ChatViewModel(
                                     }
                                 }
                                 GenerationEvent.Completed -> {
-                                    markAssistantIncompleteWhenNeeded()
+                                    markAssistantIncompleteWhenNeeded(
+                                        latestContextTokenCount,
+                                        inferenceForRequest.contextTokens,
+                                        toolCalled,
+                                    )
                                     attachSourcesToAssistant(pendingResearchSources)
                                     flushAssistantPresentation()
                                     flushAssistantMessage()
@@ -737,6 +814,7 @@ class ChatViewModel(
                     }
                 } finally {
                     finalizeAssistantMessage()
+                    refreshContextBoundary()
                 }
             }
     }
@@ -820,6 +898,7 @@ class ChatViewModel(
                 )
             }
         }
+        if (!_uiState.value.isGenerating) refreshContextBoundary()
     }
 
     private fun maybeTitleSessionFromTranscript(sessionId: String, transcript: String) {
@@ -853,7 +932,7 @@ class ChatViewModel(
     }
 
     fun onLeavingChat() {
-        stopActiveGeneration()
+        stopActiveGeneration(userCancelled = true)
         _uiState.update {
             it.copy(
                 isLoadingModel = false,
@@ -863,6 +942,7 @@ class ChatViewModel(
                 researchSources = emptyList(),
             )
         }
+        refreshContextBoundary()
     }
 
     fun onEnteringChat() {
@@ -878,9 +958,12 @@ class ChatViewModel(
                 selectedSessionId = session.id,
                 messages = displayedMessages(session.id),
                 hasOlderMessages = hasOlderMessages(session.id),
+                oldestIncludedContextMessageId = null,
+                hasOmittedContextHistory = false,
                 messageDisplayRevision = it.messageDisplayRevision + 1,
             )
         }
+        refreshContextBoundary()
     }
 
     fun loadOlderMessages() {
@@ -905,7 +988,7 @@ class ChatViewModel(
 
     fun cancelGeneration() {
         if (closed.get()) return
-        stopActiveGeneration()
+        stopActiveGeneration(userCancelled = true)
         unloadEngine()
         _uiState.update {
             it.copy(
@@ -918,6 +1001,7 @@ class ChatViewModel(
                 errorKey = null,
             )
         }
+        refreshContextBoundary()
     }
 
     fun close() {
@@ -937,9 +1021,19 @@ class ChatViewModel(
         }
     }
 
-    private fun stopActiveGeneration() {
+    private fun stopActiveGeneration(userCancelled: Boolean = false) {
+        val cancelledTurn = userCancelled && _uiState.value.isGenerating
         generationJob?.cancel()
         generationJob = null
+        if (cancelledTurn) {
+            if (activeAssistantMessageId == null) {
+                _uiState.value.selectedSessionId?.let { prepareAssistantMessage(it) }
+            }
+            appendAssistantContent { buffer ->
+                buffer.completionStatus = AssistantCompletionStatus.Cancelled
+                buffer.incompleteReason = null
+            }
+        }
         finalizeAssistantMessage()
     }
 
@@ -962,10 +1056,24 @@ class ChatViewModel(
         appendAssistantContent { it.sources = sources }
     }
 
-    private fun markAssistantIncompleteWhenNeeded() {
+    private fun markAssistantIncompleteWhenNeeded(
+        nativeTokenCount: Int?,
+        contextTokens: Int,
+        toolCalled: Boolean,
+    ) {
         appendAssistantContent { buffer ->
+            val atCapacity = contextCapacityReached(nativeTokenCount, contextTokens)
             if (buffer.text.isBlank()) {
                 buffer.completionStatus = AssistantCompletionStatus.Incomplete
+                buffer.incompleteReason = when {
+                    contextCapacityLikelyReached(nativeTokenCount, contextTokens) ->
+                        AssistantIncompleteReason.ContextCapacityLikely
+                    toolCalled -> AssistantIncompleteReason.AfterToolCall
+                    else -> null
+                }
+            } else if (atCapacity) {
+                buffer.completionStatus = AssistantCompletionStatus.PossiblyIncomplete
+                buffer.incompleteReason = AssistantIncompleteReason.ContextCapacityLikely
             }
         }
     }
@@ -1109,6 +1217,7 @@ class ChatViewModel(
         val reasoning: StringBuilder = StringBuilder(),
         var sources: List<com.jesjobom.ararai.knowledge.KnowledgeSource> = emptyList(),
         var completionStatus: AssistantCompletionStatus = AssistantCompletionStatus.Complete,
+        var incompleteReason: AssistantIncompleteReason? = null,
         var persistenceDirty: Boolean = false,
         var presentationDirty: Boolean = false,
     ) {
@@ -1117,6 +1226,7 @@ class ChatViewModel(
             reasoningText = reasoning.toString(),
             sources = sources,
             completionStatus = completionStatus,
+            incompleteReason = incompleteReason,
         )
     }
 
@@ -1125,5 +1235,16 @@ class ChatViewModel(
         const val DEFAULT_ASSISTANT_PRESENTATION_INTERVAL_MILLIS = 50L
         const val INITIAL_MESSAGE_WINDOW_SIZE = 100
         const val MESSAGE_WINDOW_PAGE_SIZE = 100
+        const val CONTEXT_BOUNDARY_DEBOUNCE_MILLIS = 150L
     }
+}
+
+private fun contextCapacityLikelyReached(usedTokens: Int?, contextTokens: Int): Boolean {
+    usedTokens ?: return false
+    return contextTokens > 0 && usedTokens >= contextTokens - 8
+}
+
+private fun contextCapacityReached(usedTokens: Int?, contextTokens: Int): Boolean {
+    usedTokens ?: return false
+    return contextTokens > 0 && usedTokens >= contextTokens
 }

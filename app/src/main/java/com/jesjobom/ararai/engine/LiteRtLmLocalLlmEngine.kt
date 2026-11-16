@@ -17,6 +17,8 @@ import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.tool
 import com.jesjobom.ararai.chat.CALCULATOR_TOOL_NAME
+import com.jesjobom.ararai.chat.MEMORY_WRITE_TOOL_NAME
+import com.jesjobom.ararai.chat.MemoryWriteOpenApiTool
 import com.jesjobom.ararai.chat.MessageContent
 import com.jesjobom.ararai.chat.WEB_SEARCH_TOOL_NAME
 import com.jesjobom.ararai.chat.WIKIPEDIA_SEARCH_TOOL_NAME
@@ -435,6 +437,7 @@ class LiteRtLmLocalLlmEngine(
         if (text.isNotEmpty()) add(GenerationEvent.Token(text))
         if (reasoning.isNotEmpty()) add(GenerationEvent.ReasoningToken(reasoning))
         metrics?.let { add(GenerationEvent.Metrics(it)) }
+        contextTokenCount?.let { add(GenerationEvent.ConversationTokenCount(it)) }
         val eventToolName = toolName ?: WIKIPEDIA_SEARCH_TOOL_NAME
         val eventToolDisplayName = toolDisplayName ?: eventToolName
         when (val event = toolEvent) {
@@ -572,6 +575,7 @@ data class LiteRtLmChunk(
     val text: String = "",
     val reasoning: String = "",
     val metrics: GenerationMetrics? = null,
+    val contextTokenCount: Int? = null,
     val toolEvent: ApplicationToolExecutionEvent? = null,
     val toolName: String? = null,
     val toolDisplayName: String? = null,
@@ -788,6 +792,15 @@ private class AndroidLiteRtLmSession(
             )
         }
         created.weatherTool?.beginTurn()
+        created.memoryWriteTool?.beginTurn { event ->
+            delivery.emit(
+                LiteRtLmChunk(
+                    toolEvent = event,
+                    toolName = MEMORY_WRITE_TOOL_NAME,
+                    toolDisplayName = "Save shared memory",
+                ),
+            )
+        }
         Log.d(
             LOG_TAG,
             "Conversation ready: reused=$canReuse, elapsed=${generationStartedAt.elapsedMillis()} ms",
@@ -829,6 +842,9 @@ private class AndroidLiteRtLmSession(
 
                     override fun onDone() {
                         if (!delivery.active) return
+                        val contextTokenCount = runCatching { conversation.getTokenCount() }.getOrNull()
+                        Log.d(LOG_TAG, "Model completed: contextTokens=$contextTokenCount/${config.contextTokens}")
+                        contextTokenCount?.let { delivery.emit(LiteRtLmChunk(contextTokenCount = it)) }
                         runCatching { conversation.getBenchmarkInfo() }
                             .onFailure { error ->
                                 Log.w("ArarAI.LiteRtLm", "Unable to read LiteRT-LM benchmark metrics", error)
@@ -849,6 +865,7 @@ private class AndroidLiteRtLmSession(
                                             prefillTokensPerSecond = benchmark.lastPrefillTokensPerSecond,
                                             decodeTokenCount = benchmark.lastDecodeTokenCount,
                                             decodeTokensPerSecond = benchmark.lastDecodeTokensPerSecond,
+                                            contextTokenCount = contextTokenCount,
                                         ),
                                     ),
                                 )
@@ -873,6 +890,7 @@ private class AndroidLiteRtLmSession(
                                     webSearchTool = created.webSearchTool,
                                     calculatorTool = created.calculatorTool,
                                     weatherTool = created.weatherTool,
+                                    memoryWriteTool = created.memoryWriteTool,
                                 ),
                             )
                         }
@@ -1027,6 +1045,7 @@ private class AndroidLiteRtLmSession(
                 webSearchTool = tools.webSearch,
                 calculatorTool = tools.calculator,
                 weatherTool = tools.weather,
+                memoryWriteTool = tools.memoryWrite,
             )
             runtimeTelemetry.record(
                 event = "conversation_create_finished",
@@ -1079,12 +1098,18 @@ private class AndroidLiteRtLmSession(
         } else {
             null
         }
+        val memoryWrite = if (MEMORY_WRITE_TOOL_NAME in requested) {
+            MemoryWriteOpenApiTool(toolDispatcher, supportedToolNames)
+        } else {
+            null
+        }
         return ProductionConversationTools(
             wikipedia = wikipedia,
             structuredWikipedia = structuredWikipedia,
             webSearch = webSearch,
             calculator = calculator,
             weather = weather,
+            memoryWrite = memoryWrite,
             ephemeral = request.ephemeralTools.map(::EphemeralOpenApiTool),
         )
     }
@@ -1105,6 +1130,7 @@ private class AndroidLiteRtLmSession(
         webSearchTool = state.webSearchTool,
         calculatorTool = state.calculatorTool,
         weatherTool = state.weatherTool,
+        memoryWriteTool = state.memoryWriteTool,
     )
 
     private data class ProductionConversationSelectionInput(
@@ -1128,6 +1154,7 @@ private class AndroidLiteRtLmSession(
         val webSearchTool: WebSearchOpenApiTool?,
         val calculatorTool: CalculatorOpenApiTool?,
         val weatherTool: WeatherOpenApiTool?,
+        val memoryWriteTool: MemoryWriteOpenApiTool?,
     )
 
     private data class ProductionConversationTools(
@@ -1136,6 +1163,7 @@ private class AndroidLiteRtLmSession(
         val webSearch: WebSearchOpenApiTool?,
         val calculator: CalculatorOpenApiTool?,
         val weather: WeatherOpenApiTool?,
+        val memoryWrite: MemoryWriteOpenApiTool?,
         val ephemeral: List<EphemeralOpenApiTool>,
     ) {
         val configured = listOfNotNull(
@@ -1143,6 +1171,7 @@ private class AndroidLiteRtLmSession(
             webSearch?.let(::tool),
             calculator?.let(::tool),
             weather?.let(::tool),
+            memoryWrite?.let(::tool),
         ) + structuredWikipedia.map(::tool) + ephemeral.map(::tool)
     }
 
@@ -1210,6 +1239,7 @@ private class AndroidLiteRtLmSession(
         val webSearchTool: WebSearchOpenApiTool? = null,
         val calculatorTool: CalculatorOpenApiTool? = null,
         val weatherTool: WeatherOpenApiTool? = null,
+        val memoryWriteTool: MemoryWriteOpenApiTool? = null,
     )
 }
 
@@ -1227,12 +1257,14 @@ internal fun liteRtLmGenerationMetrics(
     prefillTokensPerSecond: Double,
     decodeTokenCount: Int,
     decodeTokensPerSecond: Double,
+    contextTokenCount: Int? = null,
 ) = GenerationMetrics(
     timeToFirstTokenMillis = (timeToFirstTokenInSecond * 1_000).toLong(),
     prefillTokenCount = prefillTokenCount,
     prefillTokensPerSecond = prefillTokensPerSecond,
     decodeTokenCount = decodeTokenCount,
     decodeTokensPerSecond = decodeTokensPerSecond,
+    contextTokenCount = contextTokenCount,
 )
 
 private fun PromptRequest.systemInstruction(): Contents? = chatMessages

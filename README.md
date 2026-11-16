@@ -261,7 +261,8 @@ history in a separate app-private SQLite database. See
 scheduling, privacy, deletion, non-goals, and validation boundaries.
 
 The optional **Local calculator** under **Assistant configuration → Tools** is
-disabled by default and runs entirely on-device. It is advertised only to the
+enabled by default and runs entirely on-device; an explicit prior opt-out remains
+off after an update. It is advertised only to the
 individually validated Gemma bundles. The bounded grammar supports decimal and
 scientific literals, parentheses, unary signs, `+`, `-`, `*`, `/`, `%`, bounded
 `^`, `abs`, `sqrt`, `min`, `max`, `ln`, `log10`, `sin`, `cos`, `tan`, and the
@@ -337,12 +338,39 @@ a fresh native conversation once from bounded reconstructible history. Runtimes
 without incremental conversation support receive the bounded reconstructed
 prompt on each turn.
 
+Context reconstruction keeps the most recent consecutive user/assistant turns
+that fit the configured input budget; it never substitutes older short turns
+after dropping a newer one. The approximate input budget leaves the configured
+output reserve plus 10% of the total context capacity as estimation headroom;
+it cannot guarantee an exact native token count. Normal Chat marks the boundary
+in its timeline (or near Load older when that boundary is above the loaded page). The marker moves
+with the context setting or draft and does not delete stored messages. It
+describes textual history only; prior images and audio have separate replay
+rules.
+
 Voice Chat keeps only bounded timing/configuration diagnostics in memory.
 Temporary capture WAV files are deleted after each exchange, cancellation, or
 failure, while the app-owned conversation copy remains available for replay.
 Stale Voice Chat temporary files are reconciled on startup. A completed
 transcript reconstructs an audio turn after native-state loss; the app omits
 rather than fabricates content for legacy or failed audio without a transcript.
+
+**Assistant configuration → Context** keeps the existing separate Chat and Voice
+Chat prompts and a shared local memory list. Users can add, edit, and remove
+individual memory entries. Eligible Gemma Chat models can save one entry when
+the user explicitly asks them to remember something. **Assistant configuration
+→ Tools** has a model memory-write switch, on by default; turning it off blocks
+model writes but leaves saved memories readable and editable under **Context**.
+The same ordered memory
+is included in later turns of either mode, across sessions; it is not copied
+into conversation history or sent to a memory service. Prompts and memory
+share a 2,000-character editable-context allowance, measured against the
+longer mode prompt. Prompts are never rotated. When needed, whole oldest
+memory entries are removed; the Context screen discloses prompt-edit evictions
+before saving. This editable-content allowance is distinct from the model's
+total token context window. An E4B write and cross-session recall passed on the
+SM-S901E; Voice Chat and physical capacity rotation remain untested. Explicit
+intent is model guidance, not yet a deterministic dispatch check.
 
 Assistant configuration also has a **Generation** tab. Context window and
 temperature overrides are saved independently for each Chat model and apply to
@@ -363,6 +391,13 @@ If a reasoning-enabled generation finishes without final answer text, ArarAI
 persists and displays an explicit incomplete response. Partial reasoning remains
 available in normal Chat when Show reasoning is enabled. Voice Chat does not
 speak empty output and recovers the loop after recording the incomplete turn.
+Chat identifies a possible full context when the runtime's token counts
+approach the configured total capacity. Non-blank output reaching or exceeding
+the limit is retained with a yellow possible-incompleteness notice; the runtime
+does not confirm that it was truncated. If a tool ran before an incomplete
+answer, Chat says so without guessing the stop cause; otherwise it says the
+runtime did not report a cause. This is a diagnostic hint, not a native stop
+reason.
 
 ## Planning and sources of truth
 

@@ -829,8 +829,9 @@ and Voice Chat.
 ### Requirement: Configured Chat System Prompt
 
 The app SHALL compose an effective system instruction from app-owned invariants
-and a bounded locally persisted user instruction selected independently for
-normal Chat or Voice Chat.
+a bounded locally persisted user instruction selected independently for
+normal Chat or Voice Chat, and bounded shared memory available across both modes
+and all conversation sessions.
 
 #### Scenario: Initialize instruction preferences
 
@@ -858,6 +859,7 @@ normal Chat or Voice Chat.
 - **WHEN** normal Chat submits a turn that requires context initialization
 - **THEN** generation receives the app-owned invariant instruction
 - **AND** the normal-Chat user instruction
+- **AND** the same ordered shared-memory entries used by Voice Chat
 - **AND** recent eligible canonical conversation history
 - **AND** the new user message.
 
@@ -867,6 +869,7 @@ normal Chat or Voice Chat.
 - **WHEN** Voice Chat submits a turn that requires context initialization
 - **THEN** generation receives the app-owned invariant instruction
 - **AND** the Voice-Chat user instruction
+- **AND** the same ordered shared-memory entries used by normal Chat
 - **AND** recent eligible canonical conversation history
 - **AND** the new user turn.
 
@@ -880,6 +883,16 @@ normal Chat or Voice Chat.
 - **AND** it appears only once in the projected prompt
 - **AND** it is not persisted as canonical conversation history.
 
+#### Scenario: Keep editable context within a shared budget
+
+- **GIVEN** the user's mode-specific prompts and ordered memory entries
+- **WHEN** either mode constructs its effective instruction
+- **THEN** the active prompt and shared memory fit the shared editable-context
+  allowance, independently of the selected model's larger total context window
+- **AND** neither mode's prompt is rotated or silently truncated
+- **AND** the allowance is enforced against the longer of the two prompts so
+  the same memory fits with either mode.
+
 #### Scenario: Restore an instruction default
 
 - **GIVEN** the user customized one interaction mode's instruction
@@ -888,11 +901,18 @@ normal Chat or Voice Chat.
 - **AND** the other interaction mode remains unchanged
 - **AND** canonical conversation history remains unchanged.
 
+#### Scenario: Add shared memory to later sessions
+
+- **GIVEN** the user explicitly saved a memory entry
+- **WHEN** a later Chat or Voice Chat turn starts in any session
+- **THEN** the entry is included in the effective instruction
+- **AND** it is not added to canonical conversation history.
+
 #### Scenario: Invalidate stale native instructions
 
 - **GIVEN** the runtime retains a native conversation
 - **WHEN** the effective instruction or advertised tool set for the next turn
-  differs from the retained conversation
+  or shared memory differs from the retained conversation
 - **THEN** the retained native conversation is not reused
 - **AND** a fresh compatible context is initialized from bounded canonical
   history
@@ -900,29 +920,64 @@ normal Chat or Voice Chat.
 
 ### Requirement: Simple Context Window Management
 
-The shared conversation coordinator SHALL project recent eligible persisted
-history using a context budget based on the selected model's configured context
-size, independently of whether the new turn originates in normal Chat or Voice
-Chat.
+The shared conversation coordinator SHALL project a contiguous suffix of recent
+eligible persisted user turns using a context budget based on the selected
+model's configured context size, independently of whether the new turn
+originates in normal Chat or Voice Chat. It SHALL keep the system instruction,
+current user turn, and configured output reserve outside the droppable history.
+A historical user turn and its associated assistant response, when present,
+SHALL be included or omitted together. Exclusion from the projected context
+SHALL NOT delete or modify canonical conversation messages.
+The approximate input budget SHALL reserve an additional 10% of the configured
+context capacity beyond the configured output reserve. This headroom reduces
+estimation error but does not guarantee that native tokenization, tool schemas,
+or generation will fit.
 
 #### Scenario: Long session prompt construction
 
 - **GIVEN** persisted history is longer than the selected model's context budget
-- **WHEN** a new turn requires a reconstructed prompt or native-session
-  rehydration
-- **THEN** the coordinator includes the newest eligible messages that fit the
-  budget
-- **AND** omits older messages
-- **AND** does not perform automatic summarization yet.
+- **WHEN** a new turn requires a reconstructed prompt or native-session rehydration
+- **THEN** the coordinator includes the newest contiguous eligible user turns that fit the budget
+- **AND** omits the first non-fitting turn and all older turns rather than backfilling shorter old messages
+- **AND** does not split an associated user/assistant pair or perform automatic summarization.
 
 #### Scenario: Compatible incremental continuation
 
-- **GIVEN** the runtime retains compatible native conversation state for the
-  same canonical history
+- **GIVEN** the runtime retains compatible native conversation state for the same canonical history
 - **WHEN** either Chat screen submits the next turn
-- **THEN** context budgeting verifies compatibility
+- **THEN** context budgeting verifies compatibility with the projected contiguous suffix
 - **AND** the runtime receives only the new user content
 - **AND** unchanged persisted history is not sent again.
+
+#### Scenario: Recent historical turn does not fit
+
+- **GIVEN** the newest eligible historical user turn does not fit after the system instruction, current user turn, and output reserve
+- **WHEN** normal Chat or Voice Chat projects the next request
+- **THEN** no earlier history is substituted for that non-fitting turn
+- **AND** the stored session remains complete and available to the user.
+
+#### Scenario: Increase the configured context window
+
+- **GIVEN** older eligible turns were omitted from a smaller projected context
+- **WHEN** the user increases the selected model's effective context capacity
+- **THEN** projection can include additional consecutive older turns that now fit
+- **AND** it reads beyond a fixed recent-message cap when necessary using bounded persistence work
+- **AND** no omitted messages need to be restored or rewritten.
+
+#### Scenario: Additional input headroom moves the boundary
+
+- **GIVEN** a model has a configured context capacity and output reserve
+- **WHEN** Chat or Voice Chat selects historical turns for the next request
+- **THEN** the approximate input budget excludes the output reserve and a further 10% of context capacity, rounded up to whole tokens
+- **AND** the Chat indicator derives from that same selection
+- **AND** increasing context capacity can make older complete turns eligible again.
+
+#### Scenario: Sliding boundary invalidates a retained native conversation
+
+- **GIVEN** a LiteRT-LM conversation retains a different historical transcript than the newly projected suffix
+- **WHEN** the next turn is submitted
+- **THEN** the retained conversation is not reused
+- **AND** a fresh conversation receives the selected bounded history exactly once.
 
 ### Requirement: Model Input Capability Metadata
 
@@ -2962,7 +3017,14 @@ measurements independent from conversational generation overrides.
 
 The app SHALL distinguish a terminal assistant generation that contains
 reasoning but no usable final answer from a complete answer, cancellation, and
-failure.
+failure. When runtime token counts suggest that the configured total context
+capacity was reached, it SHALL present this as a possibility rather than a
+confirmed stop reason; otherwise it SHALL not attribute an unreported cause.
+An assistant turn stopped by the user's cancellation SHALL retain a distinct
+cancelled status, not an incomplete-generation status.
+For a non-blank answer whose native cumulative token count is at or above the
+configured context limit, the app SHALL preserve the answer and distinguish a
+possible incomplete-output warning from a confirmed failure or cancellation.
 
 #### Scenario: Generation ends after reasoning only
 
@@ -2979,6 +3041,7 @@ failure.
 - **WHEN** normal Chat renders it
 - **THEN** Chat shows an `Incomplete response` indication and controlled
   explanation
+- **AND** shows the explanation after the response content, including any partial reasoning and sources
 - **AND** shows partial reasoning only when `Show reasoning` is enabled
 - **AND** does not guess, repair, or silently replace generated facts.
 
@@ -2988,8 +3051,83 @@ failure.
   completion-status field and newer incomplete messages
 - **WHEN** the conversation is reconstructed after process death
 - **THEN** legacy messages default to complete
-- **AND** incomplete status and partial reasoning remain available
+- **AND** incomplete or cancelled status, optional display reason, and partial reasoning remain available
 - **AND** eligible completed history remains unchanged.
+
+#### Scenario: Incomplete response near the configured context capacity
+
+- **GIVEN** Chat has no final answer after terminal completion
+- **AND** the runtime's cumulative native conversation token count is near the effective total context capacity
+- **WHEN** Chat renders the incomplete assistant message
+- **THEN** it explains that the context may have filled before a final answer
+- **AND** suggests increasing the configured capacity, disabling reasoning, or starting a new conversation
+- **AND** places that guidance at the end of the response where automatic scrolling leaves it visible
+- **AND** restores that guidance when the incomplete conversation is reopened
+- **AND** does not claim that LiteRT-LM reported a specific stop reason.
+
+#### Scenario: Incomplete response without context-limit evidence
+
+- **GIVEN** Chat has no final answer after terminal completion
+- **AND** the cumulative native token count is missing or below the context capacity
+- **AND** no tool completed during the turn
+- **WHEN** Chat renders the incomplete assistant message
+- **THEN** it says the runtime did not report why generation stopped
+- **AND** it suggests retrying or starting a new chat rather than blaming the context limit.
+
+#### Scenario: Non-blank output reaches the configured context limit
+
+- **GIVEN** Chat receives non-blank final answer text
+- **AND** the runtime reports a cumulative native conversation token count at or above the configured context limit at completion
+- **WHEN** the assistant message is displayed or reopened
+- **THEN** Chat retains and displays the generated answer
+- **AND** shows a yellow notice after the answer explaining that it may be incomplete or unreliable
+- **AND** suggests increasing context, disabling reasoning, or starting a new chat
+- **AND** does not claim the runtime confirmed truncation
+- **AND** the non-blank output remains eligible for user-initiated content reporting.
+
+#### Scenario: Non-blank output below the configured context limit
+
+- **GIVEN** Chat receives non-blank final answer text
+- **AND** the native cumulative token count is unavailable or below the configured limit
+- **WHEN** the assistant message is displayed
+- **THEN** it remains a complete response without a capacity warning.
+
+#### Scenario: A tool completed but the model did not answer
+
+- **GIVEN** a tool completion event occurred in the turn
+- **AND** Chat has no final answer after terminal completion
+- **AND** the cumulative native token count does not indicate likely context exhaustion
+- **WHEN** Chat renders the incomplete assistant message
+- **THEN** it explains that a tool ran but the model did not provide a final answer
+- **AND** it does not present tool output as a generated answer or infer why the model stopped.
+
+#### Scenario: Existing incomplete message with tool sources
+
+- **GIVEN** a persisted incomplete message predates reason storage but has attached tool sources
+- **WHEN** Chat renders that message after an app update
+- **THEN** it may explain that a tool ran without a final answer
+- **AND** it does not rewrite the stored message or infer a context-limit cause.
+
+#### Scenario: User cancels while the model is loading
+
+- **GIVEN** Chat has persisted the user's turn and is loading the model
+- **WHEN** the user cancels generation
+- **THEN** the assistant turn is immediately marked cancelled and persisted
+- **AND** Chat shows a cancellation notice at the end of the turn rather than an incomplete-response warning.
+
+#### Scenario: User cancels during generation
+
+- **GIVEN** Chat is generating an assistant turn with possible partial output
+- **WHEN** the user cancels generation or leaves Chat
+- **THEN** partial output is preserved and the assistant turn is marked cancelled immediately
+- **AND** the cancelled status and notice remain after reopening the conversation
+- **AND** no context-exhaustion warning is attributed to the cancelled turn.
+
+#### Scenario: Historical turn without cancellation status
+
+- **GIVEN** a previously saved assistant turn has no explicit cancellation status
+- **WHEN** Chat reconstructs its history
+- **THEN** Chat does not retroactively claim that the user cancelled it.
 
 ### Requirement: Best-Available Final Answer Guidance
 
@@ -3679,9 +3817,9 @@ or arbitrary user-defined executable functions.
 
 ### Requirement: Calculator capability, disclosure, and privacy
 
-The app SHALL persist calculator enablement locally, keep it disabled by default,
-explain its supported numerical scope and local execution, and advertise it only
-to individually validated models.
+The app SHALL persist calculator enablement locally, keep it enabled by default
+until the user explicitly disables it, explain its supported numerical scope
+and local execution, and advertise it only to individually validated models.
 
 #### Scenario: Selected model cannot use calculator
 
@@ -3698,6 +3836,13 @@ to individually validated models.
 - **THEN** the app explains that expressions and results are processed on-device
 - **AND** no provider credential or network service is required
 - **AND** calculation protocol and intermediate values are not persisted as visible conversation messages.
+
+#### Scenario: Preserve an explicit calculator opt-out
+
+- **GIVEN** the user explicitly disabled the calculator in a prior app version
+- **WHEN** the updated preferences are loaded
+- **THEN** the calculator remains disabled
+- **AND** the user can enable it from the Tools tab.
 
 ### Requirement: Branded Application Entry
 
@@ -4645,3 +4790,105 @@ The Assistant configuration Tools tab SHALL identify its tool controls and model
 - **WHEN** the user opens a tool's configuration action in Assistant configuration
 - **THEN** the application opens that provider's configuration flow in context
 - **AND** returning to the Tools tab shows the updated setup status.
+
+### Requirement: Explicit Shared Conversation Memory
+
+The application SHALL persist an ordered, locally editable memory shared by
+normal Chat and Voice Chat across sessions. It SHALL allow direct user edits and
+offer a model-only memory-write tool, enabled by default for eligible models,
+with instructions to call it only in response to an explicit request to
+remember. It SHALL cap editable context shared with mode-specific prompts and
+remove oldest whole memory entries as needed, without rotating prompts.
+
+#### Scenario: Save a memory with available space
+
+- **GIVEN** an explicit request to remember a bounded fact or preference
+- **WHEN** an eligible model calls the memory-write tool or the user adds it in
+  the Context screen
+- **THEN** the app stores a normalized entry locally
+- **AND** later turns of either mode receive it in context
+- **AND** the app reports what was saved.
+
+#### Scenario: Rotate oldest entries at the shared limit
+
+- **GIVEN** ordered memory entries and mode-specific prompts
+- **WHEN** a new or edited entry would exceed the shared editable-context limit
+- **THEN** the app removes oldest complete entries until the result fits
+- **AND** reports which entries were removed
+- **AND** rejects an entry that cannot fit even when memory is otherwise empty.
+
+#### Scenario: Edit prompts without rotating them
+
+- **WHEN** the user changes a mode-specific prompt in the Context screen
+- **THEN** that prompt retains a simple length limit and is never automatically
+  rotated
+- **AND** any resulting memory eviction is disclosed before the edit is applied
+- **AND** the other mode's prompt remains unchanged.
+
+#### Scenario: Inspect and manage memory
+
+- **WHEN** the user opens the Context screen
+- **THEN** they can view memory entries and combined usage with the prompts
+- **AND** they can add, edit, or remove individual entries
+- **AND** they can clear all entries without deleting prompts or conversations.
+
+#### Scenario: Keep memory local and model-only
+
+- **WHEN** the app offers the memory-write tool
+- **THEN** it is available only to a selected model with verified tool capability
+- **AND** the persisted memory-write switch must be enabled
+- **AND** the widget consumer cannot invoke it
+- **AND** no memory or prompt content is sent to a remote memory service.
+
+#### Scenario: Disable model memory writes
+
+- **GIVEN** the user disables the memory-write switch on the Tools tab
+- **WHEN** an eligible model starts a later Chat or Voice Chat turn
+- **THEN** `memory_write` is neither advertised nor executable
+- **AND** previously saved memory remains in context
+- **AND** the user can still view, edit, and delete memory on the Context tab.
+
+#### Scenario: Explain where memories are managed
+
+- **WHEN** the user reviews the memory-write switch on the Tools tab
+- **THEN** it starts enabled unless the user previously disabled it
+- **AND** the UI directs the user to the Context tab to view and edit entries.
+
+### Requirement: Visible Chat Context History Boundary
+
+Normal Chat SHALL indicate which older canonical messages are outside the
+bounded textual history projected for the next response. The indication SHALL
+derive from the same inclusion decision used for generation, not a separate
+visual estimate, and SHALL move when that decision changes. It SHALL NOT be
+stored as a conversation message or imply that historical media are replayed.
+
+#### Scenario: Show the boundary inside loaded history
+
+- **GIVEN** older excluded turns and the oldest included turn are both loaded in the Chat timeline
+- **WHEN** the conversation is shown
+- **THEN** one accessible, non-error-styled divider appears between them
+- **AND** its label explains that earlier messages are outside the context for the next response
+- **AND** all messages remain visible in their original order.
+
+#### Scenario: Boundary precedes the loaded UI page
+
+- **GIVEN** some older turns are outside context but the exact inclusion boundary is above the currently loaded message page
+- **WHEN** Chat opens the conversation
+- **THEN** a compact indication near the older-history control says that some older messages are outside context
+- **AND** Chat does not place a divider at an inaccurate position
+- **AND** loading the relevant older page reveals the exact divider.
+
+#### Scenario: Context settings or draft change
+
+- **GIVEN** Chat displays a context boundary for the selected session
+- **WHEN** the selected model, effective context, instruction or memory, or draft user request changes
+- **THEN** Chat recomputes the boundary for the next response from the authoritative projection
+- **AND** increasing available context can move the boundary toward older messages or remove it
+- **AND** previously excluded messages remain stored without restoration.
+
+#### Scenario: Freeze the submitted request's boundary while generating
+
+- **GIVEN** a user turn is in flight
+- **WHEN** Chat presents its context indication during generation
+- **THEN** the indication reflects the history selected for that submitted request
+- **AND** after the turn ends it may recalculate for the next response.

@@ -49,6 +49,41 @@ class ChatViewModelTest {
         )
 
     @Test
+    fun `context boundary moves when configured context increases without deleting history`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val session = store.ensureSession()
+        val older = store.appendMessage(session.id, ChatRole.User, "o".repeat(80))
+        store.appendMessage(session.id, ChatRole.Assistant, "a".repeat(80))
+        val newer = store.appendMessage(session.id, ChatRole.User, "n".repeat(80))
+        store.appendMessage(session.id, ChatRole.Assistant, "b".repeat(80))
+        val small = inferenceConfig.copy(contextTokens = 80, promptReserveTokens = 16)
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = emptyList()),
+            initialModel = model,
+            inferenceConfig = small,
+            systemPrompt = "s",
+            conversationTurnSettingsProvider = { ConversationTurnSettings("s") },
+            sessionStore = store,
+            scope = this,
+        )
+
+        advanceTimeBy(151)
+        runCurrent()
+        assertEquals(newer.id, viewModel.uiState.value.oldestIncludedContextMessageId)
+        assertTrue(viewModel.uiState.value.hasOmittedContextHistory)
+
+        viewModel.onModelStartupState(
+            ModelStartupState.Available(model, small.copy(contextTokens = 220)),
+        )
+        advanceTimeBy(151)
+        runCurrent()
+        assertEquals(older.id, viewModel.uiState.value.oldestIncludedContextMessageId)
+        assertFalse(viewModel.uiState.value.hasOmittedContextHistory)
+        assertEquals(4, store.getMessages(session.id).size)
+        viewModel.close()
+    }
+
+    @Test
     fun `keeps submit disabled until model is available`() {
         val viewModel =
             ChatViewModel(
@@ -334,6 +369,10 @@ class ChatViewModelTest {
         assertEquals(0, engine.unloadCalls)
         assertFalse(viewModel.uiState.value.isGenerating)
         assertFalse(viewModel.uiState.value.isLoadingModel)
+        assertEquals(
+            AssistantCompletionStatus.Cancelled,
+            (viewModel.uiState.value.messages.last().content as MessageContent.TextPrompt).completionStatus,
+        )
     }
 
     @Test
@@ -364,6 +403,63 @@ class ChatViewModelTest {
                 .text,
         )
         assertEquals("hello", viewModel.uiState.value.prompt)
+        assertEquals(
+            AssistantCompletionStatus.Cancelled,
+            (viewModel.uiState.value.messages.last().content as MessageContent.TextPrompt).completionStatus,
+        )
+    }
+
+    @Test
+    fun `cancel during model loading persists a cancelled assistant turn immediately`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val engine = LoadFailingEngine("unused")
+        val viewModel =
+            ChatViewModel(
+                engine = engine,
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("hello")
+        viewModel.submitPrompt()
+        runCurrent()
+        assertTrue(engine.loadStarted.isCompleted)
+        assertTrue(viewModel.uiState.value.isLoadingModel)
+
+        viewModel.cancelGeneration()
+
+        val content = viewModel.uiState.value.messages.last().content as MessageContent.TextPrompt
+        assertEquals(AssistantCompletionStatus.Cancelled, content.completionStatus)
+        val persisted = store.getMessages(store.listSessions().first().id).last().content as MessageContent.TextPrompt
+        assertEquals(AssistantCompletionStatus.Cancelled, persisted.completionStatus)
+    }
+
+    @Test
+    fun `cancel after reasoning starts remains cancelled when chat is reopened`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val viewModel =
+            ChatViewModel(
+                engine = SlowReasoningEngine(),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("hello")
+        viewModel.submitPrompt()
+        runCurrent()
+        viewModel.cancelGeneration()
+
+        val immediate = viewModel.uiState.value.messages.last().content as MessageContent.TextPrompt
+        assertEquals(AssistantCompletionStatus.Cancelled, immediate.completionStatus)
+        assertEquals("partial reasoning", immediate.reasoningText)
+        viewModel.onEnteringChat()
+        val reopened = viewModel.uiState.value.messages.last().content as MessageContent.TextPrompt
+        assertEquals(AssistantCompletionStatus.Cancelled, reopened.completionStatus)
+        assertEquals("partial reasoning", reopened.reasoningText)
     }
 
     @Test
@@ -602,7 +698,7 @@ class ChatViewModelTest {
             ChatViewModel(
                 engine = engine,
                 initialModel = model,
-                inferenceConfig = inferenceConfig,
+                inferenceConfig = inferenceConfig.copy(promptReserveTokens = 16),
                 systemPrompt = "Be useful.",
                 sessionStore = store,
                 scope = this,
@@ -787,7 +883,7 @@ class ChatViewModelTest {
             ChatViewModel(
                 engine = engine,
                 initialModel = model.copy(inputCapabilities = ModelInputCapabilities(audio = true)),
-                inferenceConfig = inferenceConfig,
+                inferenceConfig = inferenceConfig.copy(promptReserveTokens = 16),
                 systemPrompt = "Be useful.",
                 sessionStore = store,
                 scope = this,
@@ -1093,6 +1189,156 @@ class ChatViewModelTest {
         assertEquals("", content.text)
         assertEquals("unfinished reasoning", content.reasoningText)
         assertEquals(AssistantCompletionStatus.Incomplete, content.completionStatus)
+        assertEquals(null, content.incompleteReason)
+    }
+
+    @Test
+    fun `identifies likely context capacity only when incomplete generation approaches its limit`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val metrics = com.jesjobom.ararai.engine.GenerationMetrics(10, 2, 20.0, 3, 30.0, contextTokenCount = 128)
+        val viewModel =
+            ChatViewModel(
+                engine = EventStreamingEngine(listOf(GenerationEvent.Metrics(metrics), GenerationEvent.Completed)),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("answer")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        val content = store.getMessages(store.listSessions().first().id).last().content as MessageContent.TextPrompt
+        assertEquals(AssistantCompletionStatus.Incomplete, content.completionStatus)
+        assertEquals(AssistantIncompleteReason.ContextCapacityLikely, content.incompleteReason)
+    }
+
+    @Test
+    fun `warns on nonblank output at native context capacity without discarding the answer`() = runTest {
+        for (count in listOf(128, 157)) {
+            val store = InMemoryChatSessionStore()
+            val metrics = com.jesjobom.ararai.engine.GenerationMetrics(10, 2, 20.0, 3, 30.0, contextTokenCount = count)
+            val viewModel = ChatViewModel(
+                engine = EventStreamingEngine(
+                    listOf(GenerationEvent.Token("Thell"), GenerationEvent.Metrics(metrics), GenerationEvent.Completed),
+                ),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                scope = this,
+            )
+
+            viewModel.onPromptChanged("answer")
+            viewModel.submitPrompt()
+            runCurrent()
+
+            val content = store.getMessages(store.listSessions().first().id).last().content as MessageContent.TextPrompt
+            assertEquals("Thell", content.text)
+            assertEquals(AssistantCompletionStatus.PossiblyIncomplete, content.completionStatus)
+            assertEquals(AssistantIncompleteReason.ContextCapacityLikely, content.incompleteReason)
+            viewModel.close()
+        }
+    }
+
+    @Test
+    fun `does not warn on nonblank output below native context capacity`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val metrics = com.jesjobom.ararai.engine.GenerationMetrics(10, 2, 20.0, 3, 30.0, contextTokenCount = 127)
+        val viewModel = ChatViewModel(
+            engine = EventStreamingEngine(
+                listOf(GenerationEvent.Token("answer"), GenerationEvent.Metrics(metrics), GenerationEvent.Completed),
+            ),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            sessionStore = store,
+            scope = this,
+        )
+
+        viewModel.onPromptChanged("answer")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        val content = store.getMessages(store.listSessions().first().id).last().content as MessageContent.TextPrompt
+        assertEquals(AssistantCompletionStatus.Complete, content.completionStatus)
+        assertEquals(null, content.incompleteReason)
+    }
+
+    @Test
+    fun `warns from native count even when benchmark metrics are unavailable`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val viewModel = ChatViewModel(
+            engine = EventStreamingEngine(
+                listOf(
+                    GenerationEvent.Token("Thell"),
+                    GenerationEvent.ConversationTokenCount(128),
+                    GenerationEvent.Completed,
+                ),
+            ),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            sessionStore = store,
+            scope = this,
+        )
+
+        viewModel.onPromptChanged("answer")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        val content = store.getMessages(store.listSessions().first().id).last().content as MessageContent.TextPrompt
+        assertEquals(AssistantCompletionStatus.PossiblyIncomplete, content.completionStatus)
+        assertEquals(AssistantIncompleteReason.ContextCapacityLikely, content.incompleteReason)
+    }
+
+    @Test
+    fun `does not blame context when an incomplete generation is below capacity`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val metrics = com.jesjobom.ararai.engine.GenerationMetrics(10, 64, 20.0, 63, 30.0, contextTokenCount = 94)
+        val viewModel =
+            ChatViewModel(
+                engine = EventStreamingEngine(listOf(GenerationEvent.Metrics(metrics), GenerationEvent.Completed)),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("answer")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        val content = store.getMessages(store.listSessions().first().id).last().content as MessageContent.TextPrompt
+        assertEquals(AssistantCompletionStatus.Incomplete, content.completionStatus)
+        assertEquals(null, content.incompleteReason)
+    }
+
+    @Test
+    fun `identifies a completed tool call without a final answer`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val metrics = com.jesjobom.ararai.engine.GenerationMetrics(10, 64, 20.0, 30, 30.0)
+        val viewModel =
+            ChatViewModel(
+                engine =
+                EventStreamingEngine(
+                    listOf(
+                        GenerationEvent.ToolFinished("web_search"),
+                        GenerationEvent.Metrics(metrics),
+                        GenerationEvent.Completed,
+                    ),
+                ),
+                initialModel = model,
+                inferenceConfig = inferenceConfig,
+                sessionStore = store,
+                scope = this,
+            )
+
+        viewModel.onPromptChanged("answer")
+        viewModel.submitPrompt()
+        runCurrent()
+
+        val content = store.getMessages(store.listSessions().first().id).last().content as MessageContent.TextPrompt
+        assertEquals(AssistantCompletionStatus.Incomplete, content.completionStatus)
+        assertEquals(AssistantIncompleteReason.AfterToolCall, content.incompleteReason)
     }
 
     @Test
@@ -1115,6 +1361,7 @@ class ChatViewModelTest {
         assertEquals("", content.text)
         assertEquals("", content.reasoningText)
         assertEquals(AssistantCompletionStatus.Incomplete, content.completionStatus)
+        assertEquals(null, content.incompleteReason)
     }
 
     @Test
@@ -1512,6 +1759,17 @@ class ChatViewModelTest {
         override suspend fun unload() {
             unloadCalls += 1
         }
+    }
+
+    private class SlowReasoningEngine : LocalLlmEngine {
+        override suspend fun load(model: LocalModel, config: InferenceConfig) = Unit
+
+        override fun generate(request: PromptRequest): Flow<GenerationEvent> = flow {
+            emit(GenerationEvent.ReasoningToken("partial reasoning"))
+            kotlinx.coroutines.delay(Long.MAX_VALUE)
+        }
+
+        override suspend fun unload() = Unit
     }
 
     private class BatchedStreamingEngine : LocalLlmEngine {

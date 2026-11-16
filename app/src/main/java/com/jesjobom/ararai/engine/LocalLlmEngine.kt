@@ -154,6 +154,8 @@ sealed interface GenerationEvent {
         val value: GenerationMetrics,
     ) : GenerationEvent
 
+    data class ConversationTokenCount(val value: Int) : GenerationEvent
+
     data class Failed(
         val message: String,
         val kind: GenerationFailureKind = GenerationFailureKind.Unexpected,
@@ -186,4 +188,5 @@ data class GenerationMetrics(
     val prefillTokensPerSecond: Double,
     val decodeTokenCount: Int,
     val decodeTokensPerSecond: Double,
+    val contextTokenCount: Int? = null,
 )

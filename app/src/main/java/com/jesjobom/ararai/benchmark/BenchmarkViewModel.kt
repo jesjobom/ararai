@@ -96,6 +96,7 @@ class BenchmarkViewModel(
                             }
                             is GenerationEvent.ReasoningToken -> Unit
                             is GenerationEvent.Metrics -> runtimeMetrics = event.value
+                            is GenerationEvent.ConversationTokenCount -> Unit
                             is GenerationEvent.ToolStarted,
                             is GenerationEvent.ToolFinished,
                             -> Unit

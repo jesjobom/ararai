@@ -17,8 +17,13 @@ class GeneratedContentReportProjectorTest {
     private val metadata = ReportTechnicalMetadata("1.0", "pt-BR", "gemma", "litert-lm")
 
     @Test
-    fun `only completed nonblank assistant text is reportable`() {
+    fun `completed or capacity warned nonblank assistant text is reportable`() {
         assertTrue(projector.isReportable(message("answer", ChatRole.Assistant, text("result"))))
+        assertTrue(
+            projector.isReportable(
+                message("warned", ChatRole.Assistant, text("Thell", AssistantCompletionStatus.PossiblyIncomplete)),
+            ),
+        )
         assertFalse(projector.isReportable(message("user", ChatRole.User, text("result"))))
         assertFalse(projector.isReportable(message("blank", ChatRole.Assistant, text("  "))))
         assertFalse(

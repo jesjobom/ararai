@@ -279,6 +279,15 @@ internal fun ChatScreen(
                         contentPadding = PaddingValues(vertical = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
+                        val boundaryLoaded = state.messages.any {
+                            it.id == state.oldestIncludedContextMessageId
+                        }
+                        val currentUserId =
+                            if (state.isGenerating && state.oldestIncludedContextMessageId == null) {
+                                state.messages.lastOrNull { it.role == ChatRole.User }?.id
+                            } else {
+                                null
+                            }
                         if (state.hasOlderMessages) {
                             item(key = "load-older-messages") {
                                 TextButton(
@@ -296,7 +305,22 @@ internal fun ChatScreen(
                                 }
                             }
                         }
+                        val boundaryAboveLoadedPage =
+                            state.hasOmittedContextHistory &&
+                                state.hasOlderMessages &&
+                                state.oldestIncludedContextMessageId != null &&
+                                !boundaryLoaded
+                        if (boundaryAboveLoadedPage) {
+                            item(key = "context-boundary-above-page") {
+                                ChatContextBoundary(R.string.chat_context_older_omitted)
+                            }
+                        }
                         items(state.messages) { message ->
+                            if (state.hasOmittedContextHistory &&
+                                (message.id == state.oldestIncludedContextMessageId || message.id == currentUserId)
+                            ) {
+                                ChatContextBoundary(R.string.chat_context_boundary)
+                            }
                             val isStreaming = state.isGenerating && message.id == state.messages.lastOrNull()?.id
                             MessageRow(
                                 message = message,
@@ -316,6 +340,13 @@ internal fun ChatScreen(
                                     null
                                 },
                             )
+                        }
+                        if (state.hasOmittedContextHistory && state.oldestIncludedContextMessageId == null &&
+                            currentUserId == null
+                        ) {
+                            item(key = "context-boundary-all-omitted") {
+                                ChatContextBoundary(R.string.chat_context_all_omitted)
+                            }
                         }
                         item(key = "message-list-bottom") {
                             Box(
@@ -495,7 +526,10 @@ internal fun ChatScreen(
 private fun ChatMessage.isReportable(): Boolean {
     val text = content as? MessageContent.TextPrompt ?: return false
     return role == ChatRole.Assistant &&
-        text.completionStatus == AssistantCompletionStatus.Complete &&
+        (
+            text.completionStatus == AssistantCompletionStatus.Complete ||
+                text.completionStatus == AssistantCompletionStatus.PossiblyIncomplete
+            ) &&
         text.text.isNotBlank()
 }
 
