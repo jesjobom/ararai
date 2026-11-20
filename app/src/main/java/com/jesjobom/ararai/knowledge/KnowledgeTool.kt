@@ -7,6 +7,7 @@ data class ToolRequest(
     val query: String,
     val language: String = "en",
     val focus: String = query,
+    val evidencePolicy: WebEvidencePolicy = WebEvidencePolicy.Widget,
 )
 
 data class KnowledgeSource(

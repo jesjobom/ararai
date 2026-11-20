@@ -90,4 +90,56 @@ class FocusedWebEvidenceTest {
             ),
         )
     }
+
+    @Test
+    fun `Chat budgets the complete escaped model response and scales beyond widget limits`() {
+        val candidates = listOf(
+            FocusedEvidenceCandidate(
+                "Quoted source",
+                "https://example.com/quoted",
+                listOf("""A "quoted" \ path """ + "evidence ".repeat(800)),
+            ),
+        )
+        val small = normalizer.normalize(WebSearchProvider.Exa, "en", candidates, WebEvidencePolicy.Chat(2_048))
+            as ToolResult.Success
+        val large = normalizer.normalize(WebSearchProvider.Exa, "en", candidates, WebEvidencePolicy.Chat(8_192))
+            as ToolResult.Success
+        val widget = normalizer.normalize(WebSearchProvider.Exa, "en", candidates) as ToolResult.Success
+
+        assertTrue(WebEvidencePolicy.modelSuccessJson(small.untrustedContext).length <= 2_048)
+        assertTrue(WebEvidencePolicy.modelSuccessJson(large.untrustedContext).length <= 8_192)
+        assertTrue(large.untrustedContext.length > 1_800)
+        assertTrue(large.webEvidence.single().excerpts.single().length > 500)
+        assertTrue(
+            small.webEvidence.single().excerpts.single().length < large.webEvidence.single().excerpts.single().length,
+        )
+        assertTrue(widget.untrustedContext.length <= 1_800)
+        assertTrue(widget.webEvidence.single().excerpts.single().length <= 500)
+        assertEquals(small.sources, small.webEvidence.map { it.source })
+        assertEquals(large.sources, large.webEvidence.map { it.source })
+    }
+
+    @Test
+    fun `Chat omits source metadata when no meaningful excerpt fits and never splits emoji`() {
+        val oversizedUrl = "https://example.com/" + "a".repeat(180)
+        assertEquals(
+            ToolResult.Failure(ToolFailureReason.NoResults),
+            normalizer.normalize(
+                WebSearchProvider.Exa,
+                "en",
+                listOf(FocusedEvidenceCandidate("Long", oversizedUrl, listOf("evidence"))),
+                WebEvidencePolicy.Chat(128),
+            ),
+        )
+        val emoji = "\uD83D\uDE80".repeat(2_000)
+        val result = normalizer.normalize(
+            WebSearchProvider.Exa,
+            "en",
+            listOf(FocusedEvidenceCandidate("Emoji", "https://example.com/emoji", listOf(emoji))),
+            WebEvidencePolicy.Chat(2_048),
+        ) as ToolResult.Success
+        val excerpt = result.webEvidence.single().excerpts.single()
+        assertFalse(excerpt.last().isHighSurrogate())
+        assertTrue(WebEvidencePolicy.modelSuccessJson(result.untrustedContext).length <= 2_048)
+    }
 }

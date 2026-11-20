@@ -15,6 +15,7 @@ import com.jesjobom.ararai.knowledge.KnowledgeTool
 import com.jesjobom.ararai.knowledge.ToolFailureReason
 import com.jesjobom.ararai.knowledge.ToolRequest
 import com.jesjobom.ararai.knowledge.ToolResult
+import com.jesjobom.ararai.knowledge.WebEvidencePolicy
 import com.jesjobom.ararai.knowledge.WebSearchPreferences
 import com.jesjobom.ararai.knowledge.WebSearchResultsRequest
 import com.jesjobom.ararai.knowledge.WebSearchResultsResult
@@ -369,6 +370,9 @@ internal fun webSearchApplicationTool(
             }
     },
     encodeResult = ::encodeKnowledgeResult,
+    prepareRequest = { request, invocation ->
+        request.copy(evidencePolicy = WebEvidencePolicy.Chat(requireNotNull(invocation.modelContextTokens)))
+    },
 )
 
 internal fun webSearchResultsApplicationTool(

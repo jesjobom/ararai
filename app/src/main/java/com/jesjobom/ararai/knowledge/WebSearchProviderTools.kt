@@ -94,6 +94,7 @@ class TavilyKnowledgeTool(
             normalizer.normalize(
                 provider = WebSearchProvider.Tavily,
                 language = request.language,
+                policy = request.evidencePolicy,
                 candidates =
                 pages.map { page ->
                     FocusedEvidenceCandidate(
@@ -155,8 +156,7 @@ class ExaKnowledgeTool(
                                             addProperty("query", request.focus.trim())
                                             addProperty(
                                                 "maxCharacters",
-                                                FocusedWebEvidenceNormalizer.MAX_EXCERPT_LENGTH *
-                                                    FocusedWebEvidenceNormalizer.MAX_EXCERPTS_PER_SOURCE,
+                                                request.evidencePolicy.maxProviderHighlightChars,
                                             )
                                         },
                                     )
@@ -171,6 +171,7 @@ class ExaKnowledgeTool(
             normalizer.normalize(
                 provider = WebSearchProvider.Exa,
                 language = request.language,
+                policy = request.evidencePolicy,
                 candidates =
                 results.mapNotNull { element ->
                     element.takeIf { it.isJsonObject }?.asJsonObject?.let { item ->

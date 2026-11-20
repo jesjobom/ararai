@@ -18,21 +18,34 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
+data class WebSearchResultMetrics(
+    val resultChars: Int,
+    val budgetChars: Int,
+    val contextTokens: Int,
+    val sourceCount: Int,
+)
+
 class WebSearchOpenApiTool(
     dispatcher: ApplicationToolDispatcher,
     verifiedModelToolIds: Set<String>,
     val displayName: String,
+    contextTokens: Int = 2_048,
+    onResultMetrics: (WebSearchResultMetrics) -> Unit = {},
 ) : OpenApiTool {
     constructor(
         knowledgeTool: KnowledgeTool,
         languageProvider: () -> String = { Locale.getDefault().language },
+        contextTokens: Int = 2_048,
+        onResultMetrics: (WebSearchResultMetrics) -> Unit = {},
     ) : this(
         dispatcher = singleWebSearchDispatcher(knowledgeTool, languageProvider),
         verifiedModelToolIds = setOf(WEB_SEARCH_TOOL_NAME),
         displayName = knowledgeTool.displayName,
+        contextTokens = contextTokens,
+        onResultMetrics = onResultMetrics,
     )
 
-    private val turn = WebSearchToolTurn(dispatcher, verifiedModelToolIds)
+    private val turn = WebSearchToolTurn(dispatcher, verifiedModelToolIds, contextTokens, onResultMetrics)
 
     override fun getToolDescriptionJsonString(): String = WebSearchToolTurn.TOOL_DESCRIPTION
 
@@ -46,16 +59,23 @@ class WebSearchOpenApiTool(
 internal class WebSearchToolTurn(
     private val dispatcher: ApplicationToolDispatcher,
     private val verifiedModelToolIds: Set<String>,
+    contextTokens: Int = 2_048,
+    private val onResultMetrics: (WebSearchResultMetrics) -> Unit = {},
 ) {
     constructor(
         knowledgeTool: KnowledgeTool,
         languageProvider: () -> String = { Locale.getDefault().language },
+        contextTokens: Int = 2_048,
+        onResultMetrics: (WebSearchResultMetrics) -> Unit = {},
     ) : this(
         dispatcher = singleWebSearchDispatcher(knowledgeTool, languageProvider),
         verifiedModelToolIds = setOf(WEB_SEARCH_TOOL_NAME),
+        contextTokens = contextTokens,
+        onResultMetrics = onResultMetrics,
     )
 
     private val invocationCount = AtomicInteger(0)
+    private val evidencePolicy = WebEvidencePolicy.Chat(contextTokens)
     private val capturedSources = AtomicReference<List<KnowledgeSource>>(emptyList())
     private val observer = AtomicReference<(ApplicationToolExecutionEvent) -> Unit>({})
 
@@ -82,6 +102,7 @@ internal class WebSearchToolTurn(
                             consumer = ApplicationToolConsumer.Model,
                             argumentsJson = paramsJsonString,
                             verifiedModelToolIds = verifiedModelToolIds,
+                            modelContextTokens = evidencePolicy.contextTokens,
                         ),
                     )
                 }
@@ -104,23 +125,37 @@ internal class WebSearchToolTurn(
     fun consumeCapturedSources(): List<KnowledgeSource> = capturedSources.getAndSet(emptyList())
 
     private fun serializeObserved(result: ToolResult): String {
-        when (result) {
-            is ToolResult.Success ->
-                observer.get().invoke(ApplicationToolExecutionEvent.Succeeded(result.sources.toList()))
-            is ToolResult.Failure ->
-                observer.get().invoke(ApplicationToolExecutionEvent.Failed(result.reason))
+        val boundedResult = if (
+            result is ToolResult.Success &&
+            !evidencePolicy.fits(result.untrustedContext)
+        ) {
+            ToolResult.Failure(ToolFailureReason.NoResults)
+        } else {
+            result
         }
-        return when (result) {
+        when (boundedResult) {
+            is ToolResult.Success ->
+                observer.get().invoke(ApplicationToolExecutionEvent.Succeeded(boundedResult.sources.toList()))
+            is ToolResult.Failure ->
+                observer.get().invoke(ApplicationToolExecutionEvent.Failed(boundedResult.reason))
+        }
+        return when (boundedResult) {
             is ToolResult.Success -> {
                 capturedSources.updateAndGet { existing ->
-                    (existing + result.sources).distinctBy(KnowledgeSource::canonicalUrl)
+                    (existing + boundedResult.sources).distinctBy(KnowledgeSource::canonicalUrl)
                 }
-                JsonObject().apply {
-                    addProperty("ok", true)
-                    addProperty("untrustedReference", result.untrustedContext)
-                }.toString()
+                WebEvidencePolicy.modelSuccessJson(boundedResult.untrustedContext).also { response ->
+                    onResultMetrics(
+                        WebSearchResultMetrics(
+                            resultChars = response.length,
+                            budgetChars = evidencePolicy.maxResultChars,
+                            contextTokens = evidencePolicy.contextTokens,
+                            sourceCount = boundedResult.sources.size,
+                        ),
+                    )
+                }
             }
-            is ToolResult.Failure -> failureJson(result.reason.code(), result.reason.message())
+            is ToolResult.Failure -> failureJson(boundedResult.reason.code(), boundedResult.reason.message())
         }
     }
 

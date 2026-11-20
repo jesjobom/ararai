@@ -313,8 +313,11 @@ enabled, Exa runs first and Tavily is used only after a controlled provider
 failure. Both implement the same
 model-visible `web_search` schema and return untrusted query-focused excerpts,
 not a provider-generated final answer: at most three HTTPS sources, two
-500-character excerpts per source, 1,800 characters for the complete reference
-envelope, and two calls per user turn. Tavily and Exa remain experimental until
+excerpts per source, and two calls per user turn. Each Chat call independently
+budgets its complete serialized result at four characters per token for 25% of
+the selected model's total context window (2,048 characters at 2,048 tokens).
+Widget web-search content retains its fixed 500-character excerpt and
+1,800-character reference limits. Tavily and Exa remain experimental until
 the checked-in comparison produces an explicit approval verdict. Release builds
 do not advertise unapproved web search to the model. See
 `docs/web-search-providers.md`.

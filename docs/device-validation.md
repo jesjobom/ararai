@@ -1,5 +1,23 @@
 # ArarAI physical-device validation
 
+## 2026-11-20 — context-scaled Chat web-search evidence on SM-S901E
+
+With the retained debug APK (`versionCode=29913385`) and Gemma 4 E4B set to
+4,096 context tokens, a synthetic Chat web search returned a complete serialized
+model-facing result of 3,491 characters against the 4,096-character per-call
+budget, with three sources. LiteRT-LM completed at 2,758/4,096 context tokens;
+the answer and source links were visible without a possible-incomplete-response
+notice. The earlier 2,048-token run reached its 2,048-character evidence budget
+and showed the possible-incomplete notice after native context usage exceeded
+capacity. The 2,048-token original setting was restored and all three synthetic
+web-search sessions were removed individually. The app was returned to the
+launcher; its original first-install timestamp was preserved. The model's final
+answer contained an unrelated factual inconsistency ("Android 7" versus its
+sources' Android 17), so this validates evidence sizing and diagnostics, not
+answer accuracy. See
+`openspec/changes/archive/2026-11-20-scale-chat-web-search-evidence-budget/evidence/2026-11-16-sm-s901e-check.md`
+for details.
+
 ## 2026-11-16 — possible context-capacity warning on SM-S901E
 
 Debug APK SHA-256 `843599db0958c6ebfa9ad19950fdfff2e015f605ed6a5a89c90624782721e1a1`
@@ -28,8 +46,9 @@ The debug APK for `show-chat-context-history-boundary` was installed with
 `adb install -r`, preserving the original first-install timestamp. A focused
 synthetic Compose test and a pre-existing Compose control test both stopped
 before assertions with `No compose hierarchies found in the app` while the
-device was at its secure lock screen. The divider's physical-device behavior
-remains unverified; rerun after unlocking the device. See the change's
+device was at its secure lock screen. JJ subsequently confirmed a manual
+in-history divider check on 2026-11-16; the original instrumentation attempt
+remains unverified. See the archived change's
 `evidence/2026-11-15-sm-s901e-check.md` for the APK identity and observations.
 
 ## 2026-11-15 — web-search context-limit experiment on SM-S901E
@@ -1363,6 +1382,17 @@ measurements remain release-validation checks rather than claims of this change.
   history and the voice loop returns to a valid state.
 
 ## Experimental focused web search
+
+- For the context-scaled Chat evidence policy, compare a 2,048-token and a
+  larger configured context on the same synthetic question. Record the complete
+  serialized `web_search` success-result character count for each call; it must
+  fit `floor(contextTokens × 0.25) × 4`, including JSON escaping and framing.
+  Confirm that two calls in one turn each receive their own allowance, while
+  widget `web_search_content` retains its fixed limits. Restore the original
+  context setting and remove any synthetic conversation afterward.
+- If a larger evidence result exhausts native context, confirm the existing
+  incomplete-response guidance remains visible. Do not run connected Android
+  tests on the retained SM-S901E.
 
 - Use a debug build. Confirm Tavily and Exa begin unconfigured and disabled,
   the token field is obscured, and a failed verification does not select the

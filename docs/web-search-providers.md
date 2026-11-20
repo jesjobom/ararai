@@ -58,13 +58,21 @@ Provider output is normalized as untrusted external reference data:
 
 - maximum three distinct canonical HTTPS sources;
 - maximum two excerpts per source;
-- maximum 500 characters per excerpt;
-- maximum 1,800 characters including source framing;
+- Chat: each complete serialized model-visible `web_search` success result,
+  including JSON escaping and source framing, fits `floor(contextTokens × 0.25) × 4`
+  characters independently per call; no separate 500-character excerpt ceiling;
+- widget `web_search_content`: unchanged 500 characters per excerpt and
+  1,800-character reference envelope;
 - whitespace and duplicate normalization;
 - Unicode-safe truncation;
 - provider, title, canonical URL, language, and retrieval timestamp retained as
   bounded source metadata; and
 - maximum two `web_search` calls per user turn.
+
+The Chat allowance is based on configured total context, not estimated remaining
+space. A search can still fill the native context; the existing incomplete-response
+warning remains the recovery path. If even one source with an excerpt cannot fit,
+the tool returns a controlled no-results response.
 
 Tavily generated answers and Exa generated summaries are disabled. Tavily uses
 Search followed by query-focused Extract. Exa uses Search with query-focused

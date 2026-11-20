@@ -16,6 +16,7 @@ import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.tool
+import com.jesjobom.ararai.BuildConfig
 import com.jesjobom.ararai.chat.CALCULATOR_TOOL_NAME
 import com.jesjobom.ararai.chat.MEMORY_WRITE_TOOL_NAME
 import com.jesjobom.ararai.chat.MemoryWriteOpenApiTool
@@ -647,6 +648,7 @@ class AndroidLiteRtLmBridge(
                 webSearchDisplayNameProvider,
                 toolNames,
                 runtimeTelemetry,
+                config.contextTokens,
             )
         } catch (error: Throwable) {
             runtimeTelemetry.record(
@@ -674,6 +676,7 @@ private class AndroidLiteRtLmSession(
     private val webSearchDisplayNameProvider: () -> String,
     private val supportedToolNames: Set<String>,
     private val runtimeTelemetry: LiteRtLmRuntimeTelemetry,
+    private val contextTokens: Int,
 ) : LiteRtLmSession {
     private val conversations =
         RetainedResourceOwner<Conversation, RetainedConversationState>(
@@ -1084,6 +1087,16 @@ private class AndroidLiteRtLmSession(
                 dispatcher = toolDispatcher,
                 verifiedModelToolIds = supportedToolNames,
                 displayName = webSearchDisplayNameProvider(),
+                contextTokens = contextTokens,
+                onResultMetrics = { metrics ->
+                    if (BuildConfig.DEBUG) {
+                        Log.d(
+                            "ArarAI.WebSearch",
+                            "resultChars=${metrics.resultChars} budgetChars=${metrics.budgetChars} " +
+                                "contextTokens=${metrics.contextTokens} sources=${metrics.sourceCount}",
+                        )
+                    }
+                },
             )
         } else {
             null

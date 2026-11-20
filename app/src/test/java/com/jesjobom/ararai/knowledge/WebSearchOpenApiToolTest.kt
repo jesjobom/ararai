@@ -13,7 +13,10 @@ class WebSearchOpenApiToolTest {
         val tool =
             WebSearchToolTurn(
                 KnowledgeTool {
-                    assertEquals(ToolRequest("specific focus", "pt", "specific focus"), it)
+                    assertEquals(
+                        ToolRequest("specific focus", "pt", "specific focus", WebEvidencePolicy.Chat(2_048)),
+                        it,
+                    )
                     ToolResult.Success("evidence", listOf(source))
                 },
                 languageProvider = { "PT" },
@@ -109,12 +112,65 @@ class WebSearchOpenApiToolTest {
     fun `falls back to English when local language is invalid`() {
         val tool = WebSearchToolTurn(
             KnowledgeTool {
-                assertEquals(ToolRequest("query", "en", "query"), it)
+                assertEquals(ToolRequest("query", "en", "query", WebEvidencePolicy.Chat(2_048)), it)
                 ToolResult.Failure(ToolFailureReason.NoResults)
             },
             languageProvider = { "" },
         )
 
         tool.execute("""{"query":"query"}""")
+    }
+
+    @Test
+    fun `two searches in one turn each receive the full configured budget`() {
+        val policies = mutableListOf<WebEvidencePolicy>()
+        val metrics = mutableListOf<WebSearchResultMetrics>()
+        val normalizer = FocusedWebEvidenceNormalizer(clock = { 1L })
+        val tool = WebSearchToolTurn(
+            KnowledgeTool { request ->
+                policies += request.evidencePolicy
+                normalizer.normalize(
+                    WebSearchProvider.Exa,
+                    "en",
+                    listOf(
+                        FocusedEvidenceCandidate("Result", "https://example.com", listOf("evidence ".repeat(1_000))),
+                    ),
+                    request.evidencePolicy,
+                )
+            },
+            contextTokens = 4_096,
+            onResultMetrics = metrics::add,
+        )
+
+        val first = tool.execute("""{"query":"first"}""")
+        val second = tool.execute("""{"query":"second"}""")
+
+        assertEquals(listOf(WebEvidencePolicy.Chat(4_096), WebEvidencePolicy.Chat(4_096)), policies)
+        assertEquals(first.length, second.length)
+        assertTrue(first.length > 1_800)
+        assertTrue(first.length <= 4_096)
+        assertEquals(listOf(first.length, second.length), metrics.map { it.resultChars })
+        assertEquals(listOf(4_096, 4_096), metrics.map { it.budgetChars })
+        assertEquals(
+            "CALL_LIMIT_REACHED",
+            JsonParser.parseString(tool.execute("""{"query":"third"}""")).asJsonObject.get("error").asString,
+        )
+    }
+
+    @Test
+    fun `rejects an oversized success without capturing unsupported source claims`() {
+        val tool = WebSearchToolTurn(
+            KnowledgeTool {
+                ToolResult.Success(
+                    "x".repeat(3_000),
+                    listOf(KnowledgeSource("Exa", "Title", "https://example.com", "en", 1L)),
+                )
+            },
+        )
+
+        val response = JsonParser.parseString(tool.execute("""{"query":"test"}""")).asJsonObject
+
+        assertEquals("NO_RESULTS", response.get("error").asString)
+        assertEquals(emptyList<KnowledgeSource>(), tool.consumeCapturedSources())
     }
 }

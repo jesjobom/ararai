@@ -65,12 +65,16 @@ inference remains device-, driver-, model-, and workload-dependent.
   Explicit place names are geocoded. Provider attribution is displayed with
   weather widget results.
 - Chat web search uses a focused-evidence `web_search@1` contract with Exa/Tavily
-  fallback. Managed widgets may use `web_search_top_results@1` for up to ten
+  fallback. Its complete model-visible result is budgeted per call to 25% of
+  the effective total context tokens at four characters per token; this is an
+  approximation and does not prevent native context exhaustion. Managed widgets
+  may use `web_search_top_results@1` for up to ten
   ranked title/HTTPS URL results or `web_search_content@1` for up to three
   results with bounded excerpts. Widget web-search
   enablement defaults off, shares verified provider credentials but not Chat's
   enable switches. The top-results tool does not extract page content; the
-  content tool reuses Chat's bounded Exa highlights or Tavily extraction.
+  content tool reuses the Exa/Tavily provider chain with its own unchanged
+  1,800-character reference and 500-character excerpt limits.
 - Managed widgets provide bounded multi-round model authorship, strict
   staged validation, automatic advancement through successful stages, explicit
   retries and source/permission/schedule consent, immutable local

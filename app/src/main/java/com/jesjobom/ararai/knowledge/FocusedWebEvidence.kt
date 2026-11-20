@@ -1,7 +1,43 @@
 package com.jesjobom.ararai.knowledge
 
+import com.google.gson.JsonObject
 import java.net.URI
 import java.util.Locale
+
+sealed interface WebEvidencePolicy {
+    val maxResultChars: Int
+    val maxExcerptChars: Int
+    val maxProviderHighlightChars: Int
+
+    fun fits(context: String): Boolean
+
+    data object Widget : WebEvidencePolicy {
+        override val maxResultChars = FocusedWebEvidenceNormalizer.MAX_CONTEXT_LENGTH
+        override val maxExcerptChars = FocusedWebEvidenceNormalizer.MAX_EXCERPT_LENGTH
+        override val maxProviderHighlightChars = maxExcerptChars * FocusedWebEvidenceNormalizer.MAX_EXCERPTS_PER_SOURCE
+
+        override fun fits(context: String): Boolean = context.length <= maxResultChars
+    }
+
+    data class Chat(val contextTokens: Int) : WebEvidencePolicy {
+        init {
+            require(contextTokens > 0)
+        }
+
+        override val maxResultChars = contextTokens / 4 * 4
+        override val maxExcerptChars = maxResultChars
+        override val maxProviderHighlightChars = maxResultChars.coerceIn(1, 128 * 1024)
+
+        override fun fits(context: String): Boolean = modelSuccessJson(context).length <= maxResultChars
+    }
+
+    companion object {
+        fun modelSuccessJson(context: String): String = JsonObject().apply {
+            addProperty("ok", true)
+            addProperty("untrustedReference", context)
+        }.toString()
+    }
+}
 
 enum class WebSearchProvider(
     val displayName: String,
@@ -25,6 +61,7 @@ class FocusedWebEvidenceNormalizer(
         provider: WebSearchProvider,
         language: String,
         candidates: List<FocusedEvidenceCandidate>,
+        policy: WebEvidencePolicy = WebEvidencePolicy.Widget,
     ): ToolResult {
         val normalizedLanguage = language.trim().lowercase(Locale.ROOT)
         if (!LANGUAGE_PATTERN.matches(normalizedLanguage)) {
@@ -43,7 +80,7 @@ class FocusedWebEvidenceNormalizer(
                     .asSequence()
                     .map(::normalizeText)
                     .filter(String::isNotEmpty)
-                    .map { it.unicodeSafeTake(MAX_EXCERPT_LENGTH) }
+                    .map { it.unicodeSafeTake(policy.maxExcerptChars) }
                     .filter(seenExcerpts::add)
                     .take(MAX_EXCERPTS_PER_SOURCE)
                     .toList()
@@ -53,20 +90,23 @@ class FocusedWebEvidenceNormalizer(
         }
         if (accepted.isEmpty()) return ToolResult.Failure(ToolFailureReason.NoResults)
 
-        val context = StringBuilder(UNTRUSTED_PREFIX)
+        var context = UNTRUSTED_PREFIX
         val sources = mutableListOf<KnowledgeSource>()
         val webEvidence = mutableListOf<WebEvidenceItem>()
         accepted.forEach { evidence ->
             val sourcePrefix = "\n\n${provider.displayName}: ${evidence.title}\n${evidence.url}"
-            if (!context.appendWithinBudget(sourcePrefix)) return@forEach
+            val sourceContext = context + sourcePrefix
             val appendedExcerpts = mutableListOf<String>()
+            var nextContext = sourceContext
             evidence.excerpts.forEach { excerpt ->
-                val start = context.length
-                if (context.appendWithinBudget("\n$excerpt")) {
-                    appendedExcerpts += context.substring(start + 1)
+                val fitted = fitExcerpt(nextContext, excerpt, policy)
+                if (fitted != null) {
+                    nextContext += "\n$fitted"
+                    appendedExcerpts += fitted
                 }
             }
             if (appendedExcerpts.isNotEmpty()) {
+                context = nextContext
                 val source = KnowledgeSource(
                     provider = provider.sourceProvider,
                     title = evidence.title,
@@ -79,17 +119,28 @@ class FocusedWebEvidenceNormalizer(
             }
         }
         if (sources.isEmpty()) return ToolResult.Failure(ToolFailureReason.NoResults)
-        return ToolResult.Success(context.toString(), sources, webEvidence)
+        return ToolResult.Success(context, sources, webEvidence)
     }
 
-    @Suppress("ReturnCount")
-    private fun StringBuilder.appendWithinBudget(value: String): Boolean {
-        val remaining = MAX_CONTEXT_LENGTH - length
-        if (remaining <= 0) return false
-        val accepted = value.unicodeSafeTake(remaining)
-        if (accepted.isBlank()) return false
-        append(accepted)
-        return true
+    private fun fitExcerpt(
+        context: String,
+        excerpt: String,
+        policy: WebEvidencePolicy,
+    ): String? {
+        var low = 0
+        var high = minOf(excerpt.length, policy.maxExcerptChars)
+        var best = ""
+        while (low <= high) {
+            val middle = (low + high) / 2
+            val candidate = excerpt.unicodeSafeTake(middle)
+            if (policy.fits("$context\n$candidate")) {
+                best = candidate
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
+        }
+        return best.takeIf(String::isNotBlank)
     }
 
     private fun normalizeText(value: String): String = value

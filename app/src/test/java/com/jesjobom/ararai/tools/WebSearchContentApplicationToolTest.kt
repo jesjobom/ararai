@@ -36,6 +36,7 @@ class WebSearchContentApplicationToolTest {
                 consumer = ApplicationToolConsumer.Model,
                 argumentsJson = """{"query":"example"}""",
                 verifiedModelToolIds = setOf(WEB_SEARCH_TOOL_NAME),
+                modelContextTokens = 2_048,
             ),
         ) as ApplicationToolDispatchResult.Executed
         val payload = JsonParser.parseString(result.payloadJson).asJsonObject

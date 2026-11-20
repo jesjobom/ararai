@@ -1,5 +1,6 @@
 package com.jesjobom.ararai.knowledge
 
+import com.google.gson.JsonParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -69,6 +70,35 @@ class WebSearchProviderToolsTest {
         assertTrue(transport.requests.single().jsonBody.contains("\"highlights\""))
         assertFalse(transport.requests.single().jsonBody.contains("\"summary\""))
         assertEquals("exa-test", transport.requests.single().headers["x-api-key"])
+    }
+
+    @Test
+    fun `exa requests longer highlights only for a larger Chat policy`() = runTest {
+        val highlight = "focused evidence ".repeat(300)
+        val response = jsonResponse(
+            """{"results":[{"title":"Source","url":"https://example.com/source","highlights":["$highlight"]}]}""",
+        )
+        val chatTransport = QueueWebSearchTransport(response)
+        val widgetTransport = QueueWebSearchTransport(response)
+        val chat = ExaKnowledgeTool(token = { "token" }, transport = chatTransport)
+            .execute(ToolRequest("query", evidencePolicy = WebEvidencePolicy.Chat(8_192))) as ToolResult.Success
+        val widget = ExaKnowledgeTool(token = { "token" }, transport = widgetTransport)
+            .execute(ToolRequest("query")) as ToolResult.Success
+        val chatRequest = JsonParser.parseString(chatTransport.requests.single().jsonBody).asJsonObject
+        val widgetRequest = JsonParser.parseString(widgetTransport.requests.single().jsonBody).asJsonObject
+
+        assertEquals(
+            8_192,
+            chatRequest.getAsJsonObject("contents").getAsJsonObject("highlights")
+                .get("maxCharacters").asInt,
+        )
+        assertEquals(
+            1_000,
+            widgetRequest.getAsJsonObject("contents").getAsJsonObject("highlights")
+                .get("maxCharacters").asInt,
+        )
+        assertTrue(chat.webEvidence.single().excerpts.single().length > 500)
+        assertEquals(500, widget.webEvidence.single().excerpts.single().length)
     }
 
     @Test

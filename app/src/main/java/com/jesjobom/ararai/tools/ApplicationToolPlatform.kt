@@ -92,6 +92,7 @@ data class ApplicationToolInvocation(
     val consumer: ApplicationToolConsumer,
     val argumentsJson: String,
     val verifiedModelToolIds: Set<String> = emptySet(),
+    val modelContextTokens: Int? = null,
 )
 
 enum class ApplicationToolRejection {
@@ -121,11 +122,14 @@ class RegisteredApplicationTool internal constructor(
     val policy: ApplicationToolExecutionPolicy,
     private val stateProvider: () -> ApplicationToolOperationalState,
     private val acceptsArguments: (JsonObject) -> Boolean,
-    private val invoke: suspend (JsonObject) -> ApplicationToolDispatchResult.Executed,
+    private val invoke: suspend (JsonObject, ApplicationToolInvocation) -> ApplicationToolDispatchResult.Executed,
 ) {
     fun operationalState(): ApplicationToolOperationalState = stateProvider()
 
-    internal suspend fun execute(arguments: JsonObject): ApplicationToolDispatchResult.Executed = invoke(arguments)
+    internal suspend fun execute(
+        arguments: JsonObject,
+        invocation: ApplicationToolInvocation,
+    ): ApplicationToolDispatchResult.Executed = invoke(arguments, invocation)
 
     internal fun accepts(arguments: JsonObject): Boolean = acceptsArguments(arguments)
 }
@@ -137,6 +141,7 @@ fun <Request : Any, Result : Any> applicationToolBinding(
     decodeArguments: (JsonObject) -> Request?,
     encodeResult: (Result) -> String,
     policy: ApplicationToolExecutionPolicy = ApplicationToolExecutionPolicy(),
+    prepareRequest: (Request, ApplicationToolInvocation) -> Request = { request, _ -> request },
 ): RegisteredApplicationTool {
     require(executor.displayName == contract.displayName) { "Tool display metadata is inconsistent" }
     require(executor.category == contract.category) { "Tool category metadata is inconsistent" }
@@ -145,9 +150,9 @@ fun <Request : Any, Result : Any> applicationToolBinding(
         policy = policy,
         stateProvider = state,
         acceptsArguments = { decodeArguments(it) != null },
-        invoke = { arguments ->
+        invoke = { arguments, invocation ->
             val request = decodeArguments(arguments) ?: throw InvalidApplicationToolArgumentsException()
-            val result = executor.execute(request)
+            val result = executor.execute(prepareRequest(request, invocation))
             ApplicationToolDispatchResult.Executed(
                 payloadJson = encodeResult(result),
                 domainResult = result,
@@ -272,13 +277,13 @@ class ApplicationToolDispatcher(private val registry: ApplicationToolRegistry) {
             ?.takeIf { it.isJsonObject }
             ?.asJsonObject
             ?: return PreparedInvocation.rejected(ApplicationToolRejection.InvalidArguments)
-        return PreparedInvocation.Ready(binding, arguments)
+        return PreparedInvocation.Ready(binding, arguments, invocation)
     }
 
     @Suppress("SwallowedException", "TooGenericExceptionCaught")
     private suspend fun executePrepared(prepared: PreparedInvocation.Ready): ApplicationToolDispatchResult = try {
         val result = withTimeoutOrNull(prepared.binding.policy.timeoutMillis) {
-            prepared.binding.execute(prepared.arguments)
+            prepared.binding.execute(prepared.arguments, prepared.invocation)
         } ?: return ApplicationToolDispatchResult.Rejected(ApplicationToolRejection.TimedOut)
         if (!result.isValid(prepared.binding.policy)) {
             ApplicationToolDispatchResult.Rejected(ApplicationToolRejection.Unavailable)
@@ -303,6 +308,7 @@ class ApplicationToolDispatcher(private val registry: ApplicationToolRegistry) {
         data class Ready(
             val binding: RegisteredApplicationTool,
             val arguments: JsonObject,
+            val invocation: ApplicationToolInvocation,
         ) : PreparedInvocation
 
         data class Rejected(val result: ApplicationToolDispatchResult.Rejected) : PreparedInvocation
