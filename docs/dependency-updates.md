@@ -27,6 +27,12 @@ dependency update.
 Use Gradle's targeted `--update-locks group:artifact` only when intentionally
 changing a subset of the graph. Do not hand-edit generated lockfiles.
 
+## Update GitHub Actions
+
+Dependabot checks for GitHub Actions version updates weekly and waits seven
+days after a version is released before proposing a routine upgrade. This
+cooldown does not apply to security updates.
+
 ## Update the Gradle wrapper
 
 1. Select a reviewed Gradle version compatible with the Android Gradle Plugin.

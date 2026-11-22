@@ -138,8 +138,9 @@ inference remains device-, driver-, model-, and workload-dependent.
   only its first-model consent onboarding. Tour completion or dismissal is
   persisted per screen and can be restored from Settings.
 
-Model downloads contact only the artifact URLs declared in the catalog. A valid
-local model is sufficient for the core Chat inference flow.
+Model downloads start at the artifact URLs declared in the catalog and follow
+only bounded HTTPS redirects. A valid local model is sufficient for the core
+Chat inference flow.
 
 ## Supported implementation baseline
 

@@ -9,6 +9,7 @@ import java.io.File
 import java.io.FilterInputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
+import java.net.MalformedURLException
 import java.net.URL
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -61,56 +62,92 @@ class UrlModelByteSource(
         config: ModelConfig,
         requestedOffset: Long,
     ): ModelByteResponse {
-        val connection = connectionFactory.open(URL(config.url))
-        var ownershipTransferred = false
-        try {
-            connection.connectTimeout = 15_000
-            connection.readTimeout = 30_000
-            connection.instanceFollowRedirects = true
-            connection.requestMethod = "GET"
-            if (requestedOffset > 0L) {
-                connection.setRequestProperty("Range", "bytes=$requestedOffset-")
-            }
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                val host = connection.url.host
-                val hint =
-                    if (responseCode == HttpURLConnection.HTTP_FORBIDDEN && host.contains("xethub.hf.co")) {
-                        " via Hugging Face Xet/CAS"
-                    } else {
-                        ""
-                    }
-                throw ModelDownloadException("HTTP $responseCode$hint while downloading ${config.id}")
-            }
-            val acceptedOffset =
-                if (responseCode == HttpURLConnection.HTTP_PARTIAL) {
-                    connection
-                        .getHeaderField("Content-Range")
-                        ?.substringAfter("bytes ")
-                        ?.substringBefore('-')
-                        ?.toLongOrNull()
-                        ?.takeIf { it == requestedOffset }
-                        ?: 0L
-                } else {
-                    0L
+        var url = resolveHttpsUrl(null, config.url, config.id)
+        repeat(MAX_REDIRECTS + 1) { hop ->
+            val connection = connectionFactory.open(url)
+            var ownershipTransferred = false
+            try {
+                connection.connectTimeout = 15_000
+                connection.readTimeout = 30_000
+                connection.instanceFollowRedirects = false
+                connection.requestMethod = "GET"
+                if (requestedOffset > 0L) {
+                    connection.setRequestProperty("Range", "bytes=$requestedOffset-")
                 }
-            val input = connection.inputStream
-            val response = ModelByteResponse(
-                input = input,
-                acceptedOffset = acceptedOffset,
-                closeAction = {
-                    try {
-                        input.close()
-                    } finally {
-                        connection.disconnect()
-                    }
-                },
-            )
-            ownershipTransferred = true
-            return response
-        } finally {
-            if (!ownershipTransferred) connection.disconnect()
+                val status = connection.responseCode
+                if (status !in REDIRECT_CODES) {
+                    val response = openResponse(connection, status, config.id, requestedOffset)
+                    ownershipTransferred = true
+                    return response
+                }
+                if (hop == MAX_REDIRECTS) {
+                    throw ModelDownloadException("Too many redirects while downloading ${config.id}")
+                }
+                val location = connection.getHeaderField("Location")?.takeIf(String::isNotBlank)
+                    ?: throw ModelDownloadException("Missing redirect destination while downloading ${config.id}")
+                url = resolveHttpsUrl(url, location, config.id)
+            } finally {
+                if (!ownershipTransferred) connection.disconnect()
+            }
         }
+        error("Redirect limit must terminate the download")
+    }
+
+    private fun resolveHttpsUrl(base: URL?, destination: String, modelId: String): URL {
+        val url = try {
+            URL(base, destination)
+        } catch (_: MalformedURLException) {
+            throw ModelDownloadException("Invalid download URL for $modelId")
+        }
+        if (url.protocol != "https" || url.host.isBlank()) {
+            throw ModelDownloadException("Model download requires HTTPS for $modelId")
+        }
+        return url
+    }
+
+    private fun openResponse(
+        connection: HttpURLConnection,
+        status: Int,
+        modelId: String,
+        requestedOffset: Long,
+    ): ModelByteResponse {
+        if (status !in 200..299) {
+            val hint = if (status == HttpURLConnection.HTTP_FORBIDDEN && connection.url.host.contains("xethub.hf.co")) {
+                " via Hugging Face Xet/CAS"
+            } else {
+                ""
+            }
+            throw ModelDownloadException("HTTP $status$hint while downloading $modelId")
+        }
+        val acceptedOffset = if (status == HttpURLConnection.HTTP_PARTIAL) {
+            connection.getHeaderField("Content-Range")
+                ?.substringAfter("bytes ")
+                ?.substringBefore('-')
+                ?.toLongOrNull()
+                ?.takeIf { it == requestedOffset }
+                ?: 0L
+        } else {
+            0L
+        }
+        val input = connection.inputStream
+        return ModelByteResponse(input, acceptedOffset) {
+            try {
+                input.close()
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+
+    private companion object {
+        const val MAX_REDIRECTS = 10
+        val REDIRECT_CODES = setOf(
+            HttpURLConnection.HTTP_MOVED_PERM,
+            HttpURLConnection.HTTP_MOVED_TEMP,
+            HttpURLConnection.HTTP_SEE_OTHER,
+            307,
+            308,
+        )
     }
 }
 

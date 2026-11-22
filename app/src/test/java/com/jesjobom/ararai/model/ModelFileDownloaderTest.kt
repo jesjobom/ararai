@@ -21,6 +21,73 @@ import java.nio.file.Files
 
 class ModelFileDownloaderTest {
     @Test
+    fun `https redirects preserve range requests and release intermediate connections`() {
+        val relative = FakeHttpConnection(statusCode = HttpURLConnection.HTTP_MOVED_TEMP, location = "/next")
+        val crossHost = FakeHttpConnection(statusCode = 307, location = "https://cdn.example.com/model.gguf")
+        val final = FakeHttpConnection(statusCode = HttpURLConnection.HTTP_PARTIAL, contentRange = "bytes 2-4/5")
+        val factory = QueueConnectionFactory(relative, crossHost, final)
+
+        UrlModelByteSource(factory).open(helloConfig(), requestedOffset = 2L).use { response ->
+            assertEquals(2L, response.acceptedOffset)
+            assertEquals(1, relative.disconnectCount)
+            assertEquals(1, crossHost.disconnectCount)
+            assertEquals(0, final.disconnectCount)
+            for (connection in listOf(relative, crossHost, final)) {
+                assertFalse(connection.instanceFollowRedirects)
+                assertEquals("bytes=2-", connection.getRequestProperty("Range"))
+            }
+        }
+        assertEquals(1, final.disconnectCount)
+        assertEquals(
+            listOf("https://example.com/hello.gguf", "https://example.com/next", "https://cdn.example.com/model.gguf"),
+            factory.openedUrls.map(URL::toExternalForm),
+        )
+    }
+
+    @Test
+    fun `rejects non https redirect without opening the destination`() {
+        val redirect = FakeHttpConnection(
+            statusCode = HttpURLConnection.HTTP_MOVED_TEMP,
+            location = "http://example.com",
+        )
+        val factory = QueueConnectionFactory(redirect)
+
+        assertThrows(ModelDownloadException::class.java) {
+            UrlModelByteSource(factory).open(helloConfig(), requestedOffset = 0L)
+        }
+
+        assertEquals(listOf(helloConfig().url), factory.openedUrls.map(URL::toExternalForm))
+        assertEquals(1, redirect.disconnectCount)
+    }
+
+    @Test
+    fun `rejects non https initial url before opening a connection`() {
+        val factory = QueueConnectionFactory()
+
+        assertThrows(ModelDownloadException::class.java) {
+            UrlModelByteSource(factory).open(helloConfig().copy(url = "http://example.com"), requestedOffset = 0L)
+        }
+
+        assertTrue(factory.openedUrls.isEmpty())
+    }
+
+    @Test
+    fun `bounds redirect loops and disconnects all opened connections`() {
+        val redirects = Array(11) {
+            FakeHttpConnection(statusCode = HttpURLConnection.HTTP_MOVED_TEMP, location = "/hello.gguf")
+        }
+        val factory = QueueConnectionFactory(*redirects)
+
+        val error = assertThrows(ModelDownloadException::class.java) {
+            UrlModelByteSource(factory).open(helloConfig(), requestedOffset = 0L)
+        }
+
+        assertTrue(error.message.orEmpty().contains("Too many redirects"))
+        assertEquals(11, factory.openedUrls.size)
+        assertTrue(redirects.all { it.disconnectCount == 1 })
+    }
+
+    @Test
     fun `url response closes stream and disconnects exactly once after success`() = runTest {
         val root = Files.createTempDirectory("ararai-download").toFile()
         val input = CloseRecordingInputStream("hello".toByteArray())
@@ -474,13 +541,20 @@ private class QueueConnectionFactory(
 ) : ModelHttpConnectionFactory {
     private val connections = ArrayDeque(connections.toList())
 
-    override fun open(url: URL): HttpURLConnection = connections.removeFirst()
+    val openedUrls = mutableListOf<URL>()
+
+    override fun open(url: URL): HttpURLConnection {
+        openedUrls += url
+        return connections.removeFirst()
+    }
 }
 
 private class FakeHttpConnection(
     private val statusCode: Int = HttpURLConnection.HTTP_OK,
     private val input: InputStream = ByteArrayInputStream(ByteArray(0)),
     private val inputError: IOException? = null,
+    private val location: String? = null,
+    private val contentRange: String? = null,
 ) : HttpURLConnection(URL("https://example.com/model.gguf")) {
     var disconnectCount = 0
 
@@ -493,6 +567,12 @@ private class FakeHttpConnection(
     override fun usingProxy(): Boolean = false
 
     override fun getResponseCode(): Int = statusCode
+
+    override fun getHeaderField(name: String): String? = when (name) {
+        "Location" -> location
+        "Content-Range" -> contentRange
+        else -> null
+    }
 
     override fun getInputStream(): InputStream = inputError?.let { throw it } ?: input
 }

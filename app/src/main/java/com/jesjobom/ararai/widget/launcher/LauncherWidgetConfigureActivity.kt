@@ -31,6 +31,7 @@ import com.jesjobom.ararai.ArarAiApplication
 import com.jesjobom.ararai.R
 import com.jesjobom.ararai.settings.SharedPreferencesApplicationLanguagePreferenceStore
 import com.jesjobom.ararai.widget.managed.ManagedWidgetDefinition
+import com.jesjobom.ararai.widget.managed.ManagedWidgetRepository
 import kotlinx.coroutines.launch
 
 class LauncherWidgetConfigureActivity : ComponentActivity() {
@@ -42,8 +43,7 @@ class LauncherWidgetConfigureActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val appWidgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
-        val result = Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-        setResult(Activity.RESULT_CANCELED, result)
+        setResult(Activity.RESULT_CANCELED, configurationResult(appWidgetId))
         val info = AppWidgetManager.getInstance(this).getAppWidgetInfo(appWidgetId)
         if (info?.provider != LauncherWidgetUpdates.provider(this)) {
             finish()
@@ -75,18 +75,7 @@ class LauncherWidgetConfigureActivity : ComponentActivity() {
                                     onClick = {
                                         choosing = true
                                         scope.launch {
-                                            LauncherWidgetBindings(this@LauncherWidgetConfigureActivity)
-                                                .put(appWidgetId, definition.id)
-                                            runCatching {
-                                                LauncherWidgetRenderer.updateOne(
-                                                    this@LauncherWidgetConfigureActivity,
-                                                    appWidgetId,
-                                                    repository,
-                                                )
-                                            }
-                                            LauncherWidgetUpdates.request(this@LauncherWidgetConfigureActivity)
-                                            setResult(Activity.RESULT_OK, result)
-                                            finish()
+                                            confirmSelection(appWidgetId, definition.id, repository)
                                         }
                                     },
                                     enabled = !choosing,
@@ -99,4 +88,15 @@ class LauncherWidgetConfigureActivity : ComponentActivity() {
             }
         }
     }
+
+    internal suspend fun confirmSelection(appWidgetId: Int, widgetId: String, repository: ManagedWidgetRepository) {
+        LauncherWidgetBindings(this).put(appWidgetId, widgetId)
+        runCatching { LauncherWidgetRenderer.updateOne(this, appWidgetId, repository) }
+        LauncherWidgetUpdates.request(this)
+        setResult(Activity.RESULT_OK, configurationResult(appWidgetId))
+        finish()
+    }
+
+    private fun configurationResult(appWidgetId: Int) = Intent()
+        .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
 }
