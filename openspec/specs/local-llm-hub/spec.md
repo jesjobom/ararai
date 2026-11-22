@@ -6,9 +6,7 @@ app-owned conversations and media, and runs Chat inference locally through
 runtime-neutral boundaries without requiring an application backend, remote
 database, or hosted inference API. Native runtime, acceleration, memory,
 thermal, and real-model behavior remain subject to physical-device validation.
-
 ## Requirements
-
 ### Requirement: Android SDK 36 Target
 
 The application SHALL target Android SDK 36 for the initial MVP.
@@ -4921,3 +4919,33 @@ stored as a conversation message or imply that historical media are replayed.
 - **WHEN** Chat presents its context indication during generation
 - **THEN** the indication reflects the history selected for that submitted request
 - **AND** after the turn ends it may recalculate for the next response.
+
+### Requirement: HTTPS-only model download redirects
+
+Model downloads SHALL begin from a configured catalog source and SHALL use
+HTTPS for the initial request and every subsequent redirect. A single source
+attempt SHALL follow no more than ten redirects.
+
+#### Scenario: Resume through an HTTPS redirect
+
+- **WHEN** an HTTPS catalog source redirects a resumed download to another HTTPS URL
+- **THEN** the redirected request retains the requested byte range
+- **AND** the intermediate connection is released before opening the next one.
+
+#### Scenario: Reject an unsafe redirect
+
+- **WHEN** the redirect is missing a valid HTTPS destination or exceeds the redirect limit
+- **THEN** the current source attempt fails without opening the rejected destination
+- **AND** configured fallback sources remain eligible under the same policy.
+
+### Requirement: Web evidence deduplication uses returned evidence
+
+The shared web evidence normalizer SHALL reserve source URLs, source slots,
+and excerpt deduplication keys only when the corresponding evidence is included
+in the response.
+
+#### Scenario: An earlier candidate contributes no evidence
+
+- **WHEN** a provider-ranked candidate has no usable excerpt or cannot fit within the consumer's budget
+- **THEN** it does not prevent later candidates from contributing the same URL or excerpt if otherwise eligible
+- **AND** only included sources count toward the source limit.

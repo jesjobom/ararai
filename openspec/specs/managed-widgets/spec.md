@@ -4,9 +4,7 @@
 Define the local user-facing lifecycle for in-app widgets, including revisioned
 storage, consented scheduling, model-independent execution, constrained
 rendering, observations, diagnostics, and complete deletion.
-
 ## Requirements
-
 ### Requirement: Dedicated in-app widget management
 
 The application SHALL expose a Widgets destination from Home that opens the managed-widget list directly, with creation, empty state, current status, and navigation to detail. The list's top-right app bar SHALL provide an accessible icon action opening widget tools. Users SHALL be able to inspect a widget's active revision and permissions, enable or disable it, request an immediate refresh, edit it, duplicate it, and delete it. Managed widgets SHALL remain app-owned and rendered inside ArarAI; a user MAY also place a bounded snapshot of an existing managed widget on the Android launcher. A launcher action targeting an existing widget SHALL still open that widget's detail directly.
@@ -508,3 +506,20 @@ authorship nor scheduled execution SHALL access device location.
 - **AND** a current-weather card includes humidity when the result provides it
 - **AND** the model does not need to author JavaScript or invent result links
 - **AND** provider failure is shown distinctly from a forecast.
+
+### Requirement: Launcher widget configuration boundary
+
+The launcher setup activity SHALL accept only IDs that Android associates with
+the ArarAI widget provider. Opening or cancelling the activity SHALL leave
+bindings unchanged. Only an explicit selection SHALL bind the requested
+instance to the selected managed widget.
+
+#### Scenario: Reject an ID outside the ArarAI provider
+
+- **WHEN** the launcher setup activity receives an absent, unknown, or foreign-provider widget ID
+- **THEN** it exits with a cancelled result without storing a binding.
+
+#### Scenario: Configure one instance without changing another
+
+- **WHEN** the user explicitly selects a managed widget for a valid instance
+- **THEN** the setup activity confirms the selected binding for that instance only.

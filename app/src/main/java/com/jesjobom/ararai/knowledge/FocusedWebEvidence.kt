@@ -67,50 +67,38 @@ class FocusedWebEvidenceNormalizer(
         if (!LANGUAGE_PATTERN.matches(normalizedLanguage)) {
             return ToolResult.Failure(ToolFailureReason.InvalidArguments)
         }
-        val accepted = mutableListOf<AcceptedEvidence>()
-        val seenUrls = mutableSetOf<String>()
-        val seenExcerpts = mutableSetOf<String>()
-        candidates.forEach { candidate ->
-            if (accepted.size >= MAX_SOURCES) return@forEach
-            val title = normalizeText(candidate.title).unicodeSafeTake(MAX_TITLE_LENGTH)
-            val url = candidate.canonicalUrl.trim()
-            if (title.isEmpty() || !validHttpsSource(url) || !seenUrls.add(url)) return@forEach
-            val excerpts =
-                candidate.excerpts
-                    .asSequence()
-                    .map(::normalizeText)
-                    .filter(String::isNotEmpty)
-                    .map { it.unicodeSafeTake(policy.maxExcerptChars) }
-                    .filter(seenExcerpts::add)
-                    .take(MAX_EXCERPTS_PER_SOURCE)
-                    .toList()
-            if (excerpts.isNotEmpty()) {
-                accepted += AcceptedEvidence(title, url, excerpts)
-            }
-        }
-        if (accepted.isEmpty()) return ToolResult.Failure(ToolFailureReason.NoResults)
-
         var context = UNTRUSTED_PREFIX
         val sources = mutableListOf<KnowledgeSource>()
         val webEvidence = mutableListOf<WebEvidenceItem>()
-        accepted.forEach { evidence ->
-            val sourcePrefix = "\n\n${provider.displayName}: ${evidence.title}\n${evidence.url}"
-            val sourceContext = context + sourcePrefix
+        val seenUrls = mutableSetOf<String>()
+        val seenExcerpts = mutableSetOf<String>()
+        val rankedCandidates = candidates.iterator()
+        while (sources.size < MAX_SOURCES && rankedCandidates.hasNext()) {
+            val candidate = rankedCandidates.next()
+            val title = normalizeText(candidate.title).unicodeSafeTake(MAX_TITLE_LENGTH)
+            val url = candidate.canonicalUrl.trim()
+            var nextContext = "$context\n\n${provider.displayName}: $title\n$url"
+            val eligibleSource = title.isNotEmpty() && url !in seenUrls && validHttpsSource(url)
+            if (!eligibleSource || !policy.fits(nextContext)) continue
             val appendedExcerpts = mutableListOf<String>()
-            var nextContext = sourceContext
-            evidence.excerpts.forEach { excerpt ->
-                val fitted = fitExcerpt(nextContext, excerpt, policy)
-                if (fitted != null) {
+            candidate.excerpts.forEach { rawExcerpt ->
+                if (appendedExcerpts.size >= MAX_EXCERPTS_PER_SOURCE) return@forEach
+                val excerpt = normalizeText(rawExcerpt).unicodeSafeTake(policy.maxExcerptChars)
+                if (excerpt.isEmpty() || excerpt in seenExcerpts) return@forEach
+                val fitted = fitExcerpt(nextContext, excerpt, policy) ?: return@forEach
+                if (seenExcerpts.add(fitted)) {
+                    seenExcerpts += excerpt
                     nextContext += "\n$fitted"
                     appendedExcerpts += fitted
                 }
             }
             if (appendedExcerpts.isNotEmpty()) {
                 context = nextContext
+                seenUrls += url
                 val source = KnowledgeSource(
                     provider = provider.sourceProvider,
-                    title = evidence.title,
-                    canonicalUrl = evidence.url,
+                    title = title,
+                    canonicalUrl = url,
                     language = normalizedLanguage,
                     retrievedAtMillis = clock(),
                 )
@@ -155,12 +143,6 @@ class FocusedWebEvidenceNormalizer(
             uri.userInfo == null &&
             uri.fragment == null
     }.getOrDefault(false)
-
-    private data class AcceptedEvidence(
-        val title: String,
-        val url: String,
-        val excerpts: List<String>,
-    )
 
     companion object {
         const val MAX_SOURCES = 3

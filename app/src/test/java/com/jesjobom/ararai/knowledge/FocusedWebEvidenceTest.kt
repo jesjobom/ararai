@@ -60,6 +60,48 @@ class FocusedWebEvidenceTest {
     }
 
     @Test
+    fun `empty or duplicate excerpts do not reserve the source url`() {
+        val firstUrl = "https://example.com/first"
+        val secondUrl = "https://example.com/second"
+        val candidates = listOf(
+            FocusedEvidenceCandidate("Empty", firstUrl, listOf(" ")),
+            FocusedEvidenceCandidate("First", firstUrl, listOf("shared evidence")),
+            FocusedEvidenceCandidate("Duplicate only", secondUrl, listOf("shared evidence")),
+            FocusedEvidenceCandidate("Second", secondUrl, listOf("fresh evidence")),
+        )
+
+        for (policy in listOf(WebEvidencePolicy.Widget, WebEvidencePolicy.Chat(2_048))) {
+            val result = normalizer.normalize(WebSearchProvider.Exa, "en", candidates, policy) as ToolResult.Success
+
+            assertEquals(listOf(firstUrl, secondUrl), result.sources.map { it.canonicalUrl })
+            assertEquals(listOf("First", "Second"), result.sources.map { it.title })
+            assertEquals(listOf("shared evidence", "fresh evidence"), result.webEvidence.flatMap { it.excerpts })
+        }
+    }
+
+    @Test
+    fun `sources too large to fit do not reserve excerpts or fill the source limit`() {
+        for (policy in listOf(WebEvidencePolicy.Widget, WebEvidencePolicy.Chat(256))) {
+            val oversized = (1..3).map { index ->
+                val url = "https://example.com/$index/" + "a".repeat(policy.maxResultChars)
+                FocusedEvidenceCandidate("Too long", url, listOf("evidence $index"))
+            }
+            val fitting = FocusedEvidenceCandidate("Fits", "https://example.com/short", listOf("evidence 1"))
+
+            val result = normalizer.normalize(
+                WebSearchProvider.Exa,
+                "en",
+                oversized + fitting,
+                policy,
+            ) as ToolResult.Success
+
+            assertEquals(fitting.canonicalUrl, result.sources.single().canonicalUrl)
+            assertEquals(fitting.excerpts, result.webEvidence.single().excerpts)
+            assertTrue(policy.fits(result.untrustedContext))
+        }
+    }
+
+    @Test
     fun `does not split a surrogate pair at an excerpt boundary`() {
         val prefix = "a".repeat(FocusedWebEvidenceNormalizer.MAX_EXCERPT_LENGTH - 1)
         val result =

@@ -43,13 +43,12 @@ The local model sees one vendor-neutral schema:
 
 ```json
 {
-  "query": "short search query",
-  "language": "en",
-  "focus": "the exact fact or comparison to resolve"
+  "query": "short search query"
 }
 ```
 
-ArarAI binds enabled providers behind that schema in deterministic order. When
+ArarAI derives the provider language and research focus internally; the model
+only sends `query`. ArarAI binds the enabled providers in deterministic order. When
 both are enabled, Exa runs first and Tavily is the fallback. Changing enablement
 changes the effective system instruction and invalidates incompatible retained
 native conversation state.
@@ -63,7 +62,8 @@ Provider output is normalized as untrusted external reference data:
   characters independently per call; no separate 500-character excerpt ceiling;
 - widget `web_search_content`: unchanged 500 characters per excerpt and
   1,800-character reference envelope;
-- whitespace and duplicate normalization;
+- whitespace normalization and deduplication against sources and excerpts
+  already included in the result;
 - Unicode-safe truncation;
 - provider, title, canonical URL, language, and retrieval timestamp retained as
   bounded source metadata; and
