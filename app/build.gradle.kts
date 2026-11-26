@@ -50,7 +50,7 @@ val releaseSigningRequested =
         taskName.substringAfterLast(':').endsWith("Release", ignoreCase = true)
     }
 
-val liteRtLmVersion = "0.14.0"
+val liteRtLmVersion = "0.20.0"
 val instrumentationBuildType =
     providers.gradleProperty("ararai.appInstrumentationBuildType").orNull ?: "debug"
 

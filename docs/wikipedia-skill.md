@@ -6,7 +6,7 @@ Wikipedia retrieval is optional and disabled by default. The user enables it
 under **Instructions and tools**. The preference is preserved across model
 changes. Checked-in Chat models explicitly advertise `wikipedia_pages` and
 `wikipedia_on_this_day`; both are also available to confirmed widgets. The
-currently configured bundles are Gemma 4 E2B and E4B on LiteRT-LM 0.14.0. The
+currently configured bundles are Gemma 4 E2B and E4B on LiteRT-LM 0.20.0. The
 legacy model-only `wikipedia_search` binding remains registered for
 compatibility but is not advertised by those catalog entries.
 

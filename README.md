@@ -101,7 +101,7 @@ memory, thermal, and multimodal behavior require physical-device validation.
 - Kotlin 2.3.21 and Compose BOM 2026.06.00
 - JDK 17 for Android Gradle builds, AGP 9.2.x, Gradle wrapper 9.4.1
 - Build Tools 36.0.0; Whisper and QuickJS use NDK 28.2.13676358 and CMake 3.22.1
-- LLM runtime: LiteRT-LM 0.14.0; transcription runtime: whisper.cpp; widget
+- LLM runtime: LiteRT-LM 0.20.0; transcription runtime: whisper.cpp; widget
   program runtime: QuickJS 2026-06-04 behind the project-owned bounded JNI bridge
 - Bundled ML Kit Language ID 17.0.6
 - Android VAD 2.0.10 (WebRTC and Silero) plus ONNX Runtime Android 1.22.0
@@ -381,7 +381,7 @@ Assistant configuration also has a **Generation** tab. Context window and
 temperature overrides are saved independently for each Chat model and apply to
 future normal Chat and Voice Chat turns. Context window configures LiteRT-LM's
 total input-plus-output capacity and may reload the engine. Temperature offers
-Precise, Balanced, Creative, and manual values. LiteRT-LM 0.14.0 does not expose
+Precise, Balanced, Creative, and manual values. ArarAI does not enforce
 an independent output-token limit, so the app reports that limitation instead
 of presenting a control it cannot enforce. Runtime-backed metrics from the last
 conversational turn are shown when available; benchmark parameters and metrics

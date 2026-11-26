@@ -1925,3 +1925,59 @@ measurements remain release-validation checks rather than claims of this change.
   six model choices, numeric interval policy, and WorkManager baseline reset.
   A real model choice and a 24-hour background dispatch after a manual refresh
   remain unverified on the physical device.
+
+### 2026-11-26 LiteRT-LM 0.14.0 upgrade baseline (partial)
+
+- Samsung Galaxy S22 (SM-S901E), Android 16, installed debug app
+  `202611252159` (version code `29927699`); installed APK hash not captured.
+- Model Manager → model → Run benchmark, one run per installed Gemma 4 model.
+  The app used its fixed prompt and 2,048-token context. Native logs confirmed
+  GPU/OpenCL initialization in both runs. The process was not force-stopped
+  between runs; the app measured engine loading, not cold process startup.
+  Battery temperatures at start: 34.7 °C (E2B), 34.6 °C (E4B); Android thermal
+  status was 0 in both runs.
+
+| Model | Load | Runtime first token | Generation | Prefill | Decode | Highest observed PSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| E2B | 7,982 ms | 478 ms | 5,994 ms | 66.16 tok/s | 18.20 tok/s | 1.96 GiB |
+| E4B | 16,010 ms | 652 ms | 7,844 ms | 48.48 tok/s | 13.33 tok/s | 3.65 GiB |
+
+- Staged widget authoring with E4B: feasibility accepted in one attempt
+  (41,939 ms, including recovery and runtime load). The refresh-frequency
+  stage waited for thermal recovery; it was manually cancelled at thermal
+  status 1 without timing out. No widget was published. This was not an
+  end-to-end authoring pass.
+- No sustained stability, CPU, long-context benchmark, multimodal, or
+  post-upgrade physical results are claimed. Build the 0.20.0 candidate
+  without installing it on the resting phone.
+
+### 2026-11-26 LiteRT-LM 0.20.0 physical follow-up
+
+- Same SM-S901E on Android 16. Installed debug `202611252312` (version
+  code `29927772`, SHA-256
+  `214d435fd10ef891b8dfc506122e4de7e657a500eef658f9f156d77a40705f36`)
+  with `adb install -r`. First-install timestamp and both model files remained.
+- Same in-app fixed prompt, GPU/OpenCL, 2,048-token context. Battery at start
+  was 28.3 °C (E2B) and 29.6 °C (E4B), cooler than the baseline; thermal
+  status was 0. One completed run each; installation/process and cache
+  conditions were not controlled. These are observations, not isolated
+  runtime performance estimates.
+
+| Model | Load | Runtime first token | Generation | Prefill | Decode | Highest observed PSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| E2B | 14,001 ms | 384 ms | 5,528 ms | 84.10 tok/s | 19.51 tok/s | 2.10 GiB |
+| E4B | 22,471 ms | 642 ms | 9,563 ms | 49.36 tok/s | 13.38 tok/s | 3.69 GiB |
+
+- Leaving the second E4B diagnostic during generation cancelled it; native
+  logs recorded successful conversation cancellation and no active generation
+  at completion. A subsequent E4B authoring workload loaded and generated.
+- Reprocessing the same synthetic widget request captured a tool call but
+  failed feasibility validation (`InvalidFeasibilityTools`: one blank tool
+  ID instead of an empty list, 35,378 ms). Retrying passed in 32,057 ms.
+- Recovery then allowed refresh frequency (23,708 ms). Algorithm was
+  initially rejected (`InvalidAlgorithm`, 35,959 ms), then accepted on retry
+  (33,616 ms). Orchestration (69 ms), presentation (27,935 ms) and local
+  assembly/preview passed. The result was left as an unconfirmed draft.
+- CPU, multimodal, sustained load and installed-widget rendering were not
+  covered by this run. Longer engine loads were observed for both models,
+  but temperature, process and model-cache state differed across versions.

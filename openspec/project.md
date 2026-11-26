@@ -152,7 +152,7 @@ Chat inference flow.
 - Canonical Android Gradle runtime: JDK 17; Firebase Emulator runtime: JDK 21;
   Android Gradle Plugin 9.2.x; Gradle 9.4.1
 - Build Tools 36.0.0; Whisper and QuickJS use NDK 28.2.13676358 and CMake 3.22.1
-- LiteRT-LM 0.14.0 for configured Gemma 4 LiteRT-LM bundles
+- LiteRT-LM 0.20.0 for configured Gemma 4 LiteRT-LM bundles
 - whisper.cpp through JNI/NDK for transcription artifacts
 - QuickJS 2026-06-04 through a project-owned data-only JNI bridge for bounded
   in-memory widget-program fixtures
