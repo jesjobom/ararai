@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -42,8 +43,10 @@ import com.jesjobom.ararai.settings.resolveLanguageTag
 import com.jesjobom.ararai.ui.AndroidChatTextToSpeechService
 import com.jesjobom.ararai.ui.ArarAiApp
 import com.jesjobom.ararai.ui.ArarAiTheme
+import com.jesjobom.ararai.ui.ChatShareRequest
 import com.jesjobom.ararai.ui.MlKitChatLanguageIdentifier
 import com.jesjobom.ararai.ui.androidChatMediaServices
+import com.jesjobom.ararai.ui.toChatShareRequest
 import com.jesjobom.ararai.ui.tour.SharedPreferencesTourPreferenceStore
 import com.jesjobom.ararai.voice.SharedPreferencesVoiceChatPreferences
 import com.jesjobom.ararai.voice.reconcileVoiceTemporaryFiles
@@ -59,6 +62,7 @@ class MainActivity : ComponentActivity() {
     private val openWidgetsRequests = MutableStateFlow(0)
     private val openWidgetDetailRequests = MutableStateFlow<Pair<String, Int>?>(null)
     private var widgetDetailRequestVersion = 0
+    private val chatShareRequests = MutableStateFlow<ChatShareRequest?>(null)
 
     override fun attachBaseContext(newBase: Context) {
         val language = SharedPreferencesApplicationLanguagePreferenceStore(newBase).language
@@ -71,7 +75,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        handleNavigationIntent(intent)
+        if (intent?.action != Intent.ACTION_SEND) handleNavigationIntent(intent)
+        if (savedInstanceState == null || savedInstanceState.getBoolean(STATE_CHAT_SHARE_PENDING)) {
+            handleChatShareIntent(intent)
+        }
 
         val app = application as ArarAiApplication
         val modelCatalog = app.modelCatalog
@@ -120,6 +127,7 @@ class MainActivity : ComponentActivity() {
             val openWidgetAuthoringRequest by openWidgetAuthoringRequests.collectAsState()
             val openWidgetsRequest by openWidgetsRequests.collectAsState()
             val openWidgetDetailRequest by openWidgetDetailRequests.collectAsState()
+            val chatShareRequest by chatShareRequests.collectAsState()
             val notificationPermissionLauncher =
                 rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission(),
@@ -183,6 +191,8 @@ class MainActivity : ComponentActivity() {
                         openWidgetAuthoringRequest = openWidgetAuthoringRequest,
                         openWidgetsRequest = openWidgetsRequest,
                         openWidgetDetailRequest = openWidgetDetailRequest,
+                        chatShareRequest = chatShareRequest,
+                        onChatShareHandled = { chatShareRequests.compareAndSet(it, null) },
                         liteRtLmCacheDir =
                         prepareLiteRtLmCacheDir(cacheDir) { error ->
                             Log.w("ArarAI.LiteRtLm", "Unable to prepare LiteRT-LM cache", error)
@@ -202,7 +212,29 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleNavigationIntent(intent)
+        if (intent.action == Intent.ACTION_SEND) {
+            handleChatShareIntent(intent)
+        } else {
+            handleNavigationIntent(intent)
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_CHAT_SHARE_PENDING, chatShareRequests.value != null)
+    }
+
+    private fun handleChatShareIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        val request = try {
+            intent.toChatShareRequest()
+        } catch (_: RuntimeException) {
+            null
+        }
+        chatShareRequests.value = request
+        if (request == null) {
+            Toast.makeText(this, R.string.chat_share_invalid, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun handleNavigationIntent(intent: Intent?) {
@@ -264,6 +296,7 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val STATE_CHAT_SHARE_PENDING = "chat_share_pending"
         const val EXTRA_OPEN_MODELS = "open_model_management"
         const val EXTRA_OPEN_WIDGET_AUTHORING = "open_widget_authoring"
         const val EXTRA_OPEN_WIDGETS = "open_widgets"

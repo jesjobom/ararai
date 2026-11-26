@@ -163,14 +163,7 @@ internal fun ChatInputBar(
             coroutineScope.launch {
                 try {
                     val imported = withContext(Dispatchers.IO) { mediaServices.imageImporter.import(uri) }
-                    onAttachImage(
-                        ImageAttachment(
-                            uri = imported.file.absolutePath,
-                            mimeType = "image/jpeg",
-                            displayName = imported.displayName,
-                            byteSize = imported.file.length(),
-                        ),
-                    )
+                    onAttachImage(imported.toAttachment())
                 } catch (error: Exception) {
                     if (error is kotlinx.coroutines.CancellationException) throw error
                     imageImportError = error.message ?: "Unable to import selected image"

@@ -680,4 +680,6 @@
     <string name="widget_link_location">Location</string>
     <string name="widget_link_warning">Warning</string>
     <string name="widget_link_information">Information</string>
+    <string name="chat_share_invalid">Could not import the shared content.</string>
+    <string name="chat_shared_image_unavailable">Select an image-capable model to share images into Chat.</string>
 </resources>

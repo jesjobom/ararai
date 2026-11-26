@@ -680,4 +680,6 @@
     <string name="widget_link_location">Localização</string>
     <string name="widget_link_warning">Aviso</string>
     <string name="widget_link_information">Informação</string>
+    <string name="chat_share_invalid">Não foi possível importar o conteúdo compartilhado.</string>
+    <string name="chat_shared_image_unavailable">Selecione um modelo compatível com imagens para compartilhar imagens no Chat.</string>
 </resources>

@@ -76,6 +76,8 @@ internal fun ChatScreen(
     onDeletePendingReport: (String) -> Unit = {},
     tourPreferenceStore: TourPreferenceStore? = null,
     transcriptionAvailable: Boolean = false,
+    chatShareRequest: ChatShareRequest? = null,
+    onChatShareHandled: (ChatShareRequest) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -154,6 +156,20 @@ internal fun ChatScreen(
         messages = state.messages,
         onPrepare = textToSpeechController::prepare,
     )
+
+    fun chooseSessionForShare(request: ChatShareRequest, sessionId: String?) {
+        if (state.isPersistenceBusy || state.isGenerating || state.isLoadingModel) return
+        val accepted = when (request) {
+            is ChatShareRequest.Text -> viewModel.placeSharedContent(sessionId, text = request.value)
+            is ChatShareRequest.Image -> viewModel.placeSharedContent(sessionId) {
+                mediaServices.imageImporter.import(request.uri).toAttachment()
+            }
+        }
+        if (accepted) {
+            sessionListOpen = false
+            onChatShareHandled(request)
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         Scaffold(
@@ -361,20 +377,32 @@ internal fun ChatScreen(
             }
         }
 
-        if (sessionListOpen) {
+        if (sessionListOpen || chatShareRequest != null) {
             SessionListDialog(
                 sessions = state.sessions,
                 selectedSessionId = state.selectedSessionId,
                 canDelete = state.canDeleteCurrentSession,
-                onDismiss = { sessionListOpen = false },
+                onDismiss = {
+                    sessionListOpen = false
+                    chatShareRequest?.let(onChatShareHandled)
+                },
                 onCreate = {
-                    viewModel.createSession()
-                    sessionListOpen = false
+                    if (chatShareRequest == null) {
+                        viewModel.createSession()
+                        sessionListOpen = false
+                    } else {
+                        chooseSessionForShare(chatShareRequest, null)
+                    }
                 },
-                onSelect = {
-                    viewModel.selectSession(it)
-                    sessionListOpen = false
+                onSelect = { sessionId ->
+                    if (chatShareRequest == null) {
+                        viewModel.selectSession(sessionId)
+                        sessionListOpen = false
+                    } else {
+                        chooseSessionForShare(chatShareRequest, sessionId)
+                    }
                 },
+                selectionOnly = chatShareRequest != null,
                 onRename = { session ->
                     renameSessionId = session.id
                     renameText = session.title
@@ -547,6 +575,8 @@ internal fun UserMessageKey.localizedText(): String = when (this) {
     UserMessageKey.ModelAvailable -> stringResource(R.string.chat_model_available)
     UserMessageKey.ModelUnavailable -> stringResource(R.string.error_model_unavailable)
     UserMessageKey.GenerationFailed -> stringResource(R.string.error_generation_failed)
+    UserMessageKey.SharedImageUnavailable -> stringResource(R.string.chat_shared_image_unavailable)
+    UserMessageKey.SharedImageImportFailed -> stringResource(R.string.chat_share_invalid)
     UserMessageKey.ModelLoadingFailed -> stringResource(R.string.error_model_loading_failed)
     UserMessageKey.NoFinalAnswer -> stringResource(R.string.chat_no_final_answer)
     UserMessageKey.TextToSpeechUnavailable -> stringResource(R.string.error_tts_unavailable)

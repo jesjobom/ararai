@@ -25,6 +25,8 @@ backend, or external database.
   bounded and incrementally loadable history, bounded context construction,
   selectable Markdown and local LaTeX math rendering, and optional reasoning
   controls when declared by the selected model.
+- Android sharing accepts plain text or one image. Choose a new or existing
+  Chat session to fill the composer; nothing is sent automatically.
 - Offline response-language detection and language-aware native Android
   text-to-speech playback for completed assistant responses.
 - Experimental contextual Voice Chat for audio-capable models or text models

@@ -11,6 +11,7 @@ import com.jesjobom.ararai.model.ModelCatalog
 import com.jesjobom.ararai.model.ModelStartupState
 import com.jesjobom.ararai.reporting.DiagnosticOperationContext
 import com.jesjobom.ararai.ui.UserMessageKey
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -315,6 +317,46 @@ class ChatViewModel(
         }
     }
 
+    internal fun placeSharedContent(
+        sessionId: String?,
+        text: String = "",
+        importImage: (() -> ImageAttachment)? = null,
+    ): Boolean = runSessionMutation {
+        if (generationJob?.isActive == true || submissionPending.get()) return@runSessionMutation
+        if (sessionId != null && sessionStore.listSessions().none { it.id == sessionId }) return@runSessionMutation
+        if (importImage != null && !_uiState.value.canAttachImage) {
+            showSharedImageError(UserMessageKey.SharedImageUnavailable)
+            return@runSessionMutation
+        }
+        val image = try {
+            importImage?.invoke()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: IOException) {
+            showSharedImageError(UserMessageKey.SharedImageImportFailed)
+            return@runSessionMutation
+        } catch (_: RuntimeException) {
+            showSharedImageError(UserMessageKey.SharedImageImportFailed)
+            return@runSessionMutation
+        }
+        if (sessionId == null) {
+            createSessionAfterPersistenceDispatch()
+        } else {
+            selectSessionAfterPersistenceDispatch(sessionId)
+        }
+        _uiState.update { state ->
+            state.copy(prompt = text, imageAttachments = listOfNotNull(image).filter { state.canAttachImage })
+        }
+        if (image != null && _uiState.value.imageAttachments.none { it.uri == image.uri }) {
+            deleteDraftMedia(listOf(image.uri))
+            showSharedImageError(UserMessageKey.SharedImageUnavailable)
+        }
+    }
+
+    private fun showSharedImageError(key: UserMessageKey) {
+        _uiState.update { it.copy(error = null, errorKey = key) }
+    }
+
     fun renameCurrentSession(title: String) {
         val sessionId = _uiState.value.selectedSessionId ?: return
         renameSession(sessionId, title)
@@ -418,9 +460,8 @@ class ChatViewModel(
         }
     }
 
-    private fun runSessionMutation(block: () -> Unit) {
-        if (closed.get()) return
-        if (!sessionMutationPending.compareAndSet(false, true)) return
+    private fun runSessionMutation(block: () -> Unit): Boolean {
+        if (closed.get() || !sessionMutationPending.compareAndSet(false, true)) return false
         _uiState.update { it.copy(isPersistenceBusy = true) }
         scope.launch(persistenceDispatcher) {
             try {
@@ -431,6 +472,7 @@ class ChatViewModel(
                 refreshContextBoundary()
             }
         }
+        return true
     }
 
     fun onModelStartupState(state: ModelStartupState) {

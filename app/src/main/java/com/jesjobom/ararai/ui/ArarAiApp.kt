@@ -235,6 +235,8 @@ internal fun ArarAiApp(
     openModelManagementRequest: Int = 0,
     openWidgetAuthoringRequest: Int = 0,
     openWidgetsRequest: Int = 0,
+    chatShareRequest: ChatShareRequest? = null,
+    onChatShareHandled: (ChatShareRequest) -> Unit = {},
     openWidgetDetailRequest: Pair<String, Int>? = null,
     liteRtLmCacheDir: String? = null,
     webSearchToolFactory: WebSearchToolFactory = WebSearchToolFactory(),
@@ -494,7 +496,7 @@ internal fun ArarAiApp(
         }
     }
 
-    if (showInitialModelDialog) {
+    if (showInitialModelDialog && chatShareRequest == null) {
         val approximateSize = defaultModelConfig.expectedBytes?.let {
             Formatter.formatShortFileSize(appContext, it)
         } ?: stringResource(R.string.model_download_size_unknown)
@@ -614,6 +616,18 @@ internal fun ArarAiApp(
             }
             selectedWidgetId = widgetId
             destination = AppDestination.WidgetDetail
+        }
+    }
+
+    LaunchedEffect(chatShareRequest) {
+        if (chatShareRequest != null) {
+            showExitConfirmation = false
+            when (destination) {
+                AppDestination.VoiceChat -> voiceChatViewModel.onLeavingVoiceChat()
+                AppDestination.Diagnostics -> benchmarkViewModel.onLeavingBenchmark()
+                else -> Unit
+            }
+            destination = AppDestination.Chat
         }
     }
 
@@ -777,6 +791,8 @@ internal fun ArarAiApp(
             },
             tourPreferenceStore = tourPreferenceStore,
             transcriptionAvailable = hasAvailableTranscriptionModel,
+            chatShareRequest = chatShareRequest,
+            onChatShareHandled = onChatShareHandled,
         )
         AppDestination.VoiceChat -> {
             val voiceState by voiceChatViewModel.state.collectAsState()

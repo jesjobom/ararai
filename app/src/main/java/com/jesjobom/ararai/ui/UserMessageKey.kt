@@ -4,6 +4,8 @@ enum class UserMessageKey {
     ModelAvailable,
     ModelUnavailable,
     GenerationFailed,
+    SharedImageUnavailable,
+    SharedImageImportFailed,
     ModelLoadingFailed,
     NoFinalAnswer,
     TextToSpeechUnavailable,

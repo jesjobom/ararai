@@ -35,6 +35,8 @@ inference remains device-, driver-, model-, and workload-dependent.
   reserve, selectable Markdown and local LaTeX math output, settings, and
   capability-gated reasoning, plus language-aware native speech playback for
   completed assistant responses.
+- Android single-item sharing accepts plain text or an image. It reuses the Chat
+  session selector and places content in the composer without submitting it.
 - Assistant configuration groups mode-specific instructions, optional tools,
   per-model conversational generation controls, and a global local-transcription
   language preference. LiteRT-LM total context is

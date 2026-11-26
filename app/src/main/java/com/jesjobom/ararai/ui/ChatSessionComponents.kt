@@ -73,6 +73,7 @@ internal fun SessionListDialog(
     onRename: (ChatSessionUiState) -> Unit,
     onDelete: (String) -> Unit,
     onClearAll: () -> Unit,
+    selectionOnly: Boolean = false,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -105,20 +106,22 @@ internal fun SessionListDialog(
                         isSelected = session.id == selectedSessionId,
                         canDelete = canDelete,
                         onSelect = { onSelect(session.id) },
-                        onRename = { onRename(session) },
-                        onDelete = { onDelete(session.id) },
+                        onRename = if (selectionOnly) null else ({ onRename(session) }),
+                        onDelete = if (selectionOnly) null else ({ onDelete(session.id) }),
                     )
                 }
             }
         },
         confirmButton = {
             Row {
-                TextButton(onClick = onClearAll, enabled = sessions.isNotEmpty()) {
-                    Icon(imageVector = Icons.Filled.Delete, contentDescription = null)
-                    Text(
-                        text = stringResource(R.string.chat_clear_all),
-                        modifier = Modifier.padding(start = 6.dp),
-                    )
+                if (!selectionOnly) {
+                    TextButton(onClick = onClearAll, enabled = sessions.isNotEmpty()) {
+                        Icon(imageVector = Icons.Filled.Delete, contentDescription = null)
+                        Text(
+                            text = stringResource(R.string.chat_clear_all),
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
                 }
                 TextButton(onClick = onDismiss) {
                     Icon(imageVector = Icons.Filled.Close, contentDescription = null)
@@ -170,8 +173,8 @@ internal fun SessionListItem(
     isSelected: Boolean,
     canDelete: Boolean,
     onSelect: () -> Unit,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
+    onRename: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
 ) {
     Surface(
         modifier = Modifier
@@ -206,15 +209,17 @@ internal fun SessionListItem(
                     .weight(1f)
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             )
-            IconButton(
-                onClick = onDelete,
-                enabled = canDelete,
-                modifier = Modifier.testTag("delete-chat-${session.id}"),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Delete,
-                    contentDescription = stringResource(R.string.chat_delete),
-                )
+            if (onDelete != null) {
+                IconButton(
+                    onClick = onDelete,
+                    enabled = canDelete,
+                    modifier = Modifier.testTag("delete-chat-${session.id}"),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Delete,
+                        contentDescription = stringResource(R.string.chat_delete),
+                    )
+                }
             }
         }
     }

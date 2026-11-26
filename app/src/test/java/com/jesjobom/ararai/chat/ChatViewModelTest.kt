@@ -49,6 +49,72 @@ class ChatViewModelTest {
         )
 
     @Test
+    fun `shared text populates the chosen conversation without submitting`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val target = store.createSession("Target")
+        val original = store.createSession("Original")
+        val selection = ConversationSelection().apply { select(original.id) }
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = emptyList()),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            sessionStore = store,
+            conversationSelection = selection,
+            scope = this,
+        )
+
+        assertTrue(viewModel.placeSharedContent(target.id, text = "Shared text"))
+        runCurrent()
+
+        assertEquals(target.id, viewModel.uiState.value.selectedSessionId)
+        assertEquals("Shared text", viewModel.uiState.value.prompt)
+        assertTrue(store.getMessages(target.id).isEmpty())
+        assertTrue(store.getMessages(original.id).isEmpty())
+        viewModel.close()
+    }
+
+    @Test
+    fun `shared image becomes an attachment in a new session without submitting`() = runTest {
+        val store = InMemoryChatSessionStore()
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = emptyList()),
+            initialModel = model.copy(inputCapabilities = ModelInputCapabilities(image = true)),
+            inferenceConfig = inferenceConfig,
+            sessionStore = store,
+            scope = this,
+        )
+        val previousSession = viewModel.uiState.value.selectedSessionId
+        val image = ImageAttachment(uri = "/tmp/share.jpg", mimeType = "image/jpeg")
+
+        assertTrue(viewModel.placeSharedContent(null) { image })
+        runCurrent()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.selectedSessionId != previousSession)
+        assertEquals(listOf(image), state.imageAttachments)
+        assertTrue(store.getMessages(requireNotNull(state.selectedSessionId)).isEmpty())
+        viewModel.close()
+    }
+
+    @Test
+    fun `shared image does not import when the model cannot use it`() = runTest {
+        val viewModel = ChatViewModel(
+            engine = FakeLocalLlmEngine(chunks = emptyList()),
+            initialModel = model,
+            inferenceConfig = inferenceConfig,
+            scope = this,
+        )
+        val previousSession = viewModel.uiState.value.selectedSessionId
+
+        assertTrue(viewModel.placeSharedContent(null) { error("Unexpected import") })
+        runCurrent()
+
+        assertEquals(previousSession, viewModel.uiState.value.selectedSessionId)
+        assertEquals(UserMessageKey.SharedImageUnavailable, viewModel.uiState.value.errorKey)
+        viewModel.close()
+    }
+
+    @Test
     fun `context boundary moves when configured context increases without deleting history`() = runTest {
         val store = InMemoryChatSessionStore()
         val session = store.ensureSession()

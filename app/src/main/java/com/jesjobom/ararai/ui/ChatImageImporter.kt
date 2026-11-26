@@ -10,13 +10,21 @@ import android.media.ExifInterface
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.jesjobom.ararai.chat.ChatMediaRepository
+import com.jesjobom.ararai.chat.ImageAttachment
 import java.io.File
 import java.io.InputStream
 
 internal data class ImportedChatImage(
     val file: File,
     val displayName: String?,
-)
+) {
+    fun toAttachment() = ImageAttachment(
+        uri = file.absolutePath,
+        mimeType = "image/jpeg",
+        displayName = displayName,
+        byteSize = file.length(),
+    )
+}
 
 internal data class ChatImageBounds(
     val width: Int,
